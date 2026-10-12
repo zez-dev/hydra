@@ -5,7 +5,7 @@ export type DoctorStatus = 'ok' | 'warn' | 'fail'
 
 /** One line of the report. */
 export interface DoctorRow {
-  /** Report section: `home`, `workspace`, `sandbox`, `native`, `git`, `plugins`, `tools`, `credentials`. */
+  /** Report section: `about`, `home`, `workspace`, `sandbox`, `native`, `git`, `plugins`, `tools`, `credentials`. */
   readonly section: string
   /** Short check name, unique within its section. */
   readonly check: string
@@ -64,6 +64,12 @@ export interface SpawnResult {
  */
 export interface DoctorEnvironment {
   readonly platform: NodeJS.Platform
+  /** Processor architecture, such as `x64` or `arm64`. */
+  readonly arch: string
+  /** The running Node.js version, such as `v24.1.0`. */
+  readonly nodeVersion: string
+  /** Version of the DeepSeek Harness release this build is based on, read from the package manifest. */
+  readonly harnessVersion: string
   readonly env: Readonly<Record<string, string | undefined>>
   /** Whether a path exists. */
   exists(path: string): boolean

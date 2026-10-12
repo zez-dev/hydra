@@ -18,8 +18,8 @@ import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { FinishReason } from '@deepseek-ai/dsh-llm'
 import {
-  checkGit, checkHome, checkNativeAddon, checkSandbox, checkWorkspace, classifyProbeError, errorMessage, firstLine, renderReport, summarize,
-  WORKSPACE_FOLDERS,
+  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError, errorMessage, firstLine,
+  renderReport, summarize, WORKSPACE_FOLDERS,
 } from './checks.ts'
 import { nodeEnvironment } from './host.ts'
 import type {
@@ -28,8 +28,8 @@ import type {
 
 export type * from './types.ts'
 export {
-  checkGit, checkHome, checkNativeAddon, checkSandbox, checkWorkspace, classifyProbeError, FIXES, renderReport, summarize,
-  WORKSPACE_FOLDERS,
+  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError, FIXES, HYDRA_VERSION, renderReport,
+  summarize, WORKSPACE_FOLDERS,
 } from './checks.ts'
 
 export const name = 'doctor'
@@ -297,6 +297,7 @@ export function apply(ctx: Context, config: Config): void {
       for (const folder of WORKSPACE_FOLDERS) await mkdir(join(cwd, folder), { recursive: true })
     }
     const rows: DoctorRow[] = [
+      ...checkVersion(env),
       ...checkHome(env, profile),
       ...checkWorkspace(env, cwd),
       ...checkSandbox(env),

@@ -107,6 +107,9 @@ const inertShellTool = { name: 'inert-shell-tool', apply() {} }
 function quietHost(cwd: string): DoctorEnvironment {
   return {
     platform: 'darwin',
+    arch: 'arm64',
+    nodeVersion: 'v24.0.0',
+    harnessVersion: '0.1.6-alpha.2',
     env: { DSH_HOME: cwd },
     exists: () => true,
     writable: () => true,

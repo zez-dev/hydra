@@ -32,6 +32,9 @@ afterEach(async () => {
 function fakeHost(cwd: string): DoctorEnvironment {
   return {
     platform: 'darwin',
+    arch: 'arm64',
+    nodeVersion: 'v24.0.0',
+    harnessVersion: '0.1.6-alpha.2',
     env: { DSH_HOME: cwd },
     exists: path => path === cwd || path.startsWith(join(cwd, '.dsh')),
     writable: () => true,
@@ -86,6 +89,7 @@ describe('ctx.doctor', () => {
     const report = await ctx.doctor.run({ cwd })
     const sections = new Set(report.rows.map(row => row.section))
     for (const section of ['home', 'workspace', 'sandbox', 'native', 'git', 'plugins', 'tools', 'credentials']) expect(sections.has(section)).toBe(true)
+    expect(report.rows[0]).toMatchObject({ section: 'about', check: 'version', status: 'ok' })
     expect(report.summary.ok + report.summary.warn + report.summary.fail).toBe(report.rows.length)
   })
 

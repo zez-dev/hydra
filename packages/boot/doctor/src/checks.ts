@@ -54,6 +54,20 @@ export function firstLine(text: string): string {
   return text.replace(/\n.*/s, '')
 }
 
+/** Hydra's release version; it changes with each release tag. */
+export const HYDRA_VERSION = '0.1.0'
+
+/**
+ * The version row, so a pasted report names the Hydra release, the DeepSeek
+ * Harness release it is based on, the Node.js version, and the platform.
+ * @param env - host facts.
+ * @returns one `ok` row.
+ */
+export function checkVersion(env: DoctorEnvironment): DoctorRow[] {
+  const detail = `Hydra ${HYDRA_VERSION} on DeepSeek Harness ${env.harnessVersion}, Node ${env.nodeVersion}, ${env.platform}-${env.arch}`
+  return [row('about', 'version', 'ok', detail)]
+}
+
 /**
  * Home directory checks: `DSH_HOME`, writability, `.env`, and the profile.
  * @param env - host facts.

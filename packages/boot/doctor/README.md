@@ -28,10 +28,11 @@ kind: "package-reference"
 |---|---|---|
 | `probeTimeoutMs` | `20000` | Deadline of one `--probe` request in milliseconds |
 
-The report has nine sections; `skills` appears only when `dsh-skill-lock` is mounted:
+The report has ten sections; `skills` appears only when `dsh-skill-lock` is mounted:
 
 | Section | Checks |
 |---|---|
+| `about` | Always first: the Hydra release (`HYDRA_VERSION`), the DeepSeek Harness release it is based on, the Node.js version, and the platform, so a pasted report identifies the build |
 | `credentials` | Each configured route's key reference resolves; with `--probe`, one live request per route. The key itself is never read into the report |
 | `tools` | `argumentCoercion: lenient` and `nullableParameters: flat` on the tools row, and `requireDescription: false` on the shell tools |
 | `sandbox` | On Linux, the bubblewrap probe and `kernel.apparmor_restrict_unprivileged_userns`, plus whether the Landlock runner binary is present |

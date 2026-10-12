@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -52,6 +52,9 @@ describe('the production environment', () => {
     const missing = join(dir, 'missing')
     const host = nodeEnvironment()
     expect(host.platform).toBe(process.platform)
+    expect(host.arch).toBe(process.arch)
+    expect(host.nodeVersion).toBe(process.version)
+    expect(host.harnessVersion).toBe((JSON.parse(await readFile(join(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version)
     expect(host.env).toBe(process.env)
     expect(host.exists(file)).toBe(true)
     expect(host.exists(missing)).toBe(false)
