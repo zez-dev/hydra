@@ -1,0 +1,65 @@
+# Hydra's check for pull requests and main: install, typecheck, lint, build,
+# and unit tests on a GitHub-hosted Linux runner. The upstream DeepSeek Harness
+# workflows in this folder stay disabled in this repository's Actions settings
+# because they need DeepSeek's runners and secrets.
+name: Hydra check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  check:
+    name: install, typecheck, lint, build, unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      # Upstream's prepare-ci-bubblewrap.sh pins a .deb the Ubuntu archive no
+      # longer serves, so install bubblewrap from apt and lift the AppArmor
+      # user-namespace restriction that blocks it on Ubuntu 24.04.
+      - name: Prepare the Linux sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --dev /dev --unshare-pid --proc /proc --die-with-parent -- true
+
+      - name: Build
+        run: pnpm run build:native-system && pnpm run build:lib && pnpm run build:web
+
+      # The free 4-core runner is far slower than upstream's 16-core machines,
+      # so a test that passes there can exceed the default 5 s limit here.
+      - name: Unit tests
+        run: pnpm run test -- --testTimeout=30000
