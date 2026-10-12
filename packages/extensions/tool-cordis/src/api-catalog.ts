@@ -5505,7 +5505,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'DoctorEnvironment',
-    declaration: 'export interface DoctorEnvironment {\n    readonly platform: NodeJS.Platform;\n    readonly env: Readonly<Record<string, string | undefined>>;\n    exists(path: string): boolean;\n    writable(path: string): boolean;\n    readText(path: string): string | undefined;\n    spawn(command: string, args: readonly string[], options: {\n        cwd?: string;\n        timeoutMs: number;\n    }): SpawnResult;\n    launcherPath(): string;\n    probeLandlock(): \'full\' | \'partial\' | \'unusable\';\n    addonBinary(): string;\n}',
+    declaration: 'export interface DoctorEnvironment {\n    readonly platform: NodeJS.Platform;\n    readonly arch: string;\n    readonly nodeVersion: string;\n    readonly harnessVersion: string;\n    readonly env: Readonly<Record<string, string | undefined>>;\n    exists(path: string): boolean;\n    writable(path: string): boolean;\n    readText(path: string): string | undefined;\n    spawn(command: string, args: readonly string[], options: {\n        cwd?: string;\n        timeoutMs: number;\n    }): SpawnResult;\n    launcherPath(): string;\n    probeLandlock(): \'full\' | \'partial\' | \'unusable\';\n    addonBinary(): string;\n}',
   },
   {
     name: 'DoctorInternals',
