@@ -40,6 +40,7 @@ The `master` branch mirrors DeepSeek Harness; `main` is Hydra.
 1. Bring `master` up to date: `gh repo sync zez-dev/hydra --branch master`, or **Sync fork** on GitHub while viewing `master`.
 2. On a new branch from `main`, merge `master` and resolve the conflicts. Regenerate what the checks name as stale; `pnpm run check:ci:static` lists every generated file that is out of date (translation pairing is expected to fail).
 3. Open a pull request. The Hydra check must pass before it is merged.
+4. If the merge added a workflow under `.github/workflows/`, disable it under **Actions** (or with `gh workflow disable`): only `hydra-check.yml` should run here, because upstream's workflows need DeepSeek's runners and secrets.
 
 ### Publish a release
 
