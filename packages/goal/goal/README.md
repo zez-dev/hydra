@@ -38,14 +38,14 @@ Load the package with a composition entry; the only deployment choice is the def
 ```yaml
 - name: '@deepseek-ai/dsh-goal'
   config:
-    defaultMaxGoalRounds: 256
+    defaultMaxGoalRounds: 0
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `defaultMaxGoalRounds` | `256` | Round cap applied when a create request omits its own |
+| `defaultMaxGoalRounds` | `256` | Round cap applied when a create request omits its own; `0` means unlimited (the shipped `dsh-base` bundle sets `0`) |
 
-`defaultMaxGoalRounds` must be a positive safe integer; a create request that names its own cap overrides it. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-goal) is the exhaustive source for every accepted field.
+`defaultMaxGoalRounds` must be a positive safe integer or `0` for unlimited; a create request that names its own cap overrides it, and `maxGoalRounds: 0` on a request also means unlimited. An unlimited cap is stored as `UNLIMITED_GOAL_ROUNDS` (the largest safe integer) and read back through `isUnlimitedGoalRounds()`, so views, prompts, and the `/goal` command render it as `unlimited`. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-goal) is the exhaustive source for every accepted field.
 
 ### Session projection
 

@@ -66,7 +66,7 @@ async function preStep(
 ) {
   return agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { turn: 1, step, messages: offered, signal },
+    { turn: 1, step, messages: offered, prompt: { systemPrompt: '', tools: [] }, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages }),
   )
 }
@@ -163,7 +163,7 @@ describe('installModelSelection()', () => {
     await ctx.systemPrompt.assemble()
     const rejected = await agentEvents(ctx, agent).waterfall(
       'agent/pre-step',
-      { turn: 1, step: 1, messages: [], signal: SIGNAL },
+      { turn: 1, step: 1, messages: [], prompt: { systemPrompt: '', tools: [] }, signal: SIGNAL },
       () => Promise.resolve({ kind: 'reject' as const }),
     )
     expect(rejected).toEqual({ kind: 'reject' })

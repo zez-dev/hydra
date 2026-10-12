@@ -1,6 +1,7 @@
 /** Model-visible continuation prompt for one same-session goal round. */
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { isUnlimitedGoalRounds } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 
 /**
@@ -14,7 +15,7 @@ export function renderGoalRoundPrompt(goal: GoalView, round: number): ContentBlo
     type: 'text',
     text: '<goal_round>\n'
       + `Objective: ${JSON.stringify(goal.objective)}\n`
-      + `Round: ${round}/${goal.maxGoalRounds}\n\n`
+      + `Round: ${round}/${isUnlimitedGoalRounds(goal.maxGoalRounds) ? 'unlimited' : goal.maxGoalRounds}\n\n`
       + 'Continue working toward the objective in this same session. Treat the current workspace, '
       + 'tool results, and durable session state as authoritative; inspect them instead of assuming '
       + 'earlier narration is still current. Make concrete progress and verify the result. Before '

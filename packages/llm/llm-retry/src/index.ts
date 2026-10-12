@@ -227,7 +227,10 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
     if (failure.providerRetryAfterMs !== undefined
       && Number.isFinite(failure.providerRetryAfterMs)
       && failure.providerRetryAfterMs > 0) {
-      if (failure.providerRetryAfterMs > policy.maxDelayMs) {
+      // A provider that names its wait knows the window better than a local
+      // cap; it is waited out up to `maxProviderDelayMs`, past which a normal
+      // policy delegates and an always policy backs off locally.
+      if (failure.providerRetryAfterMs > policy.maxProviderDelayMs) {
         if (policy.mode === 'normal') return next()
         delayMs = localDelay(policy, retry, random)
       } else {

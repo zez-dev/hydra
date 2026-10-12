@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   ToolCallId,
   createAssistantMessage,
+  createPluginRecallMessage,
   createToolResultMessage,
   createUserMessage,
   freezeMessage,
+  isPluginRecallMessage,
   MessageId,
+  messageText,
 } from '@deepseek-ai/dsh-llm'
 
 describe('message construction', () => {
@@ -95,5 +98,35 @@ describe('message construction', () => {
     expect(message.id).not.toHaveLength(0)
     expect(Object.isFrozen(message)).toBe(true)
     expect(Object.isFrozen(message.content[0])).toBe(true)
+  })
+})
+
+describe('plugin recall messages', () => {
+  it('creates a frozen user message holding the text, sourced to the plugin in recall form', () => {
+    const message = createPluginRecallMessage('dsh-memory', '<retrieved_memory>note</retrieved_memory>')
+    expect(message).toMatchObject({
+      role: 'user',
+      content: [{ type: 'text', text: '<retrieved_memory>note</retrieved_memory>' }],
+      source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' },
+    })
+    expect(message.id).toEqual(expect.any(String))
+    expect(Object.isFrozen(message)).toBe(true)
+  })
+
+  it('recognizes only the named plugin\'s recall form', () => {
+    const content = [{ type: 'text' as const, text: 'note' }]
+    expect(isPluginRecallMessage(createPluginRecallMessage('dsh-memory', 'note'), 'dsh-memory')).toBe(true)
+    expect(isPluginRecallMessage(createPluginRecallMessage('dsh-memory', 'note'), 'dsh-research')).toBe(false)
+    expect(isPluginRecallMessage(createUserMessage({ content, source: { kind: 'plugin', plugin: 'dsh-memory' } }), 'dsh-memory')).toBe(false)
+    expect(isPluginRecallMessage(createUserMessage({ content, source: { kind: 'user' } }), 'dsh-memory')).toBe(false)
+  })
+
+  it('reads the text blocks of a message, concatenated, and nothing else', () => {
+    const mixed = createUserMessage({
+      content: [{ type: 'text', text: 'Hello' }, { type: 'reasoning', text: 'hidden' }, { type: 'text', text: ' world' }],
+      source: { kind: 'user' },
+    })
+    expect(messageText(mixed)).toBe('Hello world')
+    expect(messageText(createUserMessage({ content: [{ type: 'reasoning', text: 'hidden' }], source: { kind: 'user' } }))).toBe('')
   })
 })

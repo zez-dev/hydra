@@ -20,6 +20,7 @@ import SessionPersistence, {
   type SessionAccess,
   type SessionHandle,
   type SessionPersistenceSnapshot,
+  type SessionDeleteResult,
 } from '@deepseek-ai/dsh-session-persistence'
 import MessageFeedbackService from '../src/index.ts'
 
@@ -105,6 +106,7 @@ interface StoredSession {
 
 /** Minimal controllable persistence provider for service-level tests. */
 class TestPersistence extends SessionPersistence {
+  delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
   readonly durable = new Map<SessionId, StoredSession>()
   readFailure: Error | undefined
   appendFailure: Error | undefined

@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
+
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
 它构建于**一切皆插件**的架构之上，由 [Cordis](https://github.com/cordiverse/cordis) 驱动，其设计参见论文 [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512)。

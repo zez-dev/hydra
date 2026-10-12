@@ -17,6 +17,8 @@
 - text: Reply with the single word LIGHTHOUSE and stop. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Thought for a while" [expanded]:
   - text: Thought for a while
   - img
@@ -25,7 +27,6 @@
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - button "Think The user wants me to reply with a single word. Let me comply.":
-  - img
   - img
   - text: Think The user wants me to reply with a single word. Let me comply.
 - paragraph: LIGHTHOUSE

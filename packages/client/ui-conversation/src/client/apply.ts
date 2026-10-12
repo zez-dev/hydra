@@ -203,6 +203,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
 
   const inputHub = new InputHub(ctx, t)
   const composerBlocks = new ComposerBlockRegistry()
+  uiConversation.bindDraftWriter((sessionId, text) => {
+    const binding = sessions.binding(sessionId)
+    if (binding === undefined) return false
+    inputHub.shellFor(binding).setDraft(text)
+    return true
+  })
 
   ctx.inject(['commandUi'], (scope) => {
     const commands = scope.get('commandUi') as FileCommandRegistry
@@ -223,6 +229,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     resolve: (binding) => {
       trackBinding(binding)
       const shell = inputHub.shellFor(binding)
+      const seeded = uiConversation.takeSeededDraft(binding.sessionId)
+      if (seeded !== undefined) shell.setDraft(seeded)
       const conversation = uiConversation.binding(binding)
       restoreView(binding.sessionId)
       return {

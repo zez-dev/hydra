@@ -13,7 +13,7 @@ import type { Session, SessionEvent, SessionSeq, ToolResultMessage } from '@deep
 import type {} from '@deepseek-ai/dsh-compaction'
 // Type-only: the `ctx.tokenMeter` Context merge for the declared injection.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import { codePointLength, DEFAULTS, PRUNE_MARKER, resolveConfig } from './config.ts'
+import { codePointLength, DEFAULTS, hasSurrogates, PRUNE_MARKER, resolveConfig } from './config.ts'
 import type {
   PrunedEntry,
   PruneResult,
@@ -81,6 +81,9 @@ export class ToolResultPruner extends Service {
    * @returns pruned content, or `null` when the text is within budget.
    */
   pruneContent(blocks: readonly ContentBlock[]): ContentBlock[] | null {
+    // A UTF-16 length is never below the code-point count, so content that
+    // is short in code units is short in code points: no counting needed.
+    if (blocks.reduce((sum, block) => sum + (block.type === 'text' ? block.text.length : 0), 0) <= this.config.thresholdChars) return null
     const totalChars = this.measureContent(blocks)
     if (totalChars <= this.config.thresholdChars) return null
 
@@ -96,7 +99,7 @@ export class ToolResultPruner extends Service {
         continue
       }
 
-      const points = Array.from(block.text)
+      const points: string | string[] = hasSurrogates(block.text) ? Array.from(block.text) : block.text
       const blockStart = consumed
       const blockEnd = blockStart + points.length
       const headEnd = Math.min(points.length, Math.max(0, removedStart - blockStart))
@@ -104,9 +107,9 @@ export class ToolResultPruner extends Service {
       const intersectsRemoved = blockStart < removedEnd && blockEnd > removedStart
       const marker = intersectsRemoved && !markerInserted ? PRUNE_MARKER : ''
       if (marker.length > 0) markerInserted = true
-      const text = points.slice(0, headEnd).join('')
+      const text = (typeof points === 'string' ? points.slice(0, headEnd) : points.slice(0, headEnd).join(''))
         + marker
-        + points.slice(tailStart).join('')
+        + (typeof points === 'string' ? points.slice(tailStart) : points.slice(tailStart).join(''))
       if (text.length > 0) pruned.push({ ...block, text })
       consumed = blockEnd
     }

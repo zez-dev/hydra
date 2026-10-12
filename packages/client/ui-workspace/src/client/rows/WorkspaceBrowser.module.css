@@ -496,6 +496,13 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
+.deleteNotice {
+  margin-bottom: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .deleteStatus {
   font-size: 12px;
   line-height: 18px;

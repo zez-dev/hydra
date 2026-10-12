@@ -17,6 +17,8 @@
 - text: Stream one TypeScript fence for the highlighting snapshot. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Context injection @deepseek-ai/dsh-system-prompt":
   - img
   - img
@@ -24,7 +26,7 @@
 - text: ts
 - button "Copy"
 - code: "const first: number = 1 const second = \"two\" let tail"
-- status: Deep diving...
+- status: The dragon is thinking…
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands":
   - img

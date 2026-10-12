@@ -131,7 +131,10 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   'ptc-turn': {
     patches: [fileURLToPath(new URL('./ptc-turn/runtime.cordis.yml', import.meta.url))],
     expectedFinalResponse: 'CODE_ONE+CODE_TWO',
-    expectedTools: { run_code: ['code', 'description'] },
+    expectedTools: { run_code: ['code'] },
+  },
+  'max-tokens-continue': {
+    patches: [fileURLToPath(new URL('./max-tokens-continue/runtime.cordis.yml', import.meta.url))],
   },
   'subagent-continuable': {
     environment: { DSH_SNAPSHOT_HUMAN_STEER: '1' },
@@ -141,7 +144,19 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   },
   'persistent-tools': {
     environment: { DSH_SYSTEM_PROMPT: MINIMAL_SYSTEM_PROMPT },
-    expectedTools: { bash: ['command'], str_replace_editor: ['command', 'path'] },
+    // The Hydra plugin rows in the base bundle publish their own tools, so a
+    // persistent SDK session sees them alongside the two shell/edit tools.
+    expectedTools: {
+      bash: ['command'],
+      doctor: [],
+      journal: ['action'],
+      knowledge_add: ['path'],
+      memory: ['action'],
+      off_peak: ['action'],
+      run_experiment: ['title', 'command'],
+      str_replace_editor: ['command', 'path'],
+      usage: [],
+    },
     expectedSystem: MINIMAL_SYSTEM_PROMPT,
     expectedToolDescriptions: { bash: MINIMAL_BASH_DESCRIPTION },
     runtimeContext: {

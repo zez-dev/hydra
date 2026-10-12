@@ -94,6 +94,12 @@
     },
     {
       "path": "../../document/office-to-pdf"
+    },
+    {
+      "path": "../learning-controller"
+    },
+    {
+      "path": "../usage-controller"
     }
   ]
 }

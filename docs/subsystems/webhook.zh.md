@@ -44,6 +44,29 @@ follow-up 是普通持久 user-role 消息，使用 `source.kind: "webhook"`，�
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxnotify--notifyservice"></a>
+
+### `ctx.notify` — `NotifyService`
+
+Service published as `ctx.notify`.
+
+```ts cordis-catalog
+/**
+ * Deliver one notification to every channel, regardless of the event switches.
+ * Failures are logged, never thrown.
+ * @param notification - what to announce.
+ */
+send(notification: Notification): Promise<void>
+
+/**
+ * Configured channel names.
+ * @returns the names in configuration order.
+ */
+channels(): string[]
+```
+
+Source: [`packages/webhook/notify/src/types.ts`](../../packages/webhook/notify/src/types.ts)
+
 <a id="ctxwebhookruntime--webhookruntime"></a>
 
 ### `ctx.webhookRuntime` — `WebhookRuntime`

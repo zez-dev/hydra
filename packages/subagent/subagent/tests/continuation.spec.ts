@@ -17,6 +17,7 @@ import type { ContentBlock, GenerateOptions, MessageId, StreamChunk } from '@dee
 import { ToolCallId, createUserMessage, LlmAdapter, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import InvariantRegistry from '@deepseek-ai/dsh-invariants'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
 import { MockAdapter, maxTokensResponse, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import SubagentRuntime, {
   SubagentError,
@@ -84,7 +85,7 @@ afterEach(async () => {
 /** Boot the full continuable stack: loop, persistence, providers, and subagents. */
 async function setupWith(
   adapter: LlmAdapter,
-  options: { persistence?: boolean; schedule?: boolean; sessionQuery?: boolean; maxActiveSubagents?: number } = {},
+  options: { persistence?: boolean; schedule?: boolean; sessionQuery?: boolean; maxActiveSubagents?: number; commands?: boolean } = {},
 ) {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
@@ -102,6 +103,7 @@ async function setupWith(
   }
   await ctx.plugin(AgentLoop, { agents: [] })
   if (options.schedule) await ctx.plugin(toolSchedule)
+  if (options.commands) await ctx.plugin(CommandRuntime)
   if (options.sessionQuery !== false) await ctx.plugin(TestSessionQuery)
   await ctx.plugin(SubagentRuntime, options.maxActiveSubagents === undefined ? {} : { maxActiveSubagents: options.maxActiveSubagents })
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
@@ -1033,6 +1035,92 @@ describe('continuable image Queue prompts', () => {
 
     expect(resolve).not.toHaveBeenCalled()
     await drainManager(ctx)
+  })
+})
+
+describe('slash commands on a continuable child', () => {
+  async function commandSetup(commands = true) {
+    const adapter = new MockAdapter([textResponse('first')])
+    const booted = await setupWith(adapter, { commands })
+    return { ...booted, adapter }
+  }
+
+  it('lists and runs a command on a settled child, logs it there, and releases the child again', async () => {
+    const { ctx, parent } = await commandSetup()
+    const seen: string[] = []
+    ctx.commands.register({
+      name: 'probe', description: 'Record the receiving agent',
+      handler: ({ agent }) => { seen.push(agent.id); return { kind: 'success', text: 'probed' } },
+    })
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+
+    const listed = await ctx.subagents.remoteCommands(parent.id, started.childId, testSignal)
+    expect(listed.map(command => command.name)).toContain('probe')
+    await waitNoActivation(ctx, started.childId)
+
+    const execution = await ctx.subagents.remoteCommand(parent.id, started.childId, '/probe now', testSignal)
+    expect(execution?.result).toMatchObject({ kind: 'success', text: 'probed' })
+    expect(seen).toEqual([started.childId])
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(loaded.events.filter(event => event.type === 'command/run').map(event => event.data.name)).toEqual(['probe'])
+    // A line that names no command runs nothing.
+    expect(await ctx.subagents.remoteCommand(parent.id, started.childId, '/unknown', testSignal)).toBeUndefined()
+  })
+
+  it('runs a command on a resident child in place, leaving it resident', async () => {
+    const adapter = new MockAdapter(['hang'])
+    const { ctx, parent } = await setupWith(adapter, { commands: true })
+    const seen: string[] = []
+    ctx.commands.register({
+      name: 'probe', description: 'Record the receiving agent',
+      handler: ({ agent }) => { seen.push(agent.id); return { kind: 'success' } },
+    })
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    const execution = await ctx.subagents.remoteCommand(parent.id, started.childId, '/probe', testSignal)
+    expect(execution?.result.kind).toBe('success')
+    expect(seen).toEqual([started.childId])
+    ctx.subagents.interrupt(started.childId, { kind: 'user', parentSessionId: parent.id })
+    await waitNoActivation(ctx, started.childId)
+  })
+
+  it('keeps a cold child resident when the command leaves it mid-turn', async () => {
+    const adapter = new MockAdapter([textResponse('first'), 'hang'])
+    const { ctx, parent } = await setupWith(adapter, { commands: true })
+    ctx.commands.register({
+      name: 'kick', description: 'Queue a prompt on the receiving agent',
+      handler: async ({ agent }) => {
+        agent.followup(createUserMessage({ content: [{ type: 'text', text: 'keep going' }], source: { kind: 'user' } }))
+        await vi.waitFor(() => { expect(agent.status).toBe('running') })
+        return { kind: 'success' }
+      },
+    })
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const execution = await ctx.subagents.remoteCommand(parent.id, started.childId, '/kick', testSignal)
+    expect(execution?.result.kind).toBe('success')
+    // Releasing the child now would cancel the turn the command started.
+    expect(ctx.agents.get(started.childId)?.status).toBe('running')
+    ctx.subagents.interrupt(started.childId, { kind: 'user', parentSessionId: parent.id })
+    await waitNoActivation(ctx, started.childId)
+  })
+
+  it('refuses a child of another parent, an offline parent, and a composition without commands', async () => {
+    const { ctx, parent } = await commandSetup()
+    const started = await ctx.subagents.startContinuable(startSpec(parent))
+    await waitNoActivation(ctx, started.childId)
+    const other = await ctx.agentLoop.create(SessionId('other-parent'), { provider: 'mock', model: 'mock' })
+    await expect(ctx.subagents.remoteCommands(other.id, started.childId, testSignal))
+      .rejects.toMatchObject({ code: 'subagent/unauthorized' })
+    await expect(ctx.subagents.remoteCommands(SessionId('offline'), started.childId, testSignal))
+      .rejects.toMatchObject({ code: 'subagent/parent-unavailable' })
+    await expect(ctx.subagents.remoteCommands(parent.id, SessionId(''), testSignal))
+      .rejects.toMatchObject({ code: 'gateway/bad-request' })
+
+    const bare = await commandSetup(false)
+    await expect(bare.ctx.subagents.remoteCommands(bare.parent.id, started.childId, testSignal))
+      .rejects.toMatchObject({ code: 'subagent/delivery-unavailable' })
   })
 })
 

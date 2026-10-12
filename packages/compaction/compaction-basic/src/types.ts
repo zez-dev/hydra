@@ -24,6 +24,43 @@ export interface CompactionPolicyConfig {
   compactionRetries?: number
   /** Maximum retries after canonical context overflow; `0` disables recovery. Defaults to `1`. */
   maxOverflowRetries?: number
+  /**
+   * Fraction of the window kept free beyond the request's output cap, absorbing
+   * heuristic pricing error on code and JSON. A request must fit in
+   * `contextWindow − outputCap − margin`. Defaults to `0.05`.
+   */
+  reserveMarginRatio?: number
+  /**
+   * Fraction of the window reserved for the reply when deciding to condense:
+   * the surface condenses once it leaves less than the lower of the output
+   * cap and `contextWindow × outputReserveRatio`, plus the margin. A request
+   * that leaves less than its whole cap asks for the room left instead.
+   * Defaults to `0.25`.
+   */
+  outputReserveRatio?: number
+  /**
+   * Steps a failed step-boundary compaction waits before trying again, unless the surface grows by
+   * `failureBackoffGrowthRatio` of the window, a checkpoint lands, or a reply is cut at its output
+   * cap first. Defaults to `8`.
+   */
+  failureBackoffSteps?: number
+  /** Fraction of the window the surface must grow by to retry before `failureBackoffSteps` pass. Defaults to `0.1`. */
+  failureBackoffGrowthRatio?: number
+  /** Smallest output cap a request is shrunk to when condensing cannot make room. Defaults to `256`. */
+  minOutputTokens?: number
+  /**
+   * Upper bound on the summarization cap as a fraction of the window, so a
+   * `maxTokens` sized for large models does not reserve most of a small
+   * window. Defaults to `0.25`.
+   */
+  summaryWindowRatio?: number
+  /**
+   * Multiplier for the summarization cap after a checkpoint was cut at it,
+   * applied up to three times and never above what the window affords
+   * (`summaryWindowRatio` and the room the condensed range leaves); `1`
+   * disables the retry. Defaults to `4`.
+   */
+  outputRetryFactor?: number
 }
 
 /** Exact provider/model override merged over the default compaction policy. */
@@ -55,6 +92,13 @@ interface ResolvedPolicyFields {
   readonly maxTokens: number
   readonly compactionRetries: number
   readonly maxOverflowRetries: number
+  readonly reserveMarginRatio: number
+  readonly outputReserveRatio: number
+  readonly failureBackoffSteps: number
+  readonly failureBackoffGrowthRatio: number
+  readonly minOutputTokens: number
+  readonly summaryWindowRatio: number
+  readonly outputRetryFactor: number
 }
 
 /** Validated immutable config whose target-specific defaults remain unresolved. */
@@ -73,4 +117,14 @@ export type ResolvedCompactSpec = Omit<ResolvedTargetPolicy, 'retainRatio' | 're
   readonly contextWindow: number
   readonly thresholdTokens: number
   readonly retainTokens: number
+  /** Tokens kept free beyond the output cap: `floor(contextWindow × reserveMarginRatio)`. */
+  readonly marginTokens: number
+  /** Most tokens the condense decision reserves for the reply: `floor(contextWindow × outputReserveRatio)`. */
+  readonly outputReserveTokens: number
+  /** Growth after a failed compaction that ends its backoff early: `floor(contextWindow × failureBackoffGrowthRatio)`. */
+  readonly failureBackoffGrowthTokens: number
+  /** The summarization cap this window affords: `min(maxTokens, floor(contextWindow × summaryWindowRatio))`. */
+  readonly summaryCapTokens: number
+  /** The most a cut checkpoint's cap may be raised to: `floor(contextWindow × summaryWindowRatio)`. */
+  readonly summaryCeilingTokens: number
 }

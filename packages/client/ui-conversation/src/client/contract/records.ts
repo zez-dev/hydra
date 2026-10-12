@@ -151,6 +151,24 @@ export interface TurnMaxTokensNode {
   step: number
 }
 
+/** Outcome of one automatic learning review, as `session/learning-review` recorded it. */
+export type LearningReviewOutcome =
+  | { readonly kind: 'candidates'; readonly count: number }
+  | { readonly kind: 'findings'; readonly slug: string; readonly count: number }
+  | { readonly kind: 'failed'; readonly code: string; readonly message: string }
+
+/** Row for the finished learning review of one turn. */
+export interface LearningReviewNode {
+  kind: 'learning-review'
+  /** Seq of the session/learning-review event. */
+  seq: number
+  /** Unix epoch ms from that event. */
+  time: number
+  /** The reviewed turn. */
+  turn: number
+  outcome: LearningReviewOutcome
+}
+
 /** A tool result paired (when in-window) with its call head. */
 export interface ToolResultNode {
   kind: 'tool-result'
@@ -256,6 +274,7 @@ export type ConversationNode =
   | ModelRetryNode
   | TurnErrorNode
   | TurnMaxTokensNode
+  | LearningReviewNode
   | ToolResultNode
   | CommandNode
   | CompactionSummaryNode

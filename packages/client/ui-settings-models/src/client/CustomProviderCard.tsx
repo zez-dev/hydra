@@ -14,16 +14,16 @@
  * and at least one model — are required here rather than at load, so the
  * failure names the field while the user is still looking at it.
  *
- * There is deliberately no reasoning-effort control, here or on the editor
- * card: effort is a per-MODEL capability, and the models under one provider
- * disagree about it, so a provider-scoped control can only be set to a value
- * some of them reject. The composer's model picker offers each model its own
- * levels instead.
+ * Reasoning effort itself is not chosen here: it is a per-MODEL capability,
+ * and the composer's model picker offers each model its own levels. The card
+ * carries one switch, `reasoningLevels`, on by default, deciding whether the
+ * route's models that declare no levels offer the automatic ones.
  */
 
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { validateDeepSeekModels } from './DeepSeekModelsEditor.tsx'
@@ -93,6 +93,7 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
   const [protocol, setProtocol] = useState(protocols[0] ?? '')
   const [keyDraft, setKeyDraft] = useState('')
   const [models, setModels] = useState<readonly ModelDraft[]>([])
+  const [reasoningLevels, setReasoningLevels] = useState(true)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | undefined>(undefined)
   /**
@@ -154,6 +155,8 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         api: protocol,
         baseURL: normalizedBaseURL,
         models: models.map(model => ({ ...model })),
+        // On is the adapter's default, so only a route turned off records it.
+        ...reasoningLevels ? {} : { reasoningLevels: false },
       }
       // `taken` is a snapshot too, so the id check alone cannot see a route
       // declared after this card opened; the revision makes that race a
@@ -255,6 +258,16 @@ export function CustomProviderCard(props: CustomProviderCardProps): ReactNode {
         >
           {protocols.map(choice => <option key={choice} value={choice}>{choice}</option>)}
         </select>
+      </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('reasoningLevels')}</span>
+        <Switch
+          checked={reasoningLevels}
+          label={t('reasoningLevels')}
+          disabled={profileDisabled}
+          onChange={setReasoningLevels}
+        />
+        <span className={styles['advancedHint']}>{t('reasoningLevelsHint')}</span>
       </div>
       <div className={styles['field']}>
         <span className={styles['fieldLabel']}>{t('keyInput')}</span>

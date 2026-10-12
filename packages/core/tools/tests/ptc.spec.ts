@@ -1569,6 +1569,22 @@ describe('the run_code dispatch bridge', () => {
     })
   })
 
+  it('runs without a description and labels the card by the program\'s first line', async () => {
+    const { ctx } = await setup({ mode: 'ptc' })
+    const result = await ctx.tools.execute({
+      signal: testToolSignal,
+      callId: ToolCallId('call-nodesc'),
+      name: RUN_CODE_NAME,
+      arguments: { code: 'return 1' },
+    })
+    expect(result.isError).not.toBe(true)
+    const tool = ctx.tools.get(RUN_CODE_NAME)!
+    expect(tool.presentCall?.({ code: '\n  return await tools.bash({ command: "pwd" })\n' })).toMatchObject({ title: 'return await tools.bash({ command: "pwd" })' })
+    expect(tool.presentCall?.({ code: `const value = '${'x'.repeat(90)}'` })).toMatchObject({ title: `const value = '${'x'.repeat(62)}...` })
+    expect(tool.presentCall?.({ code: '  \n\t\n' })).toMatchObject({ title: 'run_code' })
+    expect((tool.parameters as { required?: string[] }).required).toEqual(['code'])
+  })
+
   it('rejects a whitespace-only description with a structured isError', async () => {
     const { ctx } = await setup({ mode: 'ptc' })
     const result = await runCode(ctx, 'return 1', { description: '   ' })

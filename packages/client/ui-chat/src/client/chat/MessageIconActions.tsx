@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
-  IconBranchOutline16, IconCheckOutline16, IconCopyOutline16, Tooltip, writeClipboard,
+  IconBranchOutline16, IconCheckOutline16, IconCopyOutline16, IconRefreshOutline16, Tooltip, writeClipboard,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { formatMessageClock } from './message-chrome.ts'
@@ -21,6 +21,8 @@ export interface MessageIconActionsProps {
   onBranch?: (() => void) | undefined
   /** The message is not a completed transcript tail, so branch stays visible but unavailable. */
   branchUnavailable?: boolean | undefined
+  /** Rewind to before this message's turn; omission hides the action. */
+  onRewind?: (() => void) | undefined
   /** Parent layout class composed onto the actions row. */
   className?: string | undefined
   /**
@@ -43,7 +45,7 @@ export interface MessageIconActionsProps {
  * @returns The actions row element.
  */
 export function MessageIconActions({
-  text, time, clock, onBranch, branchUnavailable = false, className,
+  text, time, clock, onBranch, branchUnavailable = false, onRewind, className,
   extraActions, usageAction, t,
 }: MessageIconActionsProps) {
   const day = useCalendarDay()
@@ -88,6 +90,13 @@ export function MessageIconActions({
         </button>
       </Tooltip>
       {extraActions}
+      {onRewind !== undefined && (
+        <Tooltip label={t('message.rewind')} side="bottom">
+          <button type="button" className={css.action} aria-label={t('message.rewind')} onClick={onRewind}>
+            <IconRefreshOutline16 />
+          </button>
+        </Tooltip>
+      )}
       {onBranch !== undefined && (
         <Tooltip label={branchUnavailable ? t('message.branchUnavailable') : t('message.branch')} side="bottom">
           {/* Native disabled buttons do not deliver the hover/focus events Tooltip needs. */}

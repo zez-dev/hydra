@@ -132,6 +132,8 @@ describe('ToolResultPruner content transform', () => {
     expect(prune.measureContent(blocks)).toBe(3)
     expect(prune.pruneContent(blocks)).toBeNull()
     expect(codePointLength('a😀b')).toBe(3)
+    // Thirty emoji are sixty UTF-16 code units but thirty code points: within the threshold of 50.
+    expect(prune.pruneContent([{ type: 'text', text: '😀'.repeat(30) }])).toBeNull()
   })
 
   it('keeps configured head and tail without splitting surrogate pairs', () => {

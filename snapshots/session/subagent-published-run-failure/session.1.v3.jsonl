@@ -2,3 +2,4 @@
 {"type":"sandbox/mode","data":{"mode":"danger-full-access","source":"delegation"}}
 {"type":"approval/policy","data":{"policy":"never","source":"delegation"}}
 {"type":"permission/preset","data":{"preset":"danger-full-access"}}
+{"type":"subagent/descriptor","data":{"version":3,"mode":"one-shot","provider":"spawn","label":"Fail published run"}}

@@ -3,8 +3,10 @@ import {
   ToolCallId,
   LlmAdapter,
   ReasoningEffortId,
+  resolveRetryPolicy,
   type GenerateOptions,
   type LlmResolvedModelInfo,
+  type ResolvedRetryPolicy,
   type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 
@@ -17,6 +19,11 @@ const SHELL_COMMAND = process.platform === 'win32'
 
 /** Keyless headless-agent adapter: one production shell call followed by a final answer. */
 class CliMockAdapter extends LlmAdapter {
+  /** The shipped retry budget with one-millisecond backoff, so the designed terminal failure lands inside the smoke deadline. */
+  override providerRetryPolicy(): ResolvedRetryPolicy {
+    return resolveRetryPolicy({ mode: 'normal', backoff: { initialDelayMs: 1, maxDelayMs: 1 } }, 'cli-mock retryPolicy')
+  }
+
   override async resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
     return {
       provider,

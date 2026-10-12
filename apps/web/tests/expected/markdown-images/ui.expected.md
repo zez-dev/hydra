@@ -11,6 +11,8 @@
 - text: Show the Markdown image policy. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - heading "Markdown images" [level=2]
 - paragraph:
   - img "Remote test image"

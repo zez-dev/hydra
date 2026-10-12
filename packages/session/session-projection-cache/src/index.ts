@@ -375,6 +375,16 @@ export class SessionProjectionCache extends Service {
     }
   }
 
+  /**
+   * Drop one session's cached checkpoint row after the session itself was
+   * deleted. A missing row resolves without writing.
+   * @param id - the deleted session.
+   * @returns resolution after durability.
+   */
+  async forget(id: SessionId): Promise<void> {
+    await this.requireTable().delete(id)
+  }
+
   /** Replace one session's stored record with its log identity and a detached snapshot of `rows`. */
   private async put(id: SessionId, identity: CheckpointIdentity, rows: ProjectionCheckpoint): Promise<void> {
     const detached = snapshotJsonValue(rows)

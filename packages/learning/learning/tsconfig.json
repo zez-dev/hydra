@@ -1,0 +1,60 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cosmokit"
+    },
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../util/brand"
+    },
+    {
+      "path": "../../util/values"
+    },
+    {
+      "path": "../../util/home-paths"
+    },
+    {
+      "path": "../../util/timeout"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../llm/llm"
+    },
+    {
+      "path": "../../interaction/commands"
+    },
+    {
+      "path": "../../skill/skill"
+    },
+    {
+      "path": "../memory"
+    },
+    {
+      "path": "../../goal/research"
+    },
+    {
+      "path": "../../goal/goal"
+    },
+    {
+      "path": "../../jobs/jobs"
+    }
+  ]
+}

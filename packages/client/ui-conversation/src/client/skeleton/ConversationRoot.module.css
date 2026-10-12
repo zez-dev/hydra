@@ -387,6 +387,13 @@
      gutter moves the input card sideways by the bar's width whenever the two
      differ ([decision](../../../../../../.agents/notes/archived/bug-fix/2026-08-04-composer-tab-gutter-reservation.md)). */
   scrollbar-gutter: stable;
+  /* The Chat view owns every scroll position: it restores its own anchor row
+     when a page prepends and pins the floor while following, and it records
+     every write it makes so an unrecorded offset counts as the reader's. A
+     browser scroll-anchoring adjustment is exactly such an unrecorded offset
+     (the mounted window of a long Chat forces layouts mid-commit, where the
+     browser would adjust), so the browser never anchors here. */
+  overflow-anchor: none;
 }
 
 /* The bar also stops 2px short of the scroller's ends, matching its 2px edge
@@ -421,9 +428,28 @@
      fade from their own base. */
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent) 0px,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 40%, transparent) 0px,
     var(--dsw-alias-bg-base) 36px
   );
+}
+
+/* The fade starts 24px above the seat, in the gap left under the last
+   answer at the bottom of the transcript, and meets the seat's own band at
+   the same slope, so scrolled text dims over 60px instead of 36px. */
+.root[data-phase='active'] .composerSeat::before,
+.embeddedBody[data-content-phase='active'] .composerSeat::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 24px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--dsw-alias-bg-base) 0%, transparent),
+    color-mix(in srgb, var(--dsw-alias-bg-base) 40%, transparent)
+  );
+  content: '';
+  pointer-events: none;
 }
 
 /* An open @/slash menu (data-trigger-menu, ui-input-trigger) renders inside

@@ -2817,9 +2817,11 @@ export function TrajectoryTable({
                               ? `${css.turnLabel} ${css.turnLabelActive}`
                               : css.turnLabel}
                             aria-label={sectionLabel(record.turn, t)}
+                            title={sectionLabel(record.turn, t)}
                           >
                             {record.turn === null
-                              ? sectionLabel(record.turn, t)
+                              // The gutter is 36px wide; the full label names the section in the tooltip.
+                              ? t('section.betweenTurnsShort')
                               : (
                                 <>
                                   <span className={css.turnLabelFull} aria-hidden="true">

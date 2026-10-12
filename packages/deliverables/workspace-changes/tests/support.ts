@@ -11,6 +11,16 @@ import type { WorkspaceChangesSummary } from '../src/types.ts'
 
 let callNumber = 0
 
+/**
+ * Per-test deadline for specs whose git calls spawn through the real local
+ * subprocess runtime. On a Linux host with a user systemd manager that runtime
+ * starts every process in its own transient scope through a Node bootstrap,
+ * which under this spec runner runs from source through tsx: about 250 ms per
+ * spawn against 2 ms for a direct spawn, so a test making twenty git calls
+ * takes seconds.
+ */
+export const SCOPED_SPAWN_TIMEOUT_MS = 30_000
+
 /** Run git synchronously inside a fixture repository. */
 export function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {

@@ -134,9 +134,26 @@ export type WorkspaceBrowserInjected = {
    * session clears the selection into the New Session view state.
    */
   archiveSession: (sessionId: SessionId) => Promise<void>
+  /**
+   * Restore an archived Session to its recorded accounting slot; the row
+   * loses its archived presentation when the archive-set echo lands.
+   */
+  unarchiveSession: (sessionId: SessionId) => Promise<void>
+  /**
+   * Delete a stored Session permanently, with the sub-agent Sessions it
+   * started. Its forks are kept unless `cascade` is set, which deletes every
+   * descendant. A live or owned Session answers `failed` with the Host's
+   * reason. Deleting the current session clears the selection.
+   */
+  deleteSession: (sessionId: SessionId, options: { cascade: boolean }) => Promise<SessionDeleteOutcome>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }
+
+/** Result of one session delete attempt as the browser dialog consumes it. */
+export type SessionDeleteOutcome =
+  | { readonly kind: 'deleted' }
+  | { readonly kind: 'failed'; readonly message: string }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
 export type WorkspaceBrowserProps =

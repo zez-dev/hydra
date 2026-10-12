@@ -13,7 +13,7 @@ import {
   resolveTargetPolicy,
 } from '@deepseek-ai/dsh-compaction-basic/src/config.ts'
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
-import LlmRuntime, { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, createToolResultMessage, LlmAdapter , createMessage } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage, ToolCallId, CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, createToolResultMessage, LlmAdapter, createMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type {
   ContentBlock,
   GenerateOptions,
@@ -253,6 +253,15 @@ function oversizedToolResult(chars = 3_000, withCompactablePrompt = false): Sess
 }
 
 class TestCompactionEngine extends BasicCompactionEngine {
+  /**
+   * Fixture windows are a few hundred tokens, so the summarization request's
+   * own cost (the instruction, its cap, the margin) would swallow them; these
+   * tests pin range and retry behavior, not that arithmetic.
+   */
+  constructor(ctx: Context, config: BasicCompactionConfig = {}) {
+    super(ctx, { maxTokens: 64, reserveMarginRatio: 0, ...config })
+  }
+
   summary: ContentBlock[] = [{ type: 'text', text: 'small checkpoint' }]
   rawOutput: ContentBlock[] | undefined
   usage: TokenUsage | undefined
@@ -316,6 +325,13 @@ describe('compact configuration and defaults', () => {
       maxTokens: 8192,
       compactionRetries: 1,
       maxOverflowRetries: 1,
+      reserveMarginRatio: 0.05,
+      outputReserveRatio: 0.25,
+      failureBackoffSteps: 8,
+      failureBackoffGrowthRatio: 0.1,
+      minOutputTokens: 256,
+      summaryWindowRatio: 0.25,
+      outputRetryFactor: 4,
       modelPolicies: [],
       auto: true,
     })
@@ -479,6 +495,12 @@ describe('compact configuration and defaults', () => {
       [{ modelPolicies: [{ provider: MODEL, model: MODEL }, { provider: MODEL, model: MODEL }] }, /duplicate model policy/],
       [{ models: { [MODEL]: { retainTokens: 10 } } }, /BasicCompactionConfig: unknown key "models"/],
       [{ thresholdRato: 0.5 }, /BasicCompactionConfig: unknown key "thresholdRato"/],
+      [{ reserveMarginRatio: 1 }, /reserveMarginRatio \(1\) must be a number in \[0, 1\)/],
+      [{ outputReserveRatio: -0.1 }, /outputReserveRatio \(-0.1\) must be a number in \[0, 1\)/],
+      [{ minOutputTokens: 0 }, /minOutputTokens \(0\) must be a positive integer/],
+      [{ outputRetryFactor: 0.5 }, /outputRetryFactor \(0.5\) must be a finite number of at least 1/],
+      [{ outputRetryFactor: Number.POSITIVE_INFINITY }, /outputRetryFactor \(Infinity\) must be a finite number of at least 1/],
+      [{ outputRetryFactor: '2' }, /outputRetryFactor \(2\) must be a finite number of at least 1/],
     ] as Array<[unknown, RegExp]>
 
     for (const [config, pattern] of bad) {
@@ -863,7 +885,9 @@ describe('optional model-free tool-result pruning', () => {
   })
 
   it('summarizes the pruned surface when pruning is insufficient', async () => {
-    const ctx = createContext(2_000)
+    // The window must hold the surface plus the summarization request's own
+    // cost, or the fit rule keeps a tail out of the range and needs more passes.
+    const ctx = createContext(4_000)
     void new ToolResultPruner(ctx, pruneConfig)
     const compact = new TestCompactionEngine(ctx, {
       auto: false,
@@ -1199,7 +1223,19 @@ describe('compaction region transaction', () => {
 
 class ScriptedAdapter extends LlmAdapter {
   lastOptions: GenerateOptions | undefined
+  readonly calls: GenerateOptions[] = []
+  /** Answers for the next calls, in order; once they run out every call gets the constructor's answer. */
+  readonly answers: { blocks: readonly ContentBlock[]; finish?: (StreamChunk & { type: 'finish' })['reason'] }[] = []
   usage: TokenUsage | undefined
+  /** Reasoning efforts the route offers; none by default, like a route without reasoning metadata. */
+  efforts: readonly string[] = []
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({
+      provider, id: model, name: model,
+      ...this.efforts.length === 0 ? {} : { reasoning: { efforts: this.efforts.map(id => ({ id: ReasoningEffortId(id), name: id })) } },
+    })
+  }
 
   constructor(
     private readonly blocks: readonly ContentBlock[],
@@ -1210,7 +1246,9 @@ class ScriptedAdapter extends LlmAdapter {
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.lastOptions = options
-    for (const [index, block] of this.blocks.entries()) {
+    this.calls.push(options)
+    const next = this.answers.shift()
+    for (const [index, block] of (next?.blocks ?? this.blocks).entries()) {
       yield { type: 'block-start', index, blockType: block.type }
       if (block.type === 'text') {
         yield { type: 'text-delta', index, text: block.text }
@@ -1221,7 +1259,7 @@ class ScriptedAdapter extends LlmAdapter {
       }
     }
     if (this.usage !== undefined) yield { type: 'usage', usage: this.usage }
-    yield { type: 'finish', reason: this.finish }
+    yield { type: 'finish', reason: next?.finish ?? this.finish }
   }
 }
 
@@ -1278,6 +1316,27 @@ describe('default one-shot summarizer', () => {
     expect(adapter.lastOptions?.messages.at(-1)).toMatchObject({ role: 'user' })
     expect(result.shadowedSeqs).toEqual(nodes.slice(start, start + 2))
     if (system !== undefined) expect(session.surface.nodes[0]).toBe(nodes[0])
+  })
+
+  it('asks a thinking route for its lowest reasoning effort and records it on the checkpoint', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    adapter.efforts = ['high', 'medium', 'off']
+    const session = conversation(3)
+    const nodes = [...session.surface.nodes]
+    await compact.compactRegion(nodes[0]!, nodes[1]!, agent(session, MODEL), SIGNAL)
+    expect(adapter.lastOptions?.reasoningEffort).toBe('off')
+    const summary = session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(summary?.type === 'compaction/summary' ? summary.data.reasoningEffort : undefined).toBe('off')
+  })
+
+  it('asks a route without reasoning levels for none', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    const session = conversation(3)
+    const nodes = [...session.surface.nodes]
+    await compact.compactRegion(nodes[0]!, nodes[1]!, agent(session, MODEL), SIGNAL)
+    expect(adapter.lastOptions).not.toHaveProperty('reasoningEffort')
+    const summary = session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(summary?.data).not.toHaveProperty('reasoningEffort')
   })
 
   it('requires complete raw output when a subclass marks one local LLM stream call', () => {
@@ -1501,6 +1560,63 @@ describe('default one-shot summarizer', () => {
     },
   )
 
+  it('asks again at the route\'s default effort when its lowest effort leaves only reasoning, and records the effort used', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    adapter.efforts = ['high', 'off']
+    adapter.answers.push({ blocks: [{ type: 'reasoning', text: 'all of it went here' }] })
+    const session = conversation(3)
+    const nodes = [...session.surface.nodes]
+    await compact.compactRegion(nodes[0]!, nodes[1]!, agent(session, MODEL), SIGNAL)
+    expect(adapter.calls.map(call => call.reasoningEffort)).toEqual(['off', undefined])
+    const summary = session.snapshotEvents().find(event => event.type === 'compaction/summary')
+    expect(summary?.data).not.toHaveProperty('reasoningEffort')
+    // The route keeps its default effort for the next checkpoint.
+    await compact.runSummarize(promptInput('history'), agent(conversation(1), MODEL))
+    expect(adapter.calls.map(call => call.reasoningEffort)).toEqual(['off', undefined, undefined])
+  })
+
+  it('keeps asking the lowest effort when the default effort answers without text too', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    adapter.efforts = ['off']
+    adapter.answers.push({ blocks: [] }, { blocks: [] })
+    await expect(compact.runSummarize(promptInput('history'), agent(conversation(1), MODEL))).rejects.toThrow(/the reply was empty/)
+    await compact.runSummarize(promptInput('history'), agent(conversation(1), MODEL))
+    expect(adapter.calls.map(call => call.reasoningEffort)).toEqual(['off', undefined, 'off'])
+  })
+
+  it('asks again without tools when the checkpoint request is answered with a tool call', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    adapter.efforts = ['off']
+    adapter.answers.push({ blocks: [{ type: 'tool-call', id: ToolCallId('c1'), name: 'bash', arguments: '{}' }], finish: { kind: 'tool-calls' } })
+    const tools = [{ name: 'bash', description: 'run', parameters: { type: 'object' } }]
+    const result = await compact.runSummarize({ ...promptInput('history'), tools }, agent(conversation(1), MODEL))
+    expect(result.summary).toEqual([{ type: 'text', text: 'summary' }])
+    expect(adapter.calls.map(call => call.tools)).toEqual([tools, undefined])
+    expect(adapter.calls.map(call => call.reasoningEffort)).toEqual(['off', 'off'])
+  })
+
+  it.each([
+    [[{ type: 'reasoning', text: 'thinking only' }], 'the reply held only reasoning'],
+    [[{ type: 'tool-call', id: ToolCallId('c2'), name: 'read', arguments: '{}' }], 'the model called read instead'],
+    [[], 'the reply was empty'],
+  ] as Array<[ContentBlock[], string]>)('names what came back when the second answer has no text either %#', async (blocks, reason) => {
+    const { adapter, compact } = await summarizerHarness(blocks)
+    adapter.efforts = ['off']
+    const tools = [{ name: 'read', description: 'read', parameters: { type: 'object' } }]
+    const thrown = await compact.runSummarize({ ...promptInput('history'), tools }, agent(conversation(1), MODEL)).catch((error: unknown) => error)
+    expect(adapter.calls).toHaveLength(2)
+    expect(thrown).toMatchObject({ message: `summarization produced no text summary content: ${reason}`, code: 'SUMMARY_EMPTY' })
+  })
+
+  it('asks the checkpoint to keep dead ends and settled facts, and to carry them through later checkpoints', async () => {
+    const { adapter, compact } = await summarizerHarness([{ type: 'text', text: 'summary' }])
+    await compact.runSummarize(promptInput('history'), agent(conversation(1), MODEL))
+    const instruction = adapter.lastOptions?.messages.at(-1)?.content.map(block => (block.type === 'text' ? block.text : '')).join('') ?? ''
+    expect(instruction).toContain('## Dead Ends and Settled Facts\n')
+    expect(instruction.indexOf('## Errors and Fixes')).toBeLessThan(instruction.indexOf('## Dead Ends and Settled Facts'))
+    expect(instruction).toContain('Carry every dead end and settled fact forward unless the conversation since disproved it.')
+  })
+
   it('rejects empty or reasoning-only successful output', async () => {
     const { compact } = await summarizerHarness([{ type: 'reasoning', text: 'private' }])
     await expect(compact.runSummarize(promptInput('history'), agent(conversation(1), MODEL)))
@@ -1548,7 +1664,7 @@ describe('default one-shot summarizer', () => {
 describe('automatic listener and loader composition', () => {
   function preStep(ctx: Context, owner: Agent, signal = SIGNAL) {
     return agentEvents(ctx, owner).waterfall(
-      'agent/pre-step', { messages: [], turn: 1, step: 1, signal },
+      'agent/pre-step', { messages: [], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
       () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
     )
   }
@@ -1707,9 +1823,12 @@ describe('automatic listener and loader composition', () => {
       headChars: 20,
       tailChars: 10,
     })
+    // The summary cap counts against the 10K window like any output cap, so
+    // the default 8192 would keep most of this surface out of the range.
     const compact = new TestCompactionEngine(ctx, {
       thresholdRatio: 1,
       retainTokens: 900,
+      maxTokens: 512,
     })
     const session = toolConversation()
 
@@ -2109,7 +2228,7 @@ describe('route-priced image pressure', () => {
   })
 
   it('triggers pressure compaction from routed visual tokens and logs heuristic shadow prices', async () => {
-    const ctx = pricedContext(1_000)
+    const ctx = pricedContext(1_100)
     const session = imageConversation()
     const before = ctx.tokenMeter.measure(session)
     const compact = new TestCompactionEngine(ctx, {
@@ -2118,7 +2237,7 @@ describe('route-priced image pressure', () => {
       retainTokens: 350,
     })
 
-    // The same history stays below the 800-token threshold without pricing.
+    // The same history stays below the 880-token threshold without pricing.
     const neutralResult = await compactIfNeeded(service({
       auto: false,
       thresholdRatio: 0.8,

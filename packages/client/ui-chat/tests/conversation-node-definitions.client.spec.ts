@@ -28,6 +28,7 @@ import { requestPromptDefinition, systemMessageDefinition } from '../src/client/
 import { retryDefinition } from '../src/client/conversation-nodes/retry.ts'
 import { toolDefinition } from '../src/client/conversation-nodes/tool.ts'
 import { turnErrorDefinition } from '../src/client/conversation-nodes/turn-error.ts'
+import { learningReviewDefinition } from '../src/client/conversation-nodes/learning-review.ts'
 import { turnMaxTokensDefinition } from '../src/client/conversation-nodes/turn-max-tokens.ts'
 import { turnTailDefinition } from '../src/client/conversation-nodes/turn-tail.ts'
 import { turnProcessDefinition } from '../src/client/conversation-nodes/turn-process.ts'
@@ -48,6 +49,7 @@ const DEFINITIONS: readonly ConversationNodeDefinition[] = [
   retryDefinition,
   turnErrorDefinition,
   turnMaxTokensDefinition,
+  learningReviewDefinition,
   turnTailDefinition,
 ]
 
@@ -217,6 +219,11 @@ function toolResult(callId: string, text: string, isError = false) {
       isError,
     }],
   }
+}
+
+/** A recorded assistant stream holding only its finish chunk. */
+function finishedStream(seq: number, kind: 'max-tokens' | 'stop') {
+  return [{ type: 'chunk', time: seq, chunk: { type: 'finish', reason: { kind } } }]
 }
 
 describe('built-in conversation node Definitions', () => {
@@ -2404,6 +2411,20 @@ describe('built-in conversation node Definitions', () => {
     })
   })
 
+  it('materializes a learning-review row after the turn it reviewed', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', { turn: 1, step: 1, message: assistantMessage('a1', 'done') }, { surfaceOp: 'append' }),
+      at(4, 'step/end', { turn: 1, step: 1 }),
+      at(5, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      at(6, 'session/learning-review', { turn: 1, outcome: { kind: 'candidates', count: 2 } }),
+    ])
+    const row = node(snapshot(value), 'learning-review')
+    expect(row?.data).toEqual({ kind: 'learning-review', seq: 6, time: 1_700_000_000_006, turn: 1, outcome: { kind: 'candidates', count: 2 } })
+    expect(row?.anchorSeq).toBeGreaterThan(node(snapshot(value), 'turn-tail')?.anchorSeq ?? Number.POSITIVE_INFINITY)
+  })
+
   it('materializes a max-tokens notice and keeps completed and error turns clean', () => {
     const value = assembler([
       at(1, 'turn/start', { turn: 1 }),
@@ -2440,6 +2461,37 @@ describe('built-in conversation node Definitions', () => {
     expect(node(snapshot(failed), 'turn-error')).toBeDefined()
   })
 
+  it('shows the max-tokens notice only when the turn\'s last reply is the one the cap cut', () => {
+    // Cut, then carried to a finished answer by a continuation: the turn
+    // outcome stays max-tokens, but there is nothing left to continue.
+    const continued = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', {
+        turn: 1, step: 1, stream: finishedStream(3, 'max-tokens'), message: assistantMessage('a1', 'first half'),
+      }, { surfaceOp: 'append' }),
+      at(4, 'step/end', { turn: 1, step: 1 }),
+      at(5, 'step/start', { turn: 1, step: 2 }),
+      at(6, 'assistant/message', {
+        turn: 1, step: 2, stream: finishedStream(6, 'stop'), message: assistantMessage('a2', 'second half'),
+      }, { surfaceOp: 'append' }),
+      at(7, 'step/end', { turn: 1, step: 2 }),
+      at(8, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } }),
+    ])
+    expect(node(snapshot(continued), 'turn-max-tokens')).toBeUndefined()
+
+    const cut = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'assistant/message', {
+        turn: 1, step: 1, stream: finishedStream(3, 'max-tokens'), message: assistantMessage('a1', 'cut answer'),
+      }, { surfaceOp: 'append' }),
+      at(4, 'step/end', { turn: 1, step: 1 }),
+      at(5, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } }),
+    ])
+    expect(node(snapshot(cut), 'turn-max-tokens')?.data).toMatchObject({ kind: 'turn-max-tokens', seq: 5, turn: 1 })
+  })
+
   it('keeps the max-tokens notice when the window starts after the owning turn/start', () => {
     const value = assembler([
       at(9, 'turn/end', { turn: 3, reason: { kind: 'max-tokens' } }),
@@ -2448,10 +2500,30 @@ describe('built-in conversation node Definitions', () => {
     expect(notice?.data).toMatchObject({ kind: 'turn-max-tokens', seq: 9, turn: 3 })
   })
 
+  it('drops the max-tokens notice when a window after the turn/start ends the turn with a finished reply', () => {
+    const reply = (seq: number, step: number, kind: 'max-tokens' | 'stop', text: string) => at(seq, 'assistant/message', {
+      turn: 3, step, stream: finishedStream(seq, kind), message: assistantMessage(`a${step}`, text),
+    }, { surfaceOp: 'append' })
+    const continued = assembler([
+      reply(3, 1, 'max-tokens', 'first half'),
+      at(4, 'step/end', { turn: 3, step: 1 }),
+      at(5, 'step/start', { turn: 3, step: 2 }),
+      reply(6, 2, 'stop', 'second half'),
+      at(7, 'step/end', { turn: 3, step: 2 }),
+      at(9, 'turn/end', { turn: 3, reason: { kind: 'max-tokens' } }),
+    ], true)
+    expect(node(snapshot(continued), 'turn-max-tokens')).toBeUndefined()
+
+    const cut = assembler([
+      reply(3, 1, 'max-tokens', 'cut answer'),
+      at(4, 'step/end', { turn: 3, step: 1 }),
+      at(9, 'turn/end', { turn: 3, reason: { kind: 'max-tokens' } }),
+    ], true)
+    expect(node(snapshot(cut), 'turn-max-tokens')?.data).toMatchObject({ kind: 'turn-max-tokens', seq: 9, turn: 3 })
+  })
+
   it('pins the max-tokens Definition edges the engine cannot reach', () => {
-    // The engine only hands start the single matched turn/end and never emits
-    // update Matches for this kind; these direct calls pin the declared
-    // behavior of both required Definition members anyway.
+    // Direct calls pin the members' guards the assembled engine never reaches.
     const match = (seq: number, type: string, data: unknown) => ({
       event: { seq, time: seq * 1_000, type, data },
       role: 'start',
@@ -2462,14 +2534,17 @@ describe('built-in conversation node Definitions', () => {
     }) as unknown as Parameters<NonNullable<typeof turnMaxTokensDefinition.buildViewNode>>[0]
     const reader = { previous: () => undefined }
 
-    expect(() => turnMaxTokensDefinition.start(context(undefined), match(1, 'turn/start', { turn: 1 }), reader))
-      .toThrow('turn-max-tokens start requires a max-tokens turn/end')
-    const state = { turn: 1, seq: 5, time: 5_000 }
+    expect(() => turnMaxTokensDefinition.start(context(undefined), match(1, 'turn/end', { turn: 1, reason: { kind: 'max-tokens' } }), reader))
+      .toThrow('turn-max-tokens start requires turn/start')
+    // A reply without a recorded stream and an unrelated turn/end leave the state as it was.
+    const state = { turn: 1 }
+    type UpdateContext = Parameters<typeof turnMaxTokensDefinition.update>[0]
     expect(turnMaxTokensDefinition.update(
-      context(state) as Parameters<typeof turnMaxTokensDefinition.update>[0],
-      match(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      context(state) as UpdateContext, match(6, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
     )).toBe(state)
+    expect(turnMaxTokensDefinition.update(context(state) as UpdateContext, match(4, 'assistant/message', { turn: 1, step: 1 }))).toBe(state)
     expect(turnMaxTokensDefinition.buildViewNode?.(context(undefined))).toBeNull()
+    expect(turnMaxTokensDefinition.buildViewNode?.(context(state))).toBeNull()
   })
 
   it('preserves nested Tools and manual compaction evidence when their start events are outside the window', () => {

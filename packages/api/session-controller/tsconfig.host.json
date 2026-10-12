@@ -16,6 +16,7 @@
     "src/control.ts",
     "src/file-references.ts",
     "src/history.ts",
+    "src/history-slim.ts",
     "src/list.ts",
     "src/media-references.ts",
     "src/model-selection-projection.ts",

@@ -506,4 +506,40 @@ async readEvent(request: SessionEventReadRequest, signal?: AbortSignal): Promise
 Types: [SessionId](core.zh.md) · [SessionTitleSnapshot](session-title.zh.md)
 
 Source: [`packages/session-query/session-query/src/index.ts`](../../packages/session-query/session-query/src/index.ts)
+
+<a id="ctxsessionusage--sessionusageservice"></a>
+
+### `ctx.sessionUsage` — `SessionUsageService`
+
+Published on `ctx.sessionUsage`.
+
+```ts cordis-catalog
+/**
+ * Fold provider-reported token usage over every session in the corpus.
+ * @param options - inclusive day bounds and cancellation.
+ * @returns totals for the requested slice, derived from the session logs.
+ * @throws when a bound is not a `YYYY-MM-DD` local calendar day.
+ */
+report(options?: UsageReportOptions): Promise<UsageReport>
+```
+
+Source: [`packages/session-query/session-usage/src/types.ts`](../../packages/session-query/session-usage/src/types.ts)
+
+<a id="ctxusagecontroller--usagecontroller"></a>
+
+### `ctx.usageController` — `UsageController`
+
+Host service backing the generated `ctx.remote.usage` namespace.
+
+```ts cordis-catalog
+/**
+ * Fold token usage over every recorded session for the dashboard.
+ * @param request - inclusive local-day bounds; each absent bound is unbounded.
+ * @returns overall totals, the per-day series, and the per-model split.
+ * @throws when a bound is not a `YYYY-MM-DD` local calendar day.
+ */
+@Remote('report') async report(request: UsageReportRequest): Promise<UsageReportValue>
+```
+
+Source: [`packages/api/usage-controller/src/index.ts`](../../packages/api/usage-controller/src/index.ts)
 <!-- END GENERATED cordis-surface -->

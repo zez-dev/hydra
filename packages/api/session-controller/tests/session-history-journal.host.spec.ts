@@ -9,6 +9,15 @@ import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionHistoryController } from '@deepseek-ai/dsh-api-session-controller/src/history.ts'
 import type { SessionFollowFrame, SessionPage, SessionWireEvent } from '@deepseek-ai/dsh-api-session-controller/types'
 import { createSessionTestRemote, installSessionReadTestServices } from './test-remote.ts'
+import type { AssistantStreamRecord } from '@deepseek-ai/dsh-llm'
+import { slimAssistantStream } from '../src/history-slim.ts'
+
+/** The settled-history wire form of an Assistant event: its embedded stream cut to timing. */
+function onWire<T extends { data: object }>(event: T): T {
+  const data = event.data as { stream?: unknown }
+  if (!Array.isArray(data.stream)) return event
+  return { ...event, data: { ...event.data, stream: slimAssistantStream(data.stream as readonly AssistantStreamRecord[]) } }
+}
 
 /** Append a production-shaped human prompt to the session surface. */
 function appendUserText(session: Session, text: string): SessionEvent {
@@ -226,7 +235,7 @@ describe('Session history raw journal', () => {
       done: false, value: { type: 'assistant-stream', frame: nextFrame },
     })
     await expect(iterator.next()).resolves.toEqual({
-      done: false, value: { type: 'event', event: message },
+      done: false, value: { type: 'event', event: onWire(message) },
     })
     await expect(iterator.next()).resolves.toEqual({
       done: false, value: { type: 'assistant-stream', frame: endFrame },
@@ -826,7 +835,7 @@ describe('Session history raw journal', () => {
       })
       if (!response.ok) throw new Error('unreachable')
       expect(pageEvents(response.value).map(event => event.seq)).toEqual([message.seq])
-      expect(response.value.records).toEqual([{ type: 'event', event: message }])
+      expect(response.value.records).toEqual([{ type: 'event', event: onWire(message) }])
       expect(response.value.hasMore).toBe(true)
     } finally {
       min.mockRestore()
@@ -873,6 +882,7 @@ describe('Session history raw journal', () => {
       throughSeq: session.seq - 1,
     })
     if (!response.ok) throw new Error('unreachable')
+    // A failed attempt has no message, so its stream is the only record of what arrived: it travels whole.
     expect(response.value.records).toEqual([{ type: 'event', event: attempt }])
     await ctx.fiber.dispose()
   })

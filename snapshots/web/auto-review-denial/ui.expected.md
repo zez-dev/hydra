@@ -13,6 +13,8 @@
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - text: Failed
 - button "Tool call Rejected by Auto review":
   - img
@@ -53,6 +55,8 @@
     - tab "Trajectory"
 - text: Inspect the protected operation, but do not run it unless authorized. {{clock}}
 - button "Copy":
+  - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
   - img
 - text: Failed
 - button "Tool call Rejected by Auto review" [expanded]:

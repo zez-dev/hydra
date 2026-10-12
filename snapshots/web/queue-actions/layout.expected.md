@@ -11,10 +11,10 @@
     - tab "Chat" [selected]
     - tab "Trajectory"
 - group "Command input": /goal Keep the composer context panels aligned
-- 'button "goal Goal created Status: active Objective: Keep the composer context panels aligned Rounds: 0/256 Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"':
+- 'button "goal Goal created Status: active Objective: Keep the composer context panels aligned Rounds: 0/unlimited Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"':
   - img
   - img
-  - text: "goal Goal created Status: active Objective: Keep the composer context panels aligned Rounds: 0/256 Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"
+  - text: "goal Goal created Status: active Objective: Keep the composer context panels aligned Rounds: 0/unlimited Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"
 - button "System prompt":
   - img
   - img
@@ -28,7 +28,7 @@
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - paragraph: partial
-- status: Deep diving...
+- status: The dragon is thinking…
 - region "To-dos":
   - button "To-dos 1 completed · 1 in progress"
 - img

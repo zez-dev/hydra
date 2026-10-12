@@ -329,6 +329,66 @@ describe('ApiSession model selection', () => {
   })
 })
 
+describe('ApiSession close', () => {
+  /** An Agent this controller opened through a registry create that registers it. */
+  async function opened(name: string): Promise<{
+    ctx: Context
+    agents: ApiSessionAgentController
+    live: Agent
+    disposals: () => number
+    unregister: () => Promise<void>
+  }> {
+    const { ctx, agents } = await harness()
+    const cwd = mkdtempSync(join(tmpdir(), 'dsh-session-controller-close-'))
+    tempDirs.push(cwd)
+    const meta = header(name, cwd)
+    const live = agent(ctx, meta)
+    let disposals = 0
+    let registration: ReturnType<Context['agents']['register']> | undefined
+    vi.spyOn(ctx.agents, 'create').mockImplementation(async () => {
+      registration = ctx.agents.register(live)
+      await registration
+      return { agent: live, dispose: () => { disposals += 1; return Promise.resolve() } }
+    })
+    await expect(agents.ensureSession(meta.id, cwd, false)).resolves.toBe(live)
+    return {
+      ctx,
+      agents,
+      live,
+      disposals: () => disposals,
+      unregister: async () => { await registration?.() },
+    }
+  }
+
+  it('leaves an Agent whose turn is running alone and reports it as running', async () => {
+    const { ctx, agents, live, disposals } = await opened('close-running')
+    Object.assign(live, { status: 'running' })
+    await expect(agents.close(live.id)).resolves.toBe('running')
+    expect(disposals()).toBe(0)
+    expect(ctx.agents.get(live.id)).toBe(live)
+    expect(agents.owns(live)).toBe(true)
+  })
+
+  it('reports an Agent another owner opened as foreign without disposing it', async () => {
+    const { ctx, agents } = await harness()
+    const live = agent(ctx, header('close-foreign'))
+    await ctx.agents.register(live)
+    expect(agents.owns(live)).toBe(false)
+    await expect(agents.close(live.id)).resolves.toBe('foreign')
+    expect(ctx.agents.get(live.id)).toBe(live)
+  })
+
+  it('stops claiming an Agent that its structural owner tore down', async () => {
+    const { ctx, agents, live, disposals, unregister } = await opened('close-torn-down')
+    expect(agents.owns(live)).toBe(true)
+    await unregister()
+    expect(ctx.agents.get(live.id)).toBeUndefined()
+    expect(agents.owns(live)).toBe(false)
+    await expect(agents.close(live.id)).resolves.toBe('absent')
+    expect(disposals()).toBe(0)
+  })
+})
+
 describe('ApiSession create or adoption', () => {
   it('shares one in-flight creation between concurrent callers', async () => {
     const { ctx, agents } = await harness()

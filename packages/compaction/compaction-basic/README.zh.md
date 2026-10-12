@@ -63,14 +63,21 @@ kind: "package-reference"
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
-| `thresholdRatio` | `0.8` | 在 `floor(routedContextWindow × ratio)` 处开始压缩。 |
+| `thresholdRatio` | `0.8` | 在 `floor(routedContextWindow × ratio)` 处开始压缩；当预留的回复空间（见 `outputReserveRatio`）加上 `reserveMarginRatio` 在该点之上放不下时更早开始。 |
 | `retainRatio` | `0.16` | 以已路由上下文窗口的一部分表示逐字保留的近期对话；与 `retainTokens` 互斥。 |
 | `retainTokens` | — | 逐字保留的近期对话绝对预算；与 `retainRatio` 互斥，并且必须低于已解析阈值。 |
 | `summarizationProvider` | `''` | 与 `summarizationModel` 一起设置；空对使用最新已路由请求目标，再回退到 `AgentOptions` 对。 |
 | `summarizationModel` | `''` | 与 `summarizationProvider` 一起设置；空对使用最新已路由请求目标，再回退到 `AgentOptions` 对。 |
-| `maxTokens` | `8192` | 摘要请求的输出上限；可包含推理 token。 |
+| `maxTokens` | `8192` | 摘要请求的输出上限；可包含推理 token。受 `summaryWindowRatio × contextWindow` 限制。 |
 | `compactionRetries` | `1` | 压力仍高于阈值时，在首次压缩后进行的额外尝试次数。 |
-| `maxOverflowRetries` | `1` | 已确认上下文窗口溢出后的最大重试次数；`0` 只禁用恢复。 |
+| `maxOverflowRetries` | `1`（`dsh-base` 中为 `3`） | 已确认上下文窗口溢出后的最大重试次数；每次重试都会先剪枝工具结果并再次压缩整个可压缩范围，然后重发同一请求；`0` 只禁用恢复。 |
+| `reserveMarginRatio` | `0.05` | 在请求输出上限之外保持空闲的窗口比例；surface 在比例阈值与 `contextWindow − outputCap − margin` 中较低者处压缩，摘要请求也保留同样的余量。 |
+| `outputReserveRatio` | `0.25` | 压缩判断为回复预留的窗口比例：预留输出上限与 `contextWindow × ratio` 中较小者，使接近窗口大小的输出上限不会压缩几乎为空的 surface；放不下完整上限的请求改为请求剩余空间。 |
+| `failureBackoffSteps` | `8` | 步骤边界压缩失败后等待多少步再重试，使持续失败的检查点不会在每次请求前都运行；检查点成功落地、`/compact` 或回复在输出上限处被截断都会结束等待，用户中止的尝试不会开始等待 |
+| `failureBackoffGrowthRatio` | `0.1` | 在 `failureBackoffSteps` 之前重试所需的 surface 增长比例（相对窗口）；期间请求时的上限收缩仍保证每个请求都在窗口之内 |
+| `minOutputTokens` | `256` | 压缩无法腾出空间、输出上限被缩减为剩余空间时，请求输出上限的下限。 |
+| `outputRetryFactor` | `4` | 检查点在摘要上限处被截断后，摘要上限的乘数；最多应用三次，且从不超过窗口所能容纳的量（`summaryWindowRatio` 与被压缩范围留下的空间）；`1` 禁用该重试。先思考再作答的模型会把部分上限花在思考上。 |
+| `summaryWindowRatio` | `0.25` | 摘要请求 `maxTokens` 相对已路由窗口的比例上限，使为大模型设定的上限不会占用小模型窗口的大部分；请求随后取该上限与被压缩范围留下的空间中较小者。 |
 | `modelPolicies` | `[]` | 针对个别模型路由的精确 `{ provider, model, ...partialPolicy }` 覆盖。 |
 | `auto` | `true` | 启用自动压缩与溢出恢复；设为 `false` 则仅手动执行。 |
 
@@ -109,7 +116,7 @@ kind: "package-reference"
 
 ### 自动触发与溢出恢复
 
-当 `auto: true` 时，串行 `agent/pre-step` listener 会在请求派生前检查压力：它通过 `ctx.tokenMeter` 为最新持久路由请求 envelope 定价，当压力越过路由模型的阈值时，先剪枝，再在保留已定价近期尾部的同时摘要最旧的平衡范围。每个选定范围都从第一个不是 `system/message` 的 surface 节点开始，因此位于 surface 节点 0 的系统提示词永不会被遮蔽；由历史内提示词更新追加的后续 `system/message` 是普通历史，范围可以遮蔽它，agent loop（智能体循环）的投影随后会在二者文本不同时用当前提示词替换节点 0（[决策规则](../../core/agent-loop/README.zh.md#understand-the-implementation)）。`agent/request-error` listener 响应提供方确认的 `CONTEXT_WINDOW_EXCEEDED`：它绕过常规阈值与保留策略，尝试一次最大平衡头部缩减，并且只在表层替换 generation 前进后才授权重试。取消全程保持最终决定权。
+当 `auto: true` 时，串行 `agent/pre-step` listener 会在请求派生前检查压力：它通过 `ctx.tokenMeter` 为最新持久路由请求 envelope 定价，并计入该步骤在请求写入日志前新增的内容（用户批次、日志尚未包含其文本的载荷系统提示词，以及超出已记录 header 的工具 schema），当压力越过路由模型的阈值时，先剪枝，再在保留已定价近期尾部的同时摘要最旧的平衡范围。每个选定范围都从第一个不是 `system/message` 的 surface 节点开始，因此位于 surface 节点 0 的系统提示词永不会被遮蔽；由历史内提示词更新追加的后续 `system/message` 是普通历史，范围可以遮蔽它，agent loop（智能体循环）的投影随后会在二者文本不同时用当前提示词替换节点 0（[决策规则](../../core/agent-loop/README.zh.md#understand-the-implementation)）。`agent/request-error` listener 响应提供方确认的 `CONTEXT_WINDOW_EXCEEDED`：它绕过常规阈值与保留策略，尝试一次最大平衡头部缩减，并且只在表层替换 generation 前进后才授权重试。取消全程保持最终决定权。
 
 压力策略从拥有持久路由的适配器解析容量。适配器无法为有效动态路由返回容量时，手动压力路径会抛出目标特定配置错误；自动 listener 会对该精确目标警告一次，并携带完整历史继续。
 

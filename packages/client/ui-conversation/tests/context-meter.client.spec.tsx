@@ -57,9 +57,11 @@ describe('ContextMeter', () => {
     expect(panel.textContent).toContain('~32K / 128K')
     expect(panel.textContent).toContain('25%')
     expect(panel.textContent).toContain('上下文已用')
-    expect(panel.textContent).toContain('系统提示词~120')
-    expect(panel.textContent).toContain('工具定义~21.5K')
-    expect(panel.textContent).toContain('对话消息~477K')
+    // The rows are the heuristic composition scaled to the ring's figure, so
+    // they sum to what the reader sees: 32K across 498.6K of estimates.
+    expect(panel.textContent).toContain('系统提示词~8')
+    expect(panel.textContent).toContain('工具定义~1.4K')
+    expect(panel.textContent).toContain('对话消息~30.6K')
     // The occupancy bar splits into one colored segment per composition row.
     expect(panel.getElementsByClassName(segmentClass)).toHaveLength(3)
     // Clicking the trigger again toggles the panel shut.
@@ -107,6 +109,23 @@ describe('ContextMeter', () => {
     const trigger = view.getByRole('button', { name: '上下文已用 2%' })
     fireEvent.click(trigger)
     expect(view.queryByRole('dialog')!.textContent).toContain('~3K / 128K')
+  })
+
+  it('scales the composition rows to the priced figure and names where the next step condenses', () => {
+    // Priced at 1.5 per heuristic token: the rows sum to the ring's figure
+    // instead of the heuristic composition, and the threshold line follows.
+    const view = meter({
+      contextPressure: {
+        pressureTokens: 32_000, projectedTokens: 747_930, contextWindow: 1_000_000, density: 1.5, thresholdTokens: 800_000,
+      },
+      contextBreakdown: BREAKDOWN,
+    })
+    fireEvent.click(view.getByRole('button', { name: '上下文已用 75%' }))
+    const panel = view.queryByRole('dialog')!
+    expect(panel.textContent).toContain('~748K / 1M')
+    expect(panel.textContent).toContain('~716K')
+    expect(panel.textContent).toContain('~32.3K')
+    expect(panel.textContent).toContain('下一步在约 800K 时压缩')
   })
 
   it('omits the composition rows while the contextBreakdown projection is absent', () => {

@@ -135,6 +135,27 @@ export interface ISessions {
    */
   fork(opts: { sessionId: SessionId; atSeq?: number; increaseTitle?: boolean }): Promise<SessionId>
   /**
+   * Rewind: fork at the completed boundary before the turn holding `atSeq`
+   * and hand back that turn's user prompt so it can be resent, edited or not.
+   * @param opts - source session id, an event seq inside the turn to rewind
+   *   to (fractional seqs floor like `fork`), and whether to increment an
+   *   inherited durable title before resolving.
+   * @returns the child session id and the rewound turn's prompt text.
+   * @throws {SessionForkError} when the Host refuses (first turn, unknown
+   *   session, anchor past the log) or the transport fails.
+   */
+  rewind(opts: { sessionId: SessionId; atSeq: number; increaseTitle?: boolean }): Promise<{ sessionId: SessionId; prompt?: string }>
+  /**
+   * Delete a stored session with the sub-agent sessions it started, and its
+   * forks too with `cascade`; every removed row, sub-agent rows included,
+   * leaves the list before this resolves.
+   * @param opts - session id and whether fork descendants are deleted too.
+   * @returns the removed session ids, descendants before their parents.
+   * @throws {SessionDeleteError} when the Host refuses (live, owned, not
+   *   found) or the transport fails.
+   */
+  delete(opts: { sessionId: SessionId; cascade?: boolean }): Promise<readonly SessionId[]>
+  /**
    * Borrow an already-retained Agent-scoped Context without extending its lifetime.
    * @param id - session id.
    * @returns the live scoped Context, or undefined without a retained generation.

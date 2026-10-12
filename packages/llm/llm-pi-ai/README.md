@@ -33,7 +33,7 @@ Choose this adapter when the same composition serves several providers, when a r
 
 ### Configure provider routes
 
-Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
+Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery. An inline `apiKey`, and a model `maxToken` where `maxTokens` is meant, are refused at load with the right field named: both are what a hand-written profile from an older home carries, and dropping them silently mounted a keyless route with the default output cap.
 
 ```yaml
 - name: '@deepseek-ai/dsh-llm-pi-ai'
@@ -83,6 +83,8 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `defaultMaxTokens` | `32,768` | Output-cap fallback for undescribed models |
 | `requestImagePixelBudget` | `4,194,304` | Total-pixel budget for each deterministic request image |
 | `requestImageMaxBytes` | `1 MiB` | Encoded-byte target for each request image before base64 expansion |
+| `streamIdleTimeoutMs` | `300000` | Longest silence allowed between two chunks once streaming has started; a stream that stays silent longer fails with `TIMEOUT` |
+| `minPromptTokensPerSecond` | `50` | The slowest prompt processing allowed before a stream's first byte, until a completed stream on the route has measured its real rate: the first-byte wait is the larger of `streamIdleTimeoutMs` and twice the prompt's estimated tokens divided by this rate, or by the measured rate once known, so a large prompt on a slow local server is not mistaken for a hang while the server is still reading it |
 | `maxRequestImageBytes` | `20 MiB` | Aggregate base64 image-payload bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED` |
 | `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
 
@@ -101,6 +103,10 @@ A profile's `models` list replaces the route's installed catalog rather than ext
 `reasoningEfforts` declares a model's selectable thinking levels: each key is a level selectors offer, its value the spelling dispatch sends on the wire, so `max: ultra` renames a level for a gateway with its own vocabulary. Omitting the field keeps the installed catalog entry's capability; `false` declares a non-reasoning model. `compat` switches reshape the request for endpoints pi-ai cannot recognize — which role carries the system prompt, which field caps output, how a thinking level travels — configurable per route and per model. A model neither the entry nor the installed catalog sizes takes the route's `defaultContextWindow` and `defaultMaxTokens` fallbacks.
 
 For self-hosted Chat Completions endpoints, `thinkingTokenBudgetField` selects the reasoning-budget parameter, and `vllmPriority` sets an integer scheduler priority when the server enables priority scheduling. Template arguments accept `$var: thinking.budget`. `openai-responses` gateways can set `supportsMaxOutputTokens: false` to omit `max_output_tokens`; Azure and Codex transports ignore this shared compatibility field. These controls are opt-in; catalog-owned Anthropic effort and fallback capabilities are not configurable switches.
+
+### Reasoning levels on a custom route
+
+A route the installed catalog does not describe is a custom route. Its `openai-completions` models that declare no `reasoningEfforts` offer the levels off, low, medium, high, xhigh, and max while the route's `reasoningLevels` is on, which is the default; the Settings Models page shows it as the Reasoning levels switch on the custom provider's cards. pi-ai is handed such a model as one that does not reason, so it adds no field of its own, and the adapter adds the chosen level to the request body through pi-ai's `onPayload` hook: `chat_template_kwargs` with `enable_thinking`, `thinking`, and `reasoning_effort` (the spellings Qwen, GLM, DeepSeek, and gpt-oss chat templates read on vLLM, SGLang, and llama.cpp) and the top-level `reasoning_effort`. `off` sends thinking disabled and effort `low`. A request with no chosen level carries none of these fields, so the server's own default stands. A server that answers a request carrying them with an error naming them, or rejecting unknown request fields, has them dropped for that route for the rest of the process and the same request is sent again without them; when the refused request asked for `xhigh` or `max`, which older vLLM releases do not accept, it is first sent again at `high`, and that route gets `high` for those two levels from then on. A model that declares `reasoningEfforts` keeps its declaration, and `reasoningLevels: false` sends none of these fields.
 
 ### Change configuration at runtime
 

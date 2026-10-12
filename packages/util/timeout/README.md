@@ -71,7 +71,7 @@ using watchdog = idleWatchdog(upstream, idleMs, 'LLM_STREAM_IDLE_TIMEOUT')
 const next = await watchdog.next(providerIterator)    // timer runs only while this read is outstanding
 ```
 
-The timer is armed only while an iterator `next()` is outstanding and rearms on `pulse()` for transport activity that yields no value, so consumer think time between reads never counts as idle. The interval must be positive, finite, and no greater than `MAX_TIMER_DELAY_MS`.
+The timer is armed only while an iterator `next()` is outstanding and rearms on `pulse()` for transport activity that yields no value, so consumer think time between reads never counts as idle. The interval must be positive, finite, and no greater than `MAX_TIMER_DELAY_MS`. An optional `firstTimeoutMs` gives the first read its own budget, for a producer that is silent while it prepares its first result, and `restart()` gives the next read that budget again after the caller reopens the producer's source.
 
 ### What does not get a timeout
 

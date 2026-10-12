@@ -10,6 +10,7 @@ export type { TypertGatewayFaultDetails } from '../remote-error-codes.ts'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   ConnectionHandle,
+  ConnectionUnreachableCode,
 } from '@deepseek-ai/dsh-client-connection/client'
 import type {
   InvocationDescriptor,
@@ -717,12 +718,42 @@ function withdrawn(endpoint: string): Extract<RemoteResult<never>, { readonly ok
 /**
  * The error branch a carrier throw (offline, transport fault) folds into: `gateway/internal` naming the endpoint and
  * the thrown message. Exported so a stand-in for this face folds identically.
+ *
+ * The carrier tags a request that never reached a server with
+ * `code: 'connection/unreachable'`. The browsers word that failure differently
+ * (`Failed to fetch`, `NetworkError when attempting to fetch resource`,
+ * `Load failed`) and none of them say what a reader can do about it, while in
+ * local use the cause is nearly always that the Host stopped or was restarted
+ * under an open page, so that case gets its own sentence naming the remedy.
+ * Only the tag selects it: a `TypeError` alone is not evidence, because the
+ * carrier's own response parsing throws one after the Host has answered, and
+ * calling that "never reached the Host" would be false exactly when a
+ * mutation may already have been applied.
  * @param endpoint - `<namespace>/<method>` that was called.
  * @param error - what the carrier threw.
  * @returns the failed result.
  */
 export function carrierFailure(endpoint: string, error: unknown): Extract<RemoteResult<never>, { readonly ok: false }> {
+  if (isUnreachable(error)) {
+    return internalFailure(
+      `client api: ${endpoint} never reached the Host, so nothing was applied. The server is stopped or `
+      + 'unreachable at this address. If you restarted it, open the new link it printed: every start issues a '
+      + 'fresh access token, so a page opened with the old one cannot reconnect.',
+    )
+  }
   return internalFailure(`client api: ${endpoint} failed: ${error instanceof Error ? error.message : String(error)}`)
+}
+
+/**
+ * Whether a carrier throw carries the connection package's unreachable tag.
+ * Compared as a literal because value imports across client plugins are
+ * forbidden by the bundle purity gate; the type import keeps the literal honest.
+ * @param error - what the carrier threw.
+ * @returns true when the request never reached a server.
+ */
+function isUnreachable(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === ('connection/unreachable' satisfies ConnectionUnreachableCode)
 }
 
 /**

@@ -17,12 +17,14 @@
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Context injection @deepseek-ai/dsh-system-prompt":
   - img
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - paragraph: partial
-- status: Deep diving...
+- status: The dragon is thinking…
 - button "2 queued messages"
 - textbox "Cmd/Ctrl+Enter steers all queued messages"
 - button "Add files or run commands":

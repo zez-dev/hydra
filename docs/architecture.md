@@ -89,7 +89,7 @@ A **step** is one model request plus the tools it calls. A **turn** is zero or m
 turn/start
   claim next-step input plus one queued message
   assemble prompt sections + tool schemas; project runtime context
-  -> agent/pre-step                   reject | enter(messages, startsRequestSeries?)
+  -> agent/pre-step(messages, prompt) reject | enter(messages, startsRequestSeries?)
      reject, or a first enter rewritten empty -> close the turn with no step
      step/start
      agent/request -> prepareCall (cancellation commits neither system nor users)
@@ -105,6 +105,8 @@ turn/start
   -> agent/turn-stopping
 turn/end
 ```
+
+`max-tokens` fixes the outcome, not the stop.
 
 `turn/*`, `step/*`, `system/message`, `user/message`, `assistant/message`, `assistant/attempt`, and `tool/*` are durable session events; the rest are live extension points across three domains. `agent/assistant-stream` publishes process-local start, transient chunk, and end frames. The loop commits the complete compact stream as one message or log-only attempt before a committed end frame, and the Web Session-follow adapter is the live event's only remote consumer. `agent/pre-step`, `agent/request`, `llm/stream`, and the three `tools/*` events are waterfalls, whose listeners must call `next()` to delegate; `agent/turn-stopping` is serial and has no `next()`.
 

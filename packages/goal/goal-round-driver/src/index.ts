@@ -6,6 +6,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { FiberState } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { GoalMessageSource, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -17,6 +18,42 @@ export { renderGoalRoundPrompt } from './prompt.ts'
 
 export const name = 'goal-round-driver'
 export const inject = ['agents', 'goals', 'sessions']
+
+/** Driver configuration. */
+export interface Config {
+  /**
+   * Re-arm after a goal round that ends in a request or stream error, a
+   * provider failure, or a max-tokens cut, instead of disarming. The delay
+   * doubles per consecutive failure from `delayMs`; after `maxConsecutive`
+   * consecutive failures the goal is blocked with reason
+   * `transient-retries-exhausted` until a human resumes it. A successful
+   * round resets the count. Omit to keep every such failure a disarm. A user
+   * cancellation or explicit pause is never retried.
+   */
+  transientRetry?: {
+    /** Delay before the first re-arm, in milliseconds. */
+    delayMs: number
+    /** Consecutive failures tolerated before blocking. */
+    maxConsecutive: number
+  } | undefined
+}
+
+/** Schemastery configuration schema. */
+export const Config: z<Config> = z.object({
+  transientRetry: z.union([
+    z.object({
+      delayMs: z.natural().min(1).required(),
+      maxConsecutive: z.natural().min(1).required(),
+    }),
+    z.const(undefined),
+  ]),
+})
+
+/** Blocker recorded when transient retries run out; `/goal resume` clears it. */
+export const TRANSIENT_RETRIES_EXHAUSTED = 'transient-retries-exhausted'
+
+/** Cap on the backoff exponent so the delay stays bounded. */
+const MAX_BACKOFF_EXPONENT = 8
 
 /** Identity reserved before a goal continuation enters the agent inbox. */
 interface RoundIdentity {
@@ -43,6 +80,10 @@ interface DriverState {
   requested: boolean
   run: Promise<void> | undefined
   stopping: boolean
+  /** Goal rounds that failed transiently since the last successful round. */
+  consecutiveFailures: number
+  /** Pending re-arm delay; the driver reserves nothing while it runs. */
+  retryTimer: ReturnType<typeof setTimeout> | undefined
 }
 
 /** Whether a source identifies an automatic, positive-numbered goal round. */
@@ -73,8 +114,9 @@ function renderThrown(value: unknown): string {
 }
 
 /** Install automatic same-session continuation and its race fences. */
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, config: Config = {}): void {
   const states = new Map<Agent, DriverState>()
+  const retry = config.transientRetry
 
   /** Create state for an exact currently live agent. */
   function stateFor(agent: Agent): DriverState {
@@ -88,6 +130,8 @@ export function apply(ctx: Context): void {
       requested: false,
       run: undefined,
       stopping: false,
+      consecutiveFailures: 0,
+      retryTimer: undefined,
     }
     states.set(agent, state)
     return state
@@ -106,6 +150,7 @@ export function apply(ctx: Context): void {
       && ctx.agents.get(state.agent.id) === state.agent
       && state.agent.status === 'idle'
       && !state.competingQueued
+      && state.retryTimer === undefined
   }
 
   /** Recheck every condition that an awaited checkpoint may have changed. */
@@ -121,6 +166,48 @@ export function apply(ctx: Context): void {
     } catch (error: unknown) {
       ctx.logger.warn(`goal-round-driver: could not disarm agent "${state.agent.id}": ${renderThrown(error)}`)
     }
+  }
+
+  /** Drop a pending re-arm delay. */
+  function clearRetry(state: DriverState): void {
+    if (state.retryTimer === undefined) return
+    clearTimeout(state.retryTimer)
+    state.retryTimer = undefined
+  }
+
+  /**
+   * Handle a goal round that ended in a transient failure: re-arm after a
+   * backoff, or block once the consecutive budget is spent. Without retry
+   * configuration the failure disarms the goal.
+   */
+  function failTransiently(state: DriverState, cause: string): void {
+    if (retry === undefined || state.attempt === undefined) {
+      disarm(state)
+      return
+    }
+    const goal = currentGoal(state)
+    if (goal === undefined || goal.phase !== 'active' || goal.activation !== 'armed') return
+    state.consecutiveFailures += 1
+    if (state.consecutiveFailures > retry.maxConsecutive) {
+      state.consecutiveFailures = 0
+      try {
+        ctx.goals.block(state.agent, goalRef(goal), {
+          code: TRANSIENT_RETRIES_EXHAUSTED,
+          message: `${retry.maxConsecutive} consecutive goal rounds failed (last: ${cause}); resume the goal to continue.`,
+        })
+      } catch (error: unknown) {
+        ctx.logger.warn(`goal-round-driver: could not block agent "${state.agent.id}" after exhausted retries: ${renderThrown(error)}`)
+        disarm(state)
+      }
+      return
+    }
+    const delay = retry.delayMs * 2 ** Math.min(state.consecutiveFailures - 1, MAX_BACKOFF_EXPONENT)
+    ctx.logger.warn(`goal-round-driver: goal round for agent "${state.agent.id}" failed (${cause}); re-arming in ${delay}ms (${state.consecutiveFailures}/${retry.maxConsecutive})`)
+    clearRetry(state)
+    state.retryTimer = setTimeout(() => {
+      state.retryTimer = undefined
+      requestDrive(state)
+    }, delay)
   }
 
   /** Preserve claimed step context when this driver drops only its own round. */
@@ -243,12 +330,16 @@ export function apply(ctx: Context): void {
   // One composite effect keeps the step fence installed until this
   // plugin's own scheduling tasks settle.
   ctx.effect(function* () {
-    ctx.on('agent/error', ({ agent }) => {
+    ctx.on('agent/error', ({ agent, error }) => {
       const state = stateFor(agent)
-      disarm(state)
+      failTransiently(state, renderThrown(error))
     })
 
-    ctx.on('agent/disposed', ({ agent }) => { states.delete(agent) })
+    ctx.on('agent/disposed', ({ agent }) => {
+      const state = states.get(agent)
+      if (state !== undefined) clearRetry(state)
+      states.delete(agent)
+    })
     ctx.on('agent/created', ({ agent }) => {
       const state = stateFor(agent)
       state.attempt = undefined
@@ -326,8 +417,15 @@ export function apply(ctx: Context): void {
           }
           return
         case 'turn/end':
+          // The loop's own retry turn may succeed after a failed request
+          // already scheduled a re-arm; the round is settled, so drop it.
+          if (event.data.reason.kind === 'completed' && state.attempt?.phase === 'admitted') {
+            state.consecutiveFailures = 0
+            clearRetry(state)
+            return
+          }
           if (event.data.reason.kind === 'max-tokens') {
-            disarm(state)
+            failTransiently(state, 'max-tokens')
             return
           }
           if (event.data.reason.kind !== 'aborted') return
@@ -437,6 +535,7 @@ export function apply(ctx: Context): void {
       const waits: Promise<void>[] = []
       for (const state of states.values()) {
         state.stopping = true
+        clearRetry(state)
         disarm(state)
         const attempt = state.attempt
         if (attempt !== undefined) {

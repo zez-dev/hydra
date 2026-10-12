@@ -11,11 +11,10 @@
  * display name and wire protocol of a pi-ai route the adapter does not ship —
  * the two fields the create card asked that route for, editable here for the
  * same reason).
- * Reasoning effort is deliberately absent: it is a per-MODEL capability, and
- * the models under one provider disagree about it, so a provider-scoped
- * control can only be set to a value some of them reject. The composer's
- * model picker offers each model its own levels; `settings.yaml` keeps the
- * profile field for a deployment that knows its route. Everything else stays
+ * Reasoning effort itself is not chosen here: it is a per-MODEL capability,
+ * and the composer's model picker offers each model its own levels. A
+ * declared route gets one switch, `reasoningLevels`, deciding whether its
+ * models that declare no levels offer the automatic ones. Everything else stays
  * owned by `settings.yaml`. Profile edits land as minimal `settings.mutate`
  * path ops against the stored section — the card names only the fields it can
  * see instead of rebuilding the whole subtree from a partial descriptor.
@@ -30,6 +29,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import {
   DeepSeekModelsEditor, modelDrafts, validateDeepSeekModels,
 } from './DeepSeekModelsEditor.tsx'
+import { Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import { apiKeyFailure } from './apiKey.ts'
 import { EditorFooter } from './EditorFooter.tsx'
 import { ModelListEditor } from './ModelListEditor.tsx'
@@ -447,6 +447,32 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
                     {probeApi === undefined ? <option value="">{t('customApiUnset')}</option> : null}
                     {protocols.map(choice => <option key={choice} value={choice}>{choice}</option>)}
                   </select>
+                </div>
+              )
+              : null}
+            {ownsIdentity
+              ? (
+                <div className={styles['field']}>
+                  <span className={styles['fieldLabel']}>{t('reasoningLevels')}</span>
+                  <Switch
+                    // On unless a layer says false: the adapter's own default.
+                    checked={(() => {
+                      const stored = schema.getPath(draft, ['reasoningLevels'])
+                      return typeof stored === 'boolean'
+                        ? stored
+                        : schema.getPath(schema.getPath(namespace.base, settingsPath), ['reasoningLevels']) !== false
+                    })()}
+                    label={t('reasoningLevels')}
+                    disabled={disabled}
+                    onChange={(next) => {
+                      const inherited = schema.getPath(schema.getPath(namespace.base, settingsPath), ['reasoningLevels']) !== false
+                      // Stored only where it differs from what the layer below already says.
+                      setDraft(current => next === inherited
+                        ? schema.deletePath(current, ['reasoningLevels'])
+                        : schema.setPath(current, ['reasoningLevels'], next))
+                    }}
+                  />
+                  <span className={styles['advancedHint']}>{t('reasoningLevelsHint')}</span>
                 </div>
               )
               : null}

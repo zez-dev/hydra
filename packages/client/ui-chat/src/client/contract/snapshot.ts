@@ -8,6 +8,7 @@ export type {
   AssistantBlock, AssistantMessageNode, AssistantProviderMetadataView, AssistantRequestConfig,
   AssistantTiming, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   ModelRetryNode, PartialAssistant, RunningToolCall, SteeringMessageNode, TodoItem,
+  LearningReviewNode, LearningReviewOutcome,
   ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode, UnknownSurfaceNode,
   UserMessageNode,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'

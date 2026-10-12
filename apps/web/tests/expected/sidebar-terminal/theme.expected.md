@@ -6,9 +6,9 @@
     "foreground": "rgb(15, 17, 21)"
   },
   "dark": {
-    "surface": "rgb(21, 21, 23)",
-    "viewport": "rgb(21, 21, 23)",
-    "underlay": "rgb(21, 21, 23)",
+    "surface": "rgb(7, 7, 8)",
+    "viewport": "rgb(7, 7, 8)",
+    "underlay": "rgb(7, 7, 8)",
     "foreground": "rgb(249, 250, 251)"
   }
 }

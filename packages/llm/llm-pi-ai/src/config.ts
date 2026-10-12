@@ -23,6 +23,7 @@ import type { ResolvedRetryPolicy, RetryPolicyConfig } from '@deepseek-ai/dsh-ll
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import {
   CACHE_CONTROL_FORMATS,
+  catalogProviderIds,
   CHAT_TEMPLATE_VARS,
   MAX_TOKENS_FIELDS,
   MODALITIES,
@@ -44,6 +45,11 @@ import { buildProvider, supportedProtocols } from './provider.ts'
 
 /** Default maximum idle interval while an adapter stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
+/**
+ * Prompt tokens per second a route is assumed to process before its first
+ * byte until the adapter has measured it from a completed stream.
+ */
+export const DEFAULT_MIN_PROMPT_TOKENS_PER_SECOND = 50
 
 /**
  * Default request-level bound on base64-encoded image payload. Every image in
@@ -151,6 +157,19 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * On a custom route (one the installed catalog does not describe): whether
+   * its `openai-completions` models that declare no `reasoningEfforts` offer
+   * the levels off, low, medium, high, xhigh, and max. A request with a
+   * chosen level then carries it as `chat_template_kwargs` (`enable_thinking`,
+   * `thinking`, `reasoning_effort`) and as `reasoning_effort`, with `off` sent
+   * as thinking disabled and effort `low`; a request with no chosen level
+   * carries none, so the server's own default stands. A server that refuses
+   * `xhigh` or `max` is asked for `high` instead for the rest of the process,
+   * and one that refuses the fields has them dropped for the rest of the
+   * process. Defaults to `true`; `false` sends none of these fields.
+   */
+  reasoningLevels?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -161,8 +180,16 @@ export interface PiAiProviderProfile {
   timeoutMs?: number
   /** WebSocket connection timeout in milliseconds. */
   websocketConnectTimeoutMs?: number
-  /** Maximum provider idle time while one stream read is outstanding. */
+  /** Maximum provider idle time while one stream read is outstanding, once streaming has started. */
   streamIdleTimeoutMs?: number
+  /**
+   * The slowest prompt processing the route is allowed before its first
+   * byte, in prompt tokens per second, until a completed stream has measured
+   * the route: the first-byte wait is the larger of `streamIdleTimeoutMs`
+   * and twice the prompt's estimated tokens divided by this rate (or by the
+   * measured rate once known). Defaults to `50`.
+   */
+  minPromptTokensPerSecond?: number
   /**
    * Maximum base64-encoded image payload per request. When a request's
    * accumulated images exceed it, the oldest images are replaced by text
@@ -177,7 +204,7 @@ export interface PiAiProviderProfile {
    * the smallest quality-ladder output is used when no quality fits.
    */
   requestImageMaxBytes?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  /** Provider-owned model-request retry policy; omission uses normal mode with twelve retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -192,6 +219,8 @@ export interface ResolvedPiAiProviderProfile
   apiKeyEnv?: CredentialRef
   /** Positive finite provider-idle interval after defaulting. */
   streamIdleTimeoutMs: number
+  /** Positive finite assumed prompt rate before the first byte, after defaulting. */
+  minPromptTokensPerSecond: number
   /** Positive request-level base64 image payload bound after defaulting. */
   maxRequestImageBytes: number
   /** Positive total-pixel request-version budget after defaulting. */
@@ -215,6 +244,8 @@ export interface ResolvedPiAiProviderProfile
    * own, so a catalog capability must not appear here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Models whose reasoning fields the adapter sends itself (see `reasoningLevels`). */
+  autoReasoningModels: ReadonlySet<string>
 }
 
 /** Plugin configuration: the provider routes this instance owns. */
@@ -270,6 +301,7 @@ const compatProfile: z<PiAiCompatProfile> = z.object({
   vllmPriority: z.number().step(1),
   supportsMaxOutputTokens: z.boolean(),
   supportsStrictMode: z.boolean(),
+  zaiToolStream: z.boolean(),
   cacheControlFormat: z.union(CACHE_CONTROL_FORMATS),
   supportsLongCacheRetention: z.boolean(),
   supportsEagerToolInputStreaming: z.boolean(),
@@ -332,12 +364,14 @@ const profile = z.object({
   defaultInput: z.array(z.union(MODALITIES)).default([...DEFAULT_INPUT]),
   headers: z.dict(z.string()),
   reasoning: z.union(THINKING_LEVELS),
+  reasoningLevels: z.boolean(),
   thinkingBudgets,
   cacheRetention: z.union(['none', 'short', 'long']),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto']),
   timeoutMs: z.natural(),
   websocketConnectTimeoutMs: z.natural(),
   streamIdleTimeoutMs: z.number().min(Number.MIN_VALUE).max(MAX_TIMER_DELAY_MS).default(DEFAULT_STREAM_IDLE_TIMEOUT_MS),
+  minPromptTokensPerSecond: z.number().min(Number.MIN_VALUE).default(DEFAULT_MIN_PROMPT_TOKENS_PER_SECOND),
   maxRequestImageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_REQUEST_IMAGE_BYTES),
   requestImagePixelBudget: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET),
   requestImageMaxBytes: z.number().step(1).min(1).default(DEFAULT_REQUEST_IMAGE_MAX_BYTES),
@@ -369,6 +403,7 @@ function rejectRemovedFields(provider: string, source: PiAiProviderProfile): voi
     provider?: unknown
     maxRetries?: unknown
     maxRetryDelayMs?: unknown
+    apiKey?: unknown
   }
   if ('provider' in legacy) {
     throw new Error(`llm-pi-ai: provider "${provider}" sets "provider", which moved to the providers dict key`)
@@ -378,6 +413,22 @@ function rejectRemovedFields(provider: string, source: PiAiProviderProfile): voi
       `llm-pi-ai: provider "${provider}" sets maxRetries or maxRetryDelayMs, which were removed;`
       + ' compose agent recovery with dsh-llm-retry',
     )
+  }
+  // A hand-written profile from an older home. Silently dropping either key
+  // mounted the route without its credential and with the default output cap,
+  // which surfaced only as puzzling provider errors on the first real request.
+  // Value-based: a test harness spreads `apiKey: undefined`, which carries no
+  // secret and drops nothing.
+  if (legacy.apiKey !== undefined) {
+    throw new Error(
+      `llm-pi-ai: provider "${provider}" sets "apiKey" inline, which is not a field;`
+      + ' name the credential with apiKeyEnv and put its value in $DSH_HOME/.env',
+    )
+  }
+  for (const model of source.models ?? []) {
+    if ((model as { maxToken?: unknown }).maxToken !== undefined) {
+      throw new Error(`llm-pi-ai: provider "${provider}" model "${model.id}" sets "maxToken"; the field is maxTokens`)
+    }
   }
 }
 
@@ -430,6 +481,10 @@ export function resolveProfiles(
         `llm-pi-ai: provider "${provider}" streamIdleTimeoutMs must be a positive finite number no greater than ${MAX_TIMER_DELAY_MS}`,
       )
     }
+    const minPromptTokensPerSecond = source.minPromptTokensPerSecond ?? DEFAULT_MIN_PROMPT_TOKENS_PER_SECOND
+    if (!Number.isFinite(minPromptTokensPerSecond) || minPromptTokensPerSecond <= 0) {
+      throw new Error(`llm-pi-ai: provider "${provider}" minPromptTokensPerSecond must be a positive finite number`)
+    }
     const maxRequestImageBytes = source.maxRequestImageBytes ?? DEFAULT_MAX_REQUEST_IMAGE_BYTES
     if (!Number.isInteger(maxRequestImageBytes) || maxRequestImageBytes <= 0) {
       throw new Error(`llm-pi-ai: provider "${provider}" maxRequestImageBytes must be a positive integer`)
@@ -469,6 +524,7 @@ export function resolveProfiles(
         defaultInput,
         defaultContextWindow: source.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
         defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
+        autoReasoningLevels: !catalogProviderIds().includes(provider) && source.reasoningLevels !== false,
       }, validation)
       catalogError = catalog.modelErrors.values().next().value
       piProvider = buildProvider({
@@ -490,6 +546,7 @@ export function resolveProfiles(
       displayName,
       ...apiKeyEnv === undefined ? {} : { apiKeyEnv: credentialRef(apiKeyEnv) },
       streamIdleTimeoutMs,
+      minPromptTokensPerSecond,
       maxRequestImageBytes,
       requestImagePixelBudget,
       requestImageMaxBytes,
@@ -497,6 +554,7 @@ export function resolveProfiles(
       ...rest.headers === undefined ? {} : { headers: { ...rest.headers } },
       ...rest.thinkingBudgets === undefined ? {} : { thinkingBudgets: { ...rest.thinkingBudgets } },
       configuredMaxTokens: catalog?.configuredMaxTokens ?? new Map(),
+      autoReasoningModels: catalog?.autoReasoningModels ?? new Set(),
       modelErrors: catalog?.modelErrors ?? new Map(),
       ...piProvider === undefined ? {} : { piProvider },
       ...catalogError === undefined ? {} : { catalogError },

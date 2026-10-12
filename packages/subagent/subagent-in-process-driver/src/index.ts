@@ -31,7 +31,7 @@ import {
 } from '@deepseek-ai/dsh-subagent'
 import type {
   ResolvedSubagentStartRequest,
-  SubagentDescriptorData,
+
   SubagentResult,
   SubagentRun,
   SubagentStopReason,
@@ -77,26 +77,13 @@ function prePublicationAbort(): Error {
   return new Error('subagent request was aborted before child publication')
 }
 
-/** Append one one-shot descriptor inside the child's initial turn before its first request. */
-function attachDescriptorAppend(childCtx: Context, descriptor: SubagentDescriptorData): void {
-  let appended = false
-  childCtx.on('agent/pre-step', async ({ agent }, next) => {
-    const decision = await next()
-    if (!appended && decision.kind === 'enter') {
-      appended = true
-      agent.session.append('subagent/descriptor', descriptor)
-    }
-    return decision
-  })
-}
-
 /**
  * Establish and drive one in-process one-shot child. Fulfillment means the agent
  * is already published in the registry and transfers its turn, cancellation,
  * and disposal work through the returned run. Rejection means the agent
  * factory's unpublished creation transaction reached quiescence without
- * publishing a child. Every start appends its resolved descriptor inside the
- * child's initial turn.
+ * publishing a child. Every start appends its resolved descriptor before the
+ * child is published.
  * @param request - the trusted typed start request, including its required signal.
  * @param options - the optional fork seed.
  * @returns a published holder-owned run.
@@ -121,6 +108,10 @@ export async function startInProcessRun(
   let structured: StructuredAttachment | undefined
   const setup = (childCtx: Context, child: Agent): void => {
     appendDelegatedPolicyOverrides(child.session, inherited)
+    // The descriptor is the child's identity: it lands inside the creation
+    // transaction, before publication, so a listing that learns of the child
+    // from `session/created` never finds it without one.
+    child.session.append('subagent/descriptor', request.descriptor)
     applyChildComposition(childCtx, parent, {
       persona: request.persona,
       toolFilter: request.toolFilter,
@@ -128,7 +119,6 @@ export async function startInProcessRun(
     if (request.outputSchema !== undefined) {
       structured = attachStructuredRuntime(childCtx, request.outputSchema)
     }
-    attachDescriptorAppend(childCtx, request.descriptor)
   }
 
   const handle = await parent.ctx.agents.create({

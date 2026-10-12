@@ -122,7 +122,7 @@ A skill is a reusable set of task-specific instructions. The following skills ar
 - `<name>`: <normalized-and-capped-description>
 </available_skills>
 
-If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact skill name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.
+Skills are optional references, not rules. If the user names a skill, load it with the `skill` tool. Otherwise load one only when the task clearly needs what its description offers, treat its steps as guidance to adapt to the task at hand, and set it aside where it does not fit. This catalog contains summaries only; do not infer a skill's instructions until it has been loaded.
 A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.
 </system-reminder>
 ```

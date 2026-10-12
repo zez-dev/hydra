@@ -58,6 +58,8 @@ flowchart LR
   cfg --> plugin_dsh_base_attachment_local
   plugin_dsh_base_session_query_sqlite["session-query-sqlite<br/>@deepseek-ai/dsh-session-query-sqlite"]
   cfg --> plugin_dsh_base_session_query_sqlite
+  plugin_dsh_base_session_usage["session-usage<br/>@deepseek-ai/dsh-session-usage"]
+  cfg --> plugin_dsh_base_session_usage
   plugin_dsh_base_session_projection["session-projection<br/>@deepseek-ai/dsh-session-projection"]
   cfg --> plugin_dsh_base_session_projection
   plugin_dsh_base_storage["storage<br/>@deepseek-ai/dsh-storage"]
@@ -108,6 +110,8 @@ flowchart LR
   cfg --> plugin_dsh_base_skill_badge
   plugin_dsh_base_tool_skill["tool-skill<br/>@deepseek-ai/dsh-tool-skill"]
   cfg --> plugin_dsh_base_tool_skill
+  plugin_dsh_base_skill_lock["skill-lock<br/>@deepseek-ai/dsh-skill-lock"]
+  cfg --> plugin_dsh_base_skill_lock
   plugin_dsh_base_commands["commands<br/>@deepseek-ai/dsh-commands"]
   cfg --> plugin_dsh_base_commands
   plugin_dsh_base_command_feedback["command-feedback<br/>@deepseek-ai/dsh-command-feedback"]
@@ -142,12 +146,16 @@ flowchart LR
   cfg --> plugin_dsh_base_tool_subagent_fork
   plugin_dsh_base_ptc_runtime["ptc-runtime<br/>@deepseek-ai/dsh-ptc-runtime-node"]
   cfg --> plugin_dsh_base_ptc_runtime
+  plugin_dsh_base_workflow_journal["workflow-journal<br/>@deepseek-ai/dsh-workflow-journal"]
+  cfg --> plugin_dsh_base_workflow_journal
   plugin_dsh_base_workflow_ptc["workflow-ptc<br/>@deepseek-ai/dsh-workflow-ptc"]
   cfg --> plugin_dsh_base_workflow_ptc
   plugin_dsh_base_tool_workflow["tool-workflow<br/>@deepseek-ai/dsh-tool-workflow"]
   cfg --> plugin_dsh_base_tool_workflow
   plugin_dsh_base_timeout_policy["timeout-policy<br/>@deepseek-ai/dsh-tool-call-timeout-policy"]
   cfg --> plugin_dsh_base_timeout_policy
+  plugin_dsh_base_command_gate["command-gate<br/>@deepseek-ai/dsh-command-gate"]
+  cfg --> plugin_dsh_base_command_gate
   plugin_dsh_base_spill_local["spill-local<br/>@deepseek-ai/dsh-spill-local"]
   cfg --> plugin_dsh_base_spill_local
   plugin_dsh_base_spill_policy["spill-policy<br/>@deepseek-ai/dsh-spill-policy"]
@@ -160,10 +168,54 @@ flowchart LR
   cfg --> plugin_dsh_base_image_offload
   plugin_dsh_base_tool_todo["tool-todo<br/>@deepseek-ai/dsh-tool-todo"]
   cfg --> plugin_dsh_base_tool_todo
+  plugin_dsh_base_tool_doctor["tool-doctor<br/>@deepseek-ai/dsh-doctor/tools"]
+  cfg --> plugin_dsh_base_tool_doctor
+  plugin_dsh_base_tool_session_usage["tool-session-usage<br/>@deepseek-ai/dsh-session-usage/tools"]
+  cfg --> plugin_dsh_base_tool_session_usage
+  plugin_dsh_base_tool_research["tool-research<br/>@deepseek-ai/dsh-research/tools"]
+  cfg --> plugin_dsh_base_tool_research
+  plugin_dsh_base_tool_memory["tool-memory<br/>@deepseek-ai/dsh-memory/tools"]
+  cfg --> plugin_dsh_base_tool_memory
+  plugin_dsh_base_tool_knowledge["tool-knowledge<br/>@deepseek-ai/dsh-knowledge/tools"]
+  cfg --> plugin_dsh_base_tool_knowledge
+  plugin_dsh_base_tool_off_peak["tool-off-peak<br/>@deepseek-ai/dsh-off-peak/tools"]
+  cfg --> plugin_dsh_base_tool_off_peak
   plugin_dsh_base_tool_goal["tool-goal<br/>@deepseek-ai/dsh-tool-goal"]
   cfg --> plugin_dsh_base_tool_goal
+  plugin_dsh_base_goal_resume_on_open["goal-resume-on-open<br/>@deepseek-ai/dsh-goal-resume-on-open"]
+  cfg --> plugin_dsh_base_goal_resume_on_open
+  plugin_dsh_base_goal_supervisor["goal-supervisor<br/>@deepseek-ai/dsh-goal-supervisor"]
+  cfg --> plugin_dsh_base_goal_supervisor
+  plugin_dsh_base_goal_evaluator["goal-evaluator<br/>@deepseek-ai/dsh-goal-evaluator"]
+  cfg --> plugin_dsh_base_goal_evaluator
+  plugin_dsh_base_research["research<br/>@deepseek-ai/dsh-research"]
+  cfg --> plugin_dsh_base_research
+  plugin_dsh_base_market_data["market-data<br/>@deepseek-ai/dsh-market-data"]
+  cfg --> plugin_dsh_base_market_data
+  plugin_dsh_base_tool_market["tool-market<br/>@deepseek-ai/dsh-tool-market"]
+  cfg --> plugin_dsh_base_tool_market
+  plugin_dsh_base_digest["digest<br/>@deepseek-ai/dsh-digest"]
+  cfg --> plugin_dsh_base_digest
+  plugin_dsh_base_doctor["doctor<br/>@deepseek-ai/dsh-doctor"]
+  cfg --> plugin_dsh_base_doctor
+  plugin_dsh_base_cron_sessions["cron-sessions<br/>@deepseek-ai/dsh-cron-sessions"]
+  cfg --> plugin_dsh_base_cron_sessions
+  plugin_dsh_base_off_peak["off-peak<br/>@deepseek-ai/dsh-off-peak"]
+  cfg --> plugin_dsh_base_off_peak
+  plugin_dsh_base_spend_guard["spend-guard<br/>@deepseek-ai/dsh-spend-guard"]
+  cfg --> plugin_dsh_base_spend_guard
+  plugin_dsh_base_notify["notify<br/>@deepseek-ai/dsh-notify"]
+  cfg --> plugin_dsh_base_notify
+  plugin_dsh_base_memory["memory<br/>@deepseek-ai/dsh-memory"]
+  cfg --> plugin_dsh_base_memory
+  plugin_dsh_base_knowledge["knowledge<br/>@deepseek-ai/dsh-knowledge"]
+  cfg --> plugin_dsh_base_knowledge
+  plugin_dsh_base_learning["learning<br/>@deepseek-ai/dsh-learning"]
+  cfg --> plugin_dsh_base_learning
   plugin_dsh_base_tool_ralph["tool-ralph<br/>@deepseek-ai/dsh-tool-ralph"]
   cfg --> plugin_dsh_base_tool_ralph
+  plugin_dsh_base_auto_continue["auto-continue<br/>@deepseek-ai/dsh-auto-continue"]
+  cfg --> plugin_dsh_base_auto_continue
   plugin_dsh_base_repeat_tool_reminder["repeat-tool-reminder<br/>@deepseek-ai/dsh-repeat-tool-reminder"]
   cfg --> plugin_dsh_base_repeat_tool_reminder
   plugin_dsh_base_web["web<br/>@deepseek-ai/dsh-web"]
@@ -215,6 +267,7 @@ flowchart LR
 | `session-persistence-jsonl` | `@deepseek-ai/dsh-session-persistence-jsonl` |
 | `attachment-local` | `@deepseek-ai/dsh-attachment-local` |
 | `session-query-sqlite` | `@deepseek-ai/dsh-session-query-sqlite` |
+| `session-usage` | `@deepseek-ai/dsh-session-usage` |
 | `session-projection` | `@deepseek-ai/dsh-session-projection` |
 | `storage` | `@deepseek-ai/dsh-storage` |
 | `storage-json` | `@deepseek-ai/dsh-storage-json` |
@@ -240,6 +293,7 @@ flowchart LR
 | `skill-filesystem` | `@deepseek-ai/dsh-skill-filesystem` |
 | `skill-badge` | `@deepseek-ai/dsh-skill-badge` |
 | `tool-skill` | `@deepseek-ai/dsh-tool-skill` |
+| `skill-lock` | `@deepseek-ai/dsh-skill-lock` |
 | `commands` | `@deepseek-ai/dsh-commands` |
 | `command-feedback` | `@deepseek-ai/dsh-command-feedback` |
 | `goal` | `@deepseek-ai/dsh-goal` |
@@ -257,17 +311,41 @@ flowchart LR
 | `tool-subagent` | `@deepseek-ai/dsh-tool-subagent` |
 | `tool-subagent-fork` | `@deepseek-ai/dsh-tool-subagent` |
 | `ptc-runtime` | `@deepseek-ai/dsh-ptc-runtime-node` |
+| `workflow-journal` | `@deepseek-ai/dsh-workflow-journal` |
 | `workflow-ptc` | `@deepseek-ai/dsh-workflow-ptc` |
 | `tool-workflow` | `@deepseek-ai/dsh-tool-workflow` |
 | `timeout-policy` | `@deepseek-ai/dsh-tool-call-timeout-policy` |
+| `command-gate` | `@deepseek-ai/dsh-command-gate` |
 | `spill-local` | `@deepseek-ai/dsh-spill-local` |
 | `spill-policy` | `@deepseek-ai/dsh-spill-policy` |
 | `session-checkpoint-policy` | `@deepseek-ai/dsh-session-checkpoint-policy` |
 | `tool-result-pruner` | `@deepseek-ai/dsh-compaction-tool-result-pruner` |
 | `image-offload` | `@deepseek-ai/dsh-compaction-image-offload` |
 | `tool-todo` | `@deepseek-ai/dsh-tool-todo` |
+| `tool-doctor` | `@deepseek-ai/dsh-doctor/tools` |
+| `tool-session-usage` | `@deepseek-ai/dsh-session-usage/tools` |
+| `tool-research` | `@deepseek-ai/dsh-research/tools` |
+| `tool-memory` | `@deepseek-ai/dsh-memory/tools` |
+| `tool-knowledge` | `@deepseek-ai/dsh-knowledge/tools` |
+| `tool-off-peak` | `@deepseek-ai/dsh-off-peak/tools` |
 | `tool-goal` | `@deepseek-ai/dsh-tool-goal` |
+| `goal-resume-on-open` | `@deepseek-ai/dsh-goal-resume-on-open` |
+| `goal-supervisor` | `@deepseek-ai/dsh-goal-supervisor` |
+| `goal-evaluator` | `@deepseek-ai/dsh-goal-evaluator` |
+| `research` | `@deepseek-ai/dsh-research` |
+| `market-data` | `@deepseek-ai/dsh-market-data` |
+| `tool-market` | `@deepseek-ai/dsh-tool-market` |
+| `digest` | `@deepseek-ai/dsh-digest` |
+| `doctor` | `@deepseek-ai/dsh-doctor` |
+| `cron-sessions` | `@deepseek-ai/dsh-cron-sessions` |
+| `off-peak` | `@deepseek-ai/dsh-off-peak` |
+| `spend-guard` | `@deepseek-ai/dsh-spend-guard` |
+| `notify` | `@deepseek-ai/dsh-notify` |
+| `memory` | `@deepseek-ai/dsh-memory` |
+| `knowledge` | `@deepseek-ai/dsh-knowledge` |
+| `learning` | `@deepseek-ai/dsh-learning` |
 | `tool-ralph` | `@deepseek-ai/dsh-tool-ralph` |
+| `auto-continue` | `@deepseek-ai/dsh-auto-continue` |
 | `repeat-tool-reminder` | `@deepseek-ai/dsh-repeat-tool-reminder` |
 | `web` | `@deepseek-ai/dsh-web` |
 | `web-search-deepseek` | `@deepseek-ai/dsh-web-search-deepseek` |

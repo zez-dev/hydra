@@ -645,6 +645,35 @@ listDescendants(rootSessionId: SessionId, signal?: AbortSignal): Promise<Subagen
 @Remote('prompt') async prompt(request: SubagentPromptRequest, signal: AbortSignal): Promise<SubagentPromptReceipt>
 
 /**
+ * List the slash commands a continuable direct child resolves, under its
+ * durable parent address. A cold child is materialized for the listing and
+ * released again.
+ * @param parentSessionId - durable direct parent whose authority is claimed.
+ * @param childSessionId - durable child session whose commands are listed.
+ * @param signal - cancellation owned by the browser request.
+ * @returns the child's name-sorted command descriptors.
+ * @throws {RemoteError} `gateway/bad-request` for an empty id,
+ *   `subagent/parent-unavailable` when the parent is not live,
+ *   `subagent/unauthorized` when the parent does not own the child,
+ *   `subagent/not-resumable` for a child without continuation state,
+ *   `subagent/delivery-unavailable` when no command runtime is composed.
+ */
+@Remote('commands') async remoteCommands( parentSessionId: SessionId, childSessionId: SessionId, signal: AbortSignal, ): Promise<readonly CommandDescriptor[]>
+
+/**
+ * Run one slash command on a continuable direct child under its durable
+ * parent address, the way the composer runs one on an ordinary session: the
+ * child's own command view resolves it and its log records the lifecycle.
+ * @param parentSessionId - durable direct parent whose authority is claimed.
+ * @param childSessionId - durable child session the command runs on.
+ * @param line - complete slash-command line.
+ * @param signal - cancellation owned by the browser request.
+ * @returns the settled execution, or `undefined` when the line names no command.
+ * @throws {RemoteError} as {@link remoteCommands}.
+ */
+@Remote('command') async remoteCommand( parentSessionId: SessionId, childSessionId: SessionId, line: string, signal: AbortSignal, ): Promise<CommandExecution | undefined>
+
+/**
  * Remote face of {@link interrupt} under one durable parent address. No
  * catalog, history, persistence, or parent Agent lookup runs: the core
  * primitive alone authorizes the address against the live Activation, which
@@ -697,7 +726,7 @@ list(): string[]
 async start(name: string, request: SubagentStartRequest): Promise<SubagentRun>
 ```
 
-Types: [Agent](core.zh.md) · [ContentBlock](llm-streaming.zh.md) · [MessageId](llm-streaming.zh.md) · [SessionId](core.zh.md)
+Types: [Agent](core.zh.md) · [CommandDescriptor](commands.zh.md) · [ContentBlock](llm-streaming.zh.md) · [MessageId](llm-streaming.zh.md) · [SessionId](core.zh.md)
 
 Source: [`packages/subagent/subagent/src/index.ts`](../../packages/subagent/subagent/src/index.ts)
 

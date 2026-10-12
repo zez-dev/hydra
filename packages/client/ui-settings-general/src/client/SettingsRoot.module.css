@@ -100,14 +100,15 @@
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-/* Nav rail (figma .Setting-nav 501:29958): 188 wide, pad (12,22,12,0),
-   gap 18, no own fill — the panel white shows through. */
+/* Nav rail (figma .Setting-nav 501:29958): pad (12,22,12,0), gap 18, no own
+   fill — the panel white shows through. 204 wide instead of the figma 188 so
+   the longest English label, "Archived sessions", fits without an ellipsis. */
 .nav {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 18px;
-  width: 188px;
+  width: 204px;
   padding: 22px 12px 0;
   box-sizing: border-box;
 }
@@ -153,8 +154,17 @@
   background: var(--dsw-specific-sidebar-nav-item-hover);
 }
 
+/* The open section: an ember tint and a 2px ember bar at the leading edge,
+   like the sidebar's open session. */
 .navCell.active {
-  background: var(--dsw-specific-sidebar-nav-item-active);
+  background: var(--dsw-alias-interactive-bg-active);
+  box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .navCell {
+    transition: background-color 120ms var(--ds-ease-in-out), box-shadow 160ms var(--ds-ease-in-out);
+  }
 }
 
 .navIcon {

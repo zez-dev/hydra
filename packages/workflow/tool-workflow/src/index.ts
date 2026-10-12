@@ -17,8 +17,9 @@ import type { ToolCallView, ToolResultView } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionEventMap } from '@deepseek-ai/dsh-session'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import type {
-  WorkflowResult, WorkflowRun, WorkflowRunId, WorkflowStopReason,
+  WorkflowResult, WorkflowRun, WorkflowStopReason,
 } from '@deepseek-ai/dsh-workflow'
 import type {
   ToolWorkflowAgentEndData, ToolWorkflowAgentStartData,
@@ -146,7 +147,9 @@ Script-body hooks:
 
 Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item \`null\`.
 
-Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.`
+Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.
+
+If a run was cut off partway, call again with the same script and args plus \`resumeRunId\` set to the earlier run's id: every agent() call that already completed with the same prompt and route returns its recorded answer immediately, and only the remaining work runs.`
 
 type WorkflowCallArgs = {
   script: string
@@ -157,6 +160,7 @@ type WorkflowCallArgs = {
     phases?: { title: string; detail?: string; provider?: string; model?: string }[]
   }
   args?: Record<string, unknown>
+  resumeRunId?: string
 }
 
 /** The pending-state card: a generic card titled by the workflow's meta name. */
@@ -252,6 +256,10 @@ export function apply(ctx: Context, config: Config): void {
         additionalProperties: true,
         description: 'Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {"files": [...]}).',
       },
+      resumeRunId: {
+        type: 'string',
+        description: 'Optional id of an earlier run to resume: agent() calls at the same position with the same prompt and route reuse that run\'s recorded results instead of running again, and everything else runs for real. Pass the same script and args you ran before.',
+      },
     },
     output: {
       schema: {
@@ -284,6 +292,7 @@ export function apply(ctx: Context, config: Config): void {
         script: args.script,
         meta: args.meta,
         ...args.args !== undefined ? { args: args.args } : {},
+        ...args.resumeRunId !== undefined ? { resumeRunId: WorkflowRunId(args.resumeRunId) } : {},
         parent,
         signal: exec.signal,
       })

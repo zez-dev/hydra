@@ -31,6 +31,8 @@ import {
 } from '@deepseek-ai/dsh-typert-protocol'
 import SessionController from '../src/index.ts'
 import type {
+  SessionDeleteRequest,
+  SessionDeleteValue,
   ModelCatalog,
   SessionAttachmentRequest,
   SessionAttachmentValue,
@@ -41,6 +43,8 @@ import type {
   SessionCreateValue,
   SessionForkRequest,
   SessionForkValue,
+  SessionRewindRequest,
+  SessionRewindValue,
   SessionFollowFrame,
   SessionFollowRequest,
   SessionListRequest,
@@ -71,6 +75,8 @@ export interface TestSessionRemote {
   modelCatalog(): Promise<RemoteResult<ModelCatalog>>
   rename(request: SessionRenameRequest): Promise<RemoteResult<SessionRenameValue>>
   fork(request: SessionForkRequest): Promise<RemoteResult<SessionForkValue>>
+  rewind(request: SessionRewindRequest): Promise<RemoteResult<SessionRewindValue>>
+  delete(request: SessionDeleteRequest): Promise<RemoteResult<SessionDeleteValue>>
   prompt(request: SessionPromptRequest, signal?: AbortSignal): Promise<RemoteResult<SessionPromptValue>>
   attachment(request: SessionAttachmentRequest): Promise<RemoteResult<SessionAttachmentValue>>
   updateQueue(request: SessionUpdateQueueRequest): Promise<RemoteResult<SessionUpdateQueueValue>>
@@ -345,6 +351,8 @@ export function createSessionTestRemote(
     modelCatalog: () => remoteResult(() => direct.modelCatalog()),
     rename: request => remoteResult(() => direct.rename(request)),
     fork: request => remoteResult(() => direct.fork(request)),
+    rewind: request => remoteResult(() => direct.rewind(request)),
+    delete: request => remoteResult(() => direct.delete(request)),
     prompt: (request, signal = new AbortController().signal) => remoteResult(
       () => direct.prompt(request, signal),
       signal,

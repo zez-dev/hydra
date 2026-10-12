@@ -576,7 +576,9 @@ describe('tab switching in ConversationRoot', () => {
     const view = mount(b)
     fireEvent.click(screen.getByRole('tab', { name: 'Trajectory' }))
 
-    expect(screen.getByText('轮次之间')).toBeTruthy()
+    // The gutter shows the short label; the full one names it and is its tooltip.
+    expect(screen.getByLabelText('轮次之间').textContent).toBe('空闲')
+    expect(screen.getByLabelText('轮次之间').getAttribute('title')).toBe('轮次之间')
     expect(view.container.textContent).not.toContain('Turn null')
 
     fireEvent.click(screen.getByRole('button', { name: '请求 #2 · 压缩' }))
@@ -632,8 +634,8 @@ describe('tab switching in ConversationRoot', () => {
     const secondRequest = screen.getByRole('button', { name: '请求 #4 · 压缩' })
     const firstSection = firstRequest.closest('tr')?.querySelector('span')
     const secondSection = secondRequest.closest('tr')?.querySelector('span')
-    expect(firstSection?.textContent).toBe('轮次之间')
-    expect(secondSection?.textContent).toBe('轮次之间')
+    expect(firstSection?.textContent).toBe('空闲')
+    expect(secondSection?.getAttribute('aria-label')).toBe('轮次之间')
 
     fireEvent.click(firstRequest)
     expect(firstSection?.className).toMatch(/turnLabelActive/)

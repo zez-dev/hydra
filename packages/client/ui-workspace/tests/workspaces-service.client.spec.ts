@@ -13,7 +13,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
-import { DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigation.ts'
+import { CREATE_SESSION_TIMEOUT_MS, DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigation.ts'
 
 const sid = (id: string): SessionId => SessionId(id)
 const wid = (id: string): WorkspaceId => id as WorkspaceId
@@ -130,6 +130,8 @@ class FakeSessions implements ISessions {
   readonly list: MutableSource<SessionListState>
   readonly create: ReturnType<typeof vi.fn<ISessions['create']>>
   readonly fork = vi.fn<ISessions['fork']>(async () => sid('forked'))
+  readonly rewind = vi.fn<ISessions['rewind']>(async opts => ({ sessionId: opts.sessionId }))
+  readonly delete = vi.fn<ISessions['delete']>(async opts => [opts.sessionId])
   readonly retained: RetainedSession[] = []
   readonly refreshSubagents = vi.fn<ISessions['refreshSubagents']>(() => Promise.resolve())
   readonly retain = vi.fn<ISessions['retain']>((target) => {
@@ -315,6 +317,28 @@ describe('UiWorkspaceService', () => {
     expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('newer'), { source: 'mainView' })
     expect(prepareB).toHaveBeenCalledExactlyOnceWith(sid('newer'))
     expect(prepareA).not.toHaveBeenCalled()
+  })
+
+  it('starts a fresh request after the Host never answers, instead of reusing the dead attempt', async () => {
+    vi.useFakeTimers()
+    try {
+      const b = bench({ workspaces: workspaceState([workspace('a')]) })
+      const unanswered = Promise.withResolvers<SessionId>()
+      b.sessions.create.mockReturnValueOnce(unanswered.promise)
+      const stuck = b.uiWorkspace.connectWorkspace(wid('a'))
+      const rejected = expect(stuck).rejects.toThrow(/did not answer session create/)
+      await vi.advanceTimersByTimeAsync(CREATE_SESSION_TIMEOUT_MS)
+      await rejected
+      // The wedge this guards: the in-flight entry is keyed by Workspace and
+      // clears only when the attempt settles, so an unbounded request left
+      // every later click returning that same never-settling promise.
+      b.sessions.create.mockResolvedValueOnce(sid('fresh'))
+      await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('fresh'))
+      expect(b.sessions.create).toHaveBeenCalledTimes(2)
+      unanswered.resolve(sid('late'))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not reopen a Workspace after a later panel or Session navigation', async () => {
@@ -570,6 +594,25 @@ describe('UiWorkspaceService', () => {
     expect(b.selectPanel).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps a Session selected when it was already archived as it was opened', () => {
+    const b = bench({ workspaces: workspaceState([], [sid('current')]) })
+    b.uiWorkspace.openSession(sid('current'))
+
+    b.workspaces.list.set(workspaceState([], [sid('current'), sid('other')]))
+
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
+  })
+
+  it('clears a revealed archived selection once it has left and re-entered the archive set', () => {
+    const b = bench({ workspaces: workspaceState([], [sid('current')]) })
+    b.uiWorkspace.openSession(sid('current'))
+
+    b.workspaces.list.set(workspaceState([], []))
+    b.workspaces.list.set(workspaceState([], [sid('current')]))
+
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+  })
+
   it('clears a selected Session after archiving it without an intervening snapshot', async () => {
     const b = bench()
     b.workspaces.onArchive = async () => {}
@@ -579,6 +622,32 @@ describe('UiWorkspaceService', () => {
 
     expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
     expect(b.selectPanel).toHaveBeenCalledTimes(2)
+  })
+
+  it('deletes a Session through the Session Controller and closes it when it is the open one', async () => {
+    const b = bench()
+    b.uiWorkspace.openSession(sid('current'))
+    await expect(b.uiWorkspace.deleteSession(sid('other'), { cascade: false })).resolves.toEqual({ kind: 'deleted' })
+    expect(b.sessions.retained[0]!.release).not.toHaveBeenCalled()
+    await expect(b.uiWorkspace.deleteSession(sid('current'), { cascade: true })).resolves.toEqual({ kind: 'deleted' })
+    expect(b.sessions.delete).toHaveBeenLastCalledWith({ sessionId: sid('current'), cascade: true })
+    expect(b.sessions.retained[0]!.release).toHaveBeenCalledOnce()
+  })
+
+  it('reports every refused or failed delete as a failure with its message', async () => {
+    const b = bench()
+    const refusal = (message: string, rpcError?: object) => Object.assign(new Error(message), {
+      name: 'SessionDeleteError', ...rpcError === undefined ? {} : { rpcError },
+    })
+    const target = sid('parent')
+    b.sessions.delete.mockRejectedValueOnce(refusal('owned by another writer', { code: 'session/owned' }))
+    await expect(b.uiWorkspace.deleteSession(target, { cascade: false })).resolves.toEqual({ kind: 'failed', message: 'owned by another writer' })
+    b.sessions.delete.mockRejectedValueOnce(refusal('no rpc failure'))
+    await expect(b.uiWorkspace.deleteSession(target, { cascade: false })).resolves.toEqual({ kind: 'failed', message: 'no rpc failure' })
+    b.sessions.delete.mockRejectedValueOnce(new Error('network down'))
+    await expect(b.uiWorkspace.deleteSession(target, { cascade: false })).resolves.toEqual({ kind: 'failed', message: 'network down' })
+    b.sessions.delete.mockRejectedValueOnce('offline')
+    await expect(b.uiWorkspace.deleteSession(target, { cascade: false })).resolves.toEqual({ kind: 'failed', message: 'offline' })
   })
 
   it('forwards archive commands and preserves failures', async () => {

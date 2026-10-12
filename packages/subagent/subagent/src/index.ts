@@ -38,6 +38,8 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock, MessageId, MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { CommandDescriptor, CommandExecution } from '@deepseek-ai/dsh-commands/types'
+import type CommandRuntime from '@deepseek-ai/dsh-commands'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -492,6 +494,73 @@ export class SubagentRuntime extends TypertRemoteService {
           delivery,
         ),
       }
+    } catch (error: unknown) {
+      return rejectPrompt(error, childSessionId, signal)
+    }
+  }
+
+  /**
+   * List the slash commands a continuable direct child resolves, under its
+   * durable parent address. A cold child is materialized for the listing and
+   * released again.
+   * @param parentSessionId - durable direct parent whose authority is claimed.
+   * @param childSessionId - durable child session whose commands are listed.
+   * @param signal - cancellation owned by the browser request.
+   * @returns the child's name-sorted command descriptors.
+   * @throws {RemoteError} `gateway/bad-request` for an empty id,
+   *   `subagent/parent-unavailable` when the parent is not live,
+   *   `subagent/unauthorized` when the parent does not own the child,
+   *   `subagent/not-resumable` for a child without continuation state,
+   *   `subagent/delivery-unavailable` when no command runtime is composed.
+   */
+  @Remote('commands')
+  async remoteCommands(
+    parentSessionId: SessionId,
+    childSessionId: SessionId,
+    signal: AbortSignal,
+  ): Promise<readonly CommandDescriptor[]> {
+    return this.onChild(parentSessionId, childSessionId, signal, (child, commands) => Promise.resolve(commands.list(child)))
+  }
+
+  /**
+   * Run one slash command on a continuable direct child under its durable
+   * parent address, the way the composer runs one on an ordinary session: the
+   * child's own command view resolves it and its log records the lifecycle.
+   * @param parentSessionId - durable direct parent whose authority is claimed.
+   * @param childSessionId - durable child session the command runs on.
+   * @param line - complete slash-command line.
+   * @param signal - cancellation owned by the browser request.
+   * @returns the settled execution, or `undefined` when the line names no command.
+   * @throws {RemoteError} as {@link remoteCommands}.
+   */
+  @Remote('command')
+  async remoteCommand(
+    parentSessionId: SessionId,
+    childSessionId: SessionId,
+    line: string,
+    signal: AbortSignal,
+  ): Promise<CommandExecution | undefined> {
+    return this.onChild(parentSessionId, childSessionId, signal, (child, commands) => commands.execute(child, line, [], signal))
+  }
+
+  /** Authorize an operation on a child and run it on the child's Agent with the command runtime. */
+  private async onChild<T>(
+    parentSessionId: SessionId,
+    childSessionId: SessionId,
+    signal: AbortSignal,
+    run: (child: Agent, commands: CommandRuntime) => Promise<T>,
+  ): Promise<T> {
+    validateControlRequest('subagent.command', { parentSessionId, childSessionId })
+    const commands = this.ctx.get('commands')
+    if (commands === undefined) {
+      throw new RemoteError('subagent/delivery-unavailable', 'no command runtime is composed', { childSessionId })
+    }
+    const parent = this.ctx.get('agents')?.get(parentSessionId)
+    if (parent === undefined) {
+      throw new RemoteError('subagent/parent-unavailable', `parent session "${parentSessionId}" is not live`, { parentSessionId })
+    }
+    try {
+      return await this.requireContinuations().withChildAgent(parent, childSessionId, signal, child => run(child, commands))
     } catch (error: unknown) {
       return rejectPrompt(error, childSessionId, signal)
     }

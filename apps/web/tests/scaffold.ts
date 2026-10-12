@@ -114,7 +114,7 @@ export const WELCOME_NOTICE_VERSION = '2026-08-13.1'
 export const WELCOME_NOTICE_COPY = {
   zh: {
     title: '内测声明',
-    body: 'DeepSeek Harness 目前的 0.1 版本仍处在面向 Harness 开发者进行测试的阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者的反馈建议。预计 DeepSeek Harness 的核心插件以及基础 API 都会在接下来的一段时间内快速迭代、持续演化。\n\n我们期待与全球开发者一起，在开源、开放、可复用、可组合的基础设施之上，共同探索智能上限。欢迎全球 Harness 开发者加入 DSH 插件生态。',
+    body: 'Hydra 目前的 0.1 版本仍处在面向 Harness 开发者进行测试的阶段，还有许多地方需要持续改进和打磨，希望听取广大开发者的反馈建议。预计 DeepSeek Harness 的核心插件以及基础 API 都会在接下来的一段时间内快速迭代、持续演化。\n\n我们期待与全球开发者一起，在开源、开放、可复用、可组合的基础设施之上，共同探索智能上限。欢迎全球 Harness 开发者加入 DSH 插件生态。',
     continueLabel: '继续',
   },
 } as const
@@ -551,6 +551,22 @@ export async function launchWebScaffold(options: LaunchOptions = {}): Promise<We
     // Without HMR the profile applies configuration changes at its next start.
     ...options.profile?.hmr === false ? [{ id: 'hmr', disabled: true }] : [],
     { id: 'session-log-deepseek', config: { enabled: false } },
+    // The learning review is one more model request after a turn with tool
+    // calls; a recorded scenario's replay script has no answer for it and it
+    // would take the next turn's script. An overlay replaces the row's whole
+    // config, so the shipped values are kept and only the review is off;
+    // scenarios that test learning opt in through `extraOverlayPatches`.
+    {
+      id: 'learning',
+      config: {
+        ...(composedRows.find(row => row.id === 'learning')?.config as Record<string, unknown> | undefined),
+        reviewTurns: false,
+      },
+    },
+    // The goal evaluator gates every `update_goal` completion on one more
+    // model request, which a recorded script cannot answer either; the
+    // evaluator's own scenarios opt in the same way.
+    { id: 'goal-evaluator', disabled: true },
     // The historical Messages fixture retains its recorded route during replay;
     // live configuration uses the shared DeepSeek route. Explicit overlays win.
     ...messages
@@ -1540,6 +1556,26 @@ export async function captureStableAria(
 }
 
 /**
+ * Land the conversation on its floor with follow restored: click Back to
+ * bottom while it shows, until the scrollport sits on its floor with no
+ * control left. A click scrolls its target into view only when the chat's
+ * follow has already moved it off screen, so a capture after clicks inside
+ * grown content otherwise depends on that timing.
+ * @param page - the page under test.
+ * @param timeout - poll budget in milliseconds.
+ */
+export async function settleConversationAtBottom(page: Page, timeout = 10_000): Promise<void> {
+  const scrollport = page.locator('[data-conversation-scroll]')
+  const backToBottom = page.getByRole('button', { name: 'Back to bottom', exact: true })
+  await expect.poll(async () => {
+    if (await backToBottom.count() > 0) await backToBottom.click()
+    const atFloor = await scrollport.evaluate((host: HTMLElement) =>
+      Math.abs(host.scrollHeight - host.clientHeight - host.scrollTop) <= 1)
+    return await backToBottom.count() === 0 && atFloor
+  }, { timeout }).toBe(true)
+}
+
+/**
  * Capture a stable aria snapshot with every eligible Turn process expanded,
  * then restore the controls that were closed before the capture.
  * @param page - the page under test.
@@ -1565,17 +1601,7 @@ export async function captureExpandedTurnProcessAria(
     opened.push(index)
   }
   try {
-    if (options.scrollToBottom === true) {
-      const backToBottom = page.getByRole('button', { name: 'Back to bottom', exact: true })
-      const scroll = page.locator('[data-conversation-scroll]')
-      await expect.poll(async () => {
-        const distanceFromBottom = await scroll.evaluate((host) => {
-          host.scrollTop = host.scrollHeight
-          return host.scrollHeight - host.clientHeight - host.scrollTop
-        })
-        return Math.abs(distanceFromBottom) <= 1 && await backToBottom.count() === 0
-      }, { timeout: 10_000 }).toBe(true)
-    }
+    if (options.scrollToBottom === true) await settleConversationAtBottom(page)
     return await captureStableAria(page, selector, workspaceCwd)
   } finally {
     for (const index of opened.reverse()) {

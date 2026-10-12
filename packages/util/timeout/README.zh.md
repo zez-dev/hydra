@@ -71,7 +71,7 @@ using watchdog = idleWatchdog(upstream, idleMs, 'LLM_STREAM_IDLE_TIMEOUT')
 const next = await watchdog.next(providerIterator)    // timer runs only while this read is outstanding
 ```
 
-timer 只在某个迭代器 `next()` 尚未完成时启动，并会因不产生值的传输活动通过 `pulse()` 重新启动，因此读取之间的消费方处理时间绝不计入空闲。间隔必须为正有限数，且不得大于 `MAX_TIMER_DELAY_MS`。
+timer 只在某个迭代器 `next()` 尚未完成时启动，并会因不产生值的传输活动通过 `pulse()` 重新启动，因此读取之间的消费方处理时间绝不计入空闲。间隔必须为正有限数，且不得大于 `MAX_TIMER_DELAY_MS`。可选的 `firstTimeoutMs` 为第一次读取单独设置预算，适用于在准备第一个结果时保持静默的生产方；调用方重新打开生产方的数据源后，`restart()` 让下一次读取重新使用该预算。
 
 ### 哪些操作不设置超时
 

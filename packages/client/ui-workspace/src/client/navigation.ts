@@ -14,7 +14,30 @@ import type {
   IWorkspaces, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SessionDeleteOutcome } from './contract/slots.ts'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+
+/**
+ * Deadline after which a session-create attempt is treated as unanswered.
+ *
+ * A browser `fetch` has no timeout of its own, so a half-open connection — the
+ * Host restarted under an open page, or the machine suspended — leaves the
+ * request pending forever. The in-flight entry keyed by Workspace clears in
+ * `.finally()`, which never runs for a promise that never settles, so an
+ * unbounded attempt leaves every later New Session click returning that same
+ * dead promise for the life of the page.
+ *
+ * This bounds only what the page waits for. `session.create` takes no
+ * cancellation, so a late answer still creates the Session on the Host; the
+ * catalog then lists it and the person can open it. That is the deliberate
+ * trade: a duplicate Session beats a button that never works again.
+ *
+ * The value sits far above any legitimate create because it exists to
+ * guarantee settlement, not to be brisk: a first create activates the
+ * Workspace's agent preset, and an `mcp-client` row there blocks on its first
+ * connection for up to the MCP SDK's own 60s request timeout.
+ */
+export const CREATE_SESSION_TIMEOUT_MS = 120_000
 
 interface MainSelection {
   readonly sessionId?: SessionId
@@ -63,6 +86,13 @@ export interface UiWorkspace {
    */
   unarchiveSession(sessionId: SessionId): Promise<void>
   /**
+   * Delete a Session permanently and clear it when it is the current selection.
+   * @param sessionId - Session to delete.
+   * @param options - whether fork descendants are deleted too; sub-agent Sessions it started always are.
+   * @returns the outcome the delete dialog renders.
+   */
+  deleteSession(sessionId: SessionId, options: { cascade: boolean }): Promise<SessionDeleteOutcome>
+  /**
    * Open the Host-native directory picker.
    * @returns the selected directory, or null when cancelled.
    */
@@ -108,6 +138,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
   private mainReference: SessionReference | undefined
+  /** Selection the operator opened while it was already archived; exempt from archive clearing. */
+  private revealedArchived: SessionId | undefined
 
   /**
    * @param ctx - Client root Context.
@@ -152,10 +184,37 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         && !archived.includes(summary.id)) return summary.id
     }
 
-    const attempt = this.sessions.create({ workspaceId })
+    const attempt = this.createWithinDeadline(workspaceId)
       .finally(() => { this.connecting.delete(workspaceId) })
     this.connecting.set(workspaceId, attempt)
     return attempt
+  }
+
+  /**
+   * Await one create, giving up on an answer after {@link CREATE_SESSION_TIMEOUT_MS}.
+   * @param workspaceId - Workspace the Session belongs to.
+   * @returns the created Session id.
+   * @throws when no answer arrives before the deadline, so the caller's
+   *   in-flight entry always clears and a later attempt starts a fresh request.
+   */
+  private async createWithinDeadline(workspaceId: WorkspaceId): Promise<SessionId> {
+    const request = this.sessions.create({ workspaceId })
+    request.catch(() => {
+      // A rejection arriving after the deadline has no awaiter left, and an
+      // unobserved rejection is reported to the page as an unhandled one.
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([request, new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => { reject(new Error(`ui-workspace: the Host did not answer session create within ${CREATE_SESSION_TIMEOUT_MS}ms`)) },
+          CREATE_SESSION_TIMEOUT_MS,
+        )
+      })])
+    } finally {
+      // The deadline's executor ran synchronously inside `Promise.race`, so the timer is set.
+      clearTimeout(timer)
+    }
   }
 
   openSession(target: SessionTarget): void {
@@ -202,6 +261,16 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   async unarchiveSession(sessionId: SessionId): Promise<void> {
     await this.workspaces.unarchiveSession(sessionId)
+  }
+
+  async deleteSession(sessionId: SessionId, options: { cascade: boolean }): Promise<SessionDeleteOutcome> {
+    try {
+      await this.sessions.delete({ sessionId, cascade: options.cascade })
+    } catch (error) {
+      return { kind: 'failed', message: error instanceof Error ? error.message : String(error) }
+    }
+    if (this.mainReference?.sessionId === sessionId) this.clearMain()
+    return { kind: 'deleted' }
   }
 
   async pickDirectory(): Promise<string | null> {
@@ -283,11 +352,20 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     }
   }
 
-  /** @returns true when an archived current selection was cleared. */
+  /**
+   * Archiving a Session drops it from the main view, except when the operator
+   * opened it from a revealed archived row: that selection is deliberate, and
+   * its exemption lapses as soon as the Session leaves the archive set.
+   * @returns true when an archived current selection was cleared.
+   */
   private clearArchivedCurrent(): boolean {
+    const archivedSessionIds = this.workspaces.list.getSnapshot().archivedSessionIds
+    if (this.revealedArchived !== undefined && !archivedSessionIds.includes(this.revealedArchived)) {
+      this.revealedArchived = undefined
+    }
     const current = this.mainReference?.sessionId
-    if (current === undefined
-      || !this.workspaces.list.getSnapshot().archivedSessionIds.includes(current)) return false
+    if (current === undefined || current === this.revealedArchived
+      || !archivedSessionIds.includes(current)) return false
     this.clearMain()
     return true
   }
@@ -295,6 +373,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   private clearMain(): void {
     const previous = this.mainReference
     this.mainReference = undefined
+    this.revealedArchived = undefined
     this.selection.set({})
     previous?.release()
     this.ctx.layout.selectPanel(null)
@@ -314,6 +393,10 @@ class UiWorkspaceService extends Service implements UiWorkspace {
         reference.release()
         return
       }
+      this.revealedArchived = this.workspaces.list.getSnapshot()
+        .archivedSessionIds.includes(reference.sessionId)
+        ? reference.sessionId
+        : undefined
       const subagentAddress = typeof target === 'string'
         ? this.sessions.subagentAddress(reference.sessionId)
         : target

@@ -266,3 +266,37 @@ export function createToolResultMessage(input: ToolResultMessageInput): ToolResu
     }],
   })
 }
+
+/**
+ * Create one plugin's recall message: a user message holding one text block,
+ * sourced to the plugin in `recall` form.
+ * @param plugin - the producing plugin's name.
+ * @param text - the recalled material.
+ * @returns an immutable user message with a fresh stable identity.
+ */
+export function createPluginRecallMessage(plugin: string, text: string): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: 'plugin', plugin, form: 'recall' },
+  })
+}
+
+/**
+ * Whether a message is one plugin's recall message.
+ * @param message - any message.
+ * @param plugin - the producing plugin's name.
+ * @returns true for a `plugin` source that names `plugin` and declares the `recall` form.
+ */
+export function isPluginRecallMessage(message: Message, plugin: string): boolean {
+  const source = message.source
+  return source.kind === 'plugin' && source.plugin === plugin && source.form === 'recall'
+}
+
+/**
+ * The text of a message's text blocks, concatenated without separators.
+ * @param message - any message.
+ * @returns the text; empty when the message holds no text block.
+ */
+export function messageText(message: Message): string {
+  return message.content.filter(block => block.type === 'text').map(block => block.text).join('')
+}

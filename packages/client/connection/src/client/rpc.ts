@@ -40,15 +40,22 @@ export function createWebConnectionRpc(doFetch?: RpcFetch, openStream?: RpcStrea
         method: endpoint,
         payload,
       }
-      const response = await send(
-        new URL(`${channel}/${endpoint}`, resolveBase()),
-        {
+      const url = new URL(`${channel}/${endpoint}`, resolveBase())
+      let response: Response
+      try {
+        response = await send(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(message),
           ...signal === undefined ? {} : { signal },
-        },
-      )
+        })
+      } catch (error) {
+        // `fetch` rejects with a TypeError only when the request never reached
+        // a server. Tag that one case so a consumer can tell it from every
+        // other throw; an abort or an injected fault keeps its own identity.
+        if (error instanceof TypeError) throw unreachable(channel, endpoint, error)
+        throw error
+      }
       if (!response.ok) {
         throw new Error(`transport failure for ${channel}/${endpoint}: HTTP ${response.status}`)
       }
@@ -103,6 +110,28 @@ function parseConnectionResponse(value: unknown): {
 
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The `code` a carrier throw carries when the request never reached a server. */
+export type ConnectionUnreachableCode = 'connection/unreachable'
+
+/** Runtime value of {@link ConnectionUnreachableCode}. */
+export const CONNECTION_UNREACHABLE_CODE: ConnectionUnreachableCode = 'connection/unreachable'
+
+/**
+ * Wrap a transport-level rejection so a consumer can recognize "nothing
+ * answered" structurally, by `code`, without importing this package's values;
+ * the client-bundle purity gate forbids value imports across client plugins.
+ * @param channel - the channel that was called.
+ * @param endpoint - the `<namespace>/<method>` that was called.
+ * @param cause - what `fetch` rejected with.
+ * @returns the tagged error, carrying the original as `cause`.
+ */
+function unreachable(channel: string, endpoint: string, cause: unknown): Error {
+  return Object.assign(
+    new Error(`connection: ${channel}/${endpoint} never reached a server`, { cause }),
+    { code: CONNECTION_UNREACHABLE_CODE },
+  )
 }
 
 function resolveBase(): string {

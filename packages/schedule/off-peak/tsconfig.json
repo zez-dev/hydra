@@ -1,0 +1,26 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    { "path": "../../../vendor/cosmokit" },
+    { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/schemastery" },
+    { "path": "../../util/brand" },
+    { "path": "../../core/agent" },
+    { "path": "../../core/agent-default-model" },
+    { "path": "../../core/session" },
+    { "path": "../../core/tools" },
+    { "path": "../../llm/llm" },
+    { "path": "../../goal/goal" },
+    { "path": "../../interaction/commands" },
+    { "path": "../../preset/agent-presets" },
+    { "path": "../../storage/storage-domain" },
+    { "path": "../../webhook/notify" }
+  ]
+}

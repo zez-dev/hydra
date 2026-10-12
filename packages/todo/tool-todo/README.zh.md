@@ -44,6 +44,8 @@ kind: "package-reference"
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `allowParallelInProgress` | 必填 | 是否允许多个 todo 同时处于 `in_progress`；同时选择模型描述中的活跃状态条款 |
+| `remindOpenTodos` | `true` | 当模型看不到其最新列表（检查点之后），或上一轮次以错误、取消或输出上限结束时，是否以任务状态消息重新提供未完成任务 |
+| `maxOpenTodoContinuationsPerTurn` | `0` | 写入过列表且以未完成任务结束的轮次被要求继续或更新列表的次数；默认关闭，因为轮次常常有意只留下计划就停止 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-todo)是每个受支持字段的穷尽式真源。
 
@@ -91,7 +93,7 @@ agent 每次更新都发送完整列表；新列表替换旧列表，因此没�
 
 ### 会话投影
 
-当组合挂载 `ctx.sessionProjections`（[`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.zh.md)）时，本包在注入的子插件中注册 `todos` 单元：投影即有效计划——最新的整份 `todo/write` 列表，首次写入前为 `null`，下一轮次开始时清空，而 `turn/end` 保留刚完成的清单。该键在此处合并进 `SessionProjectionMap`；载体通过历史尾页与 `session/projection` 推送帧提供该值。未挂载注册表的组合不受影响；单元注册见 [src/index.ts](src/index.ts)。
+当组合挂载 `ctx.sessionProjections`（[`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.zh.md)）时，本包在注入的子插件中注册 `todos` 单元：投影即有效计划——最新的整份 `todo/write` 列表，首次写入前为 `null`，全部任务完成后在下一轮次开始时清空，只要仍有未完成任务就跨轮次保留，而 `turn/end` 保留刚完成的清单。该键在此处合并进 `SessionProjectionMap`；载体通过历史尾页与 `session/projection` 推送帧提供该值。未挂载注册表的组合不受影响；单元注册见 [src/index.ts](src/index.ts)。
 
 ### 持久日志不变式
 
@@ -149,6 +151,20 @@ token 用量随模型每次提交的完整列表增长，这些调用参数会�
 #### KV Cache 影响
 
 仅追加；新可见内容位于可复用请求前缀之后，不会使既有 KV-cache 条目失效。
+
+### 未完成任务消息
+
+#### 模型看到什么
+
+两种 `notice` 用户消息，每条只列出未完成任务，格式为 `- [status] content`。当模型看不到其最新列表，或上一轮次未正常完成时，请求前会出现一个 `<task_list>` 块；它要求继续进行中的任务，或在请求已转向时用 `todo_write` 更新列表。当 `maxOpenTodoContinuationsPerTurn` 大于零且写入过列表的轮次以未完成任务停止时，一条继续请求会要求它继续，或在等待用户时更新列表并结束回复。
+
+#### Token 影响
+
+有条件且很小：每个未完成任务一行，仅在上述情况出现；轮次正常完成且最新列表可见时从不出现。
+
+#### KV Cache 影响
+
+仅追加；每条消息位于既有历史之后。
 
 ## 已知限制与延期工作
 

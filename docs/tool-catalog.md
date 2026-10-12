@@ -41,9 +41,12 @@ This table connects model-visible tool names to the plugin package and service s
 | `@deepseek-ai/dsh-tool-subagent-control` | `interrupt_agent`, `list_agents`, `send_message` | `ctx.tools`, `ctx.subagents`, `ctx.agents and ctx.sessionProjections (list_agents only)` | `tool/call`, `tool/result`, `child session events through ctx.subagents` | - | The globally named control tools over continuable background subagents: provider-bound `tool-subagent` instances register distinct delegation tools, while this package registers `send_message` and `interrupt_agent` once, plus `list_agents` from its separately loaded `/list-agents` plugin (whose catalog rows use the sessionProjections and live Agent registries). |
 | `@deepseek-ai/dsh-tool-jobs` | `job_kill`, `job_list`, `job_output` | `ctx.tools`, `ctx.jobs`, `ctx.systemPrompt` | `tool/call`, `tool/result`, `user/message via agent.inject() for background completion notices` | - | The kind-agnostic background-job controller: background bash commands, PTY sends, and subagents are read, listed, and killed through the same three tools. Loading the plugin attaches the controller that arms producers' `ctx.jobs.start()`. |
 | `@deepseek-ai/dsh-experimental-tool-agent-team` | `interrupt_agent`, `list_agents`, `send_message`, `spawn_teammate`, `team_task_create`, `team_task_get`, `team_task_list`, `team_task_update`, `wait_agent` | `ctx.tools`, `ctx.systemPrompt`, `ctx.agentTeams`, `an exact live Team member Agent` | `tool/call`, `team/member`, `team/message/queued`, `team/message/delivered`, `team/task`, `tool/result` | - | All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names. |
+| `@deepseek-ai/dsh-memory` | `memory` | `ctx.tools`, `ctx.memory (the store over dsh-storage-domain)`, `ctx.commands`, `ctx.agents` | `tool/call`, `tool/result`, `memory store rows, which the recall user/message of later steps renders` | - | The memory tool ships as the package's `./tools` entry, mounted apart from the `memory` service, so a composition can hide the tool and keep recall. |
+| `@deepseek-ai/dsh-knowledge` | `knowledge_add`, `knowledge_browse`, `knowledge_read`, `knowledge_search` | `ctx.tools`, `ctx.knowledge (the index over the configured collections)`, `ctx.systemPrompt`, `ctx.commands` | `tool/call`, `tool/result` | - | The knowledge tools ship as the package's `./tools` entry and register nothing until a collection is configured; the `collection` enum lists the configured collection names. |
 | `@deepseek-ai/dsh-tool-todo` | `todo_write` | `ctx.tools`, `owning Agent session` | `tool/call`, `todo/write`, `tool/result` | - | todo_write is session-owned state; UIs render the latest todo/write event as a checklist. `allowParallelInProgress` is required with no default, so the catalog states its choice: `true`, whose description invites several `in_progress` items. A deployment choosing `false` receives the same tool with a description asking for exactly one active task. |
 | `@deepseek-ai/dsh-tool-workflow` | `workflow` | `ctx.tools`, `ctx.workflowEngine`, `ctx.systemPrompt`, `a calling Agent (exec.agent parents the script children)` | `tool/call`, `tool/result` | - | - |
 | `@deepseek-ai/dsh-tool-web` | `web_fetch`, `web_search` | `ctx.tools`, `ctx.web`, `ctx.systemPrompt` | `tool/call`, `tool/result` | - | web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps. |
+| `@deepseek-ai/dsh-tool-market` | `market_filings`, `market_history`, `market_profile`, `market_quote` | `ctx.tools`, `ctx.marketData`, `ctx.commands` | `tool/call`, `tool/result` | - | Every market tool description ends by telling the model the data is historical research material, not investment advice. |
 
 <a id="deepseek-aidsh-plugin-manager"></a>
 
@@ -540,8 +543,7 @@ Execute a TypeScript program against the available tools. Takes two required arg
     }
   },
   "required": [
-    "code",
-    "description"
+    "code"
   ]
 }
 ```
@@ -1543,7 +1545,7 @@ A fixed foreground workflow starts one fresh structured child per round; the mod
 
 ### `skill`
 
-Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.
+Load the full guidance of an available skill. Call this with the exact skill name from the session skill catalog when the user names that skill or the task clearly needs what it offers; adapt its steps to the task instead of following them as fixed rules.
 
 ```json
 {
@@ -2293,6 +2295,189 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names.
 
+<a id="deepseek-aidsh-memory"></a>
+
+## `@deepseek-ai/dsh-memory`
+
+### `memory`
+
+Long-term memory across sessions. `remember` stores a durable fact, shortcut, or preference, or a lesson (a root cause found, an approach that failed and why, a corrected assumption) the user would want later work to know; `search` finds stored entries; `forget` deletes one by id. Entries related to the current work appear in <retrieved_memory>; use one only when its situation matches. Write each entry so it names its situation (the file, command, or component). Never remember plans or progress reports.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "action": {
+      "type": "string",
+      "description": "The operation.",
+      "enum": [
+        "remember",
+        "search",
+        "forget"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "description": "remember: the knowledge to store, one or two sentences."
+    },
+    "kind": {
+      "type": "string",
+      "description": "remember: fact (default), shortcut, or preference.",
+      "enum": [
+        "fact",
+        "shortcut",
+        "preference"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "description": "remember: short lowercase topic tags.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "query": {
+      "type": "string",
+      "description": "search: words matched against entry text and tags, best match first; omit to list everything."
+    },
+    "id": {
+      "type": "string",
+      "description": "forget: the entry id."
+    }
+  },
+  "required": [
+    "action"
+  ]
+}
+```
+
+Source: [`packages/learning/memory/src/tools.ts`](../packages/learning/memory/src/tools.ts)
+
+The memory tool ships as the package's `./tools` entry, mounted apart from the `memory` service, so a composition can hide the tool and keep recall.
+
+<a id="deepseek-aidsh-knowledge"></a>
+
+## `@deepseek-ai/dsh-knowledge`
+
+### `knowledge_add`
+
+Index a folder of documents the user named, so this workspace can search it with the knowledge tools. Call it only when the user asks you to use, read, or learn from a folder of documents; the user approves the folder first and is asked separately before its files are summarized.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "The folder the user named: absolute, relative to the workspace, or starting with ~."
+    },
+    "name": {
+      "type": "string",
+      "description": "A short collection name of letters, digits, - and _; the folder's name when omitted."
+    }
+  },
+  "required": [
+    "path"
+  ]
+}
+```
+
+Source: [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+### `knowledge_browse`
+
+List what a knowledge collection holds: the folders and files directly under a folder, with file counts and each summarized file's type and summary, or the files that carry a topic tag. Without a collection, lists the collections.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "string",
+      "description": "The collection to list, one the Knowledge base section lists."
+    },
+    "folder": {
+      "type": "string",
+      "description": "Folder inside the collection; omit for its top level."
+    },
+    "tag": {
+      "type": "string",
+      "description": "List the collection's files that carry this topic tag instead of a folder."
+    }
+  }
+}
+```
+
+Source: [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+### `knowledge_read`
+
+Read lines of one indexed file by its ref (`collection:path` or `collection:path#Lstart-Lend` from knowledge_search). Returns numbered lines; ask for a later startLine to continue a long file.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ref": {
+      "type": "string",
+      "description": "The file ref, optionally with a line range."
+    },
+    "startLine": {
+      "type": "integer",
+      "description": "First line to read, 1-based; overrides the ref's range."
+    },
+    "endLine": {
+      "type": "integer",
+      "description": "Last line to read, inclusive."
+    }
+  },
+  "required": [
+    "ref"
+  ]
+}
+```
+
+Source: [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+### `knowledge_search`
+
+Search the indexed document collections. Returns the folders and files whose summaries match (when they are summarized) and the best-matching passages, each with a ref (`collection:path#Lstart-Lend`) to cite or open with knowledge_read. Use specific words from the topic; results are ranked by how many and how rare the matching words are.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Words describing what to find."
+    },
+    "collection": {
+      "type": "string",
+      "description": "Search only this collection, one the Knowledge base section lists."
+    },
+    "kind": {
+      "type": "string",
+      "description": "Search only documents (text) or only source files and scripts (code).",
+      "enum": [
+        "text",
+        "code"
+      ]
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Most passages to return (default 8, at most 30)."
+    }
+  },
+  "required": [
+    "query"
+  ]
+}
+```
+
+Source: [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+The knowledge tools ship as the package's `./tools` entry and register nothing until a collection is configured; the `collection` enum lists the configured collection names.
+
 <a id="deepseek-aidsh-tool-todo"></a>
 
 ## `@deepseek-ai/dsh-tool-todo`
@@ -2363,6 +2548,8 @@ Misused hooks (bad arguments, unknown options, unsupported schemas, tripped caps
 
 Constraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.
 
+If a run was cut off partway, call again with the same script and args plus `resumeRunId` set to the earlier run's id: every agent() call that already completed with the same prompt and route returns its recorded answer immediately, and only the remaining work runs.
+
 ```json
 {
   "type": "object",
@@ -2427,6 +2614,10 @@ Constraints: concurrency and total-agent caps apply; no filesystem, network, tim
       "type": "object",
       "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
       "additionalProperties": true
+    },
+    "resumeRunId": {
+      "type": "string",
+      "description": "Optional id of an earlier run to resume: agent() calls at the same position with the same prompt and route reuse that run's recorded results instead of running again, and everything else runs for real. Pass the same script and args you ran before."
     }
   },
   "required": [
@@ -2488,3 +2679,119 @@ Search the web for current information. Provide 1–4 queries in the required qu
 Source: [`packages/web/tool-web/src/index.ts`](../packages/web/tool-web/src/index.ts)
 
 web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.
+
+<a id="deepseek-aidsh-tool-market"></a>
+
+## `@deepseek-ai/dsh-tool-market`
+
+### `market_filings`
+
+Recent regulatory filings for a symbol, newest first, each with its form type, filing date and a document URL. Filter by form with `forms`, such as `["10-K", "10-Q"]`; omit it for every form. Read a filing's contents with the web fetch tool. Historical market data for research; not investment advice.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "The symbol to read."
+    },
+    "forms": {
+      "type": "array",
+      "description": "Form types to keep; omitted keeps every form.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Filings to return; capped at 10."
+    }
+  },
+  "required": [
+    "symbol"
+  ]
+}
+```
+
+Source: [`packages/finance/tool-market/src/index.ts`](../packages/finance/tool-market/src/index.ts)
+
+### `market_history`
+
+Daily open, high, low, close and volume for one symbol, oldest session first. Bound the window with `from` and `to` as `YYYY-MM-DD`; without them the whole available series is read and the newest 60 sessions are returned. Historical market data for research; not investment advice.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "The symbol to read."
+    },
+    "from": {
+      "type": "string",
+      "description": "Earliest session date, `YYYY-MM-DD`."
+    },
+    "to": {
+      "type": "string",
+      "description": "Latest session date, `YYYY-MM-DD`."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Newest sessions to return; capped at 60."
+    }
+  },
+  "required": [
+    "symbol"
+  ]
+}
+```
+
+Source: [`packages/finance/tool-market/src/index.ts`](../packages/finance/tool-market/src/index.ts)
+
+### `market_profile`
+
+The issuer behind a symbol as the securities regulator lists it: registered name, listing venue and industry description. Only issuers that file with the SEC are known. Historical market data for research; not investment advice.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symbol": {
+      "type": "string",
+      "description": "The symbol to describe."
+    }
+  },
+  "required": [
+    "symbol"
+  ]
+}
+```
+
+Source: [`packages/finance/tool-market/src/index.ts`](../packages/finance/tool-market/src/index.ts)
+
+### `market_quote`
+
+Latest settled daily close for one or more listed symbols. A symbol is a ticker such as `AAPL`, or `TICKER.EXCHANGE` for a non-US listing such as `bmw.de`. The close is the last completed session, so during market hours it is the previous close rather than a live price. Historical market data for research; not investment advice.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "symbols": {
+      "type": "array",
+      "description": "The symbols to quote; at most 10.",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "symbols"
+  ]
+}
+```
+
+Source: [`packages/finance/tool-market/src/index.ts`](../packages/finance/tool-market/src/index.ts)
+
+Every market tool description ends by telling the model the data is historical research material, not investment advice.

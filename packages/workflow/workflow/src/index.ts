@@ -12,9 +12,21 @@ import type {
   WorkflowResultInfo,
   WorkflowRunInfo,
 } from './types.ts'
+import type { WorkflowJournalService } from './journal-types.ts'
 import type { WorkflowRun, WorkflowStartRequest } from './runtime-types.ts'
 
 export { WorkflowRunId } from './types.ts'
+export { callKeyHash, scriptHash } from './hash.ts'
+export type { CallKeyInput } from './hash.ts'
+export type {
+  JournalCall,
+  JournalCallOutcome,
+  ResumePlan,
+  WorkflowJournalService,
+  WorkflowRunOpen,
+  WorkflowRunRecord,
+  WorkflowRunState,
+} from './journal-types.ts'
 export type {
   WorkflowAgentEndInfo,
   WorkflowAgentInfo,
@@ -31,6 +43,8 @@ export type { WorkflowRun, WorkflowStartRequest } from './runtime-types.ts'
 declare module '@deepseek-ai/cordis' {
   interface Context {
     workflowEngine: WorkflowEngine
+    /** Durable run journal, present when a Service Provider such as `dsh-workflow-journal` is mounted. */
+    workflowJournal: WorkflowJournalService
   }
 
   interface Events {

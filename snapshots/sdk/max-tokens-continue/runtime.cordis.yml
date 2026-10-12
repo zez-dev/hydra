@@ -1,0 +1,8 @@
+# This authored scenario cuts its first answer after twenty-three characters to
+# exercise the continuation after a truncated tool-call stream. The guard's
+# default floor would read that as a reasoning-starved cap and stop, which is
+# the other behavior; the floor is lowered here so the continuation runs.
+- id: auto-continue
+  config:
+    maxContinuationsPerTurn: 8
+    minVisibleChars: 1

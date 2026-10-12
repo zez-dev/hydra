@@ -1702,6 +1702,7 @@ describe('plugin registration and config', () => {
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0.2,
+      maxProviderDelayMs: 60_000,
     })
   })
 

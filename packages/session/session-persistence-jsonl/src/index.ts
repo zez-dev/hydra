@@ -21,11 +21,12 @@ import { randomBytes } from 'node:crypto'
 import {
   SessionPersistence, SessionPersistenceRevision, SessionFormatUnsupportedError,
   SessionPersistenceCorruptionError,
-  SessionAlreadyExistsError, SessionPersistenceNotFoundError,
+  SessionAlreadyExistsError, SessionAlreadyOwnedError, SessionPersistenceNotFoundError,
   assertStoredId, materializeCreateHeader, sessionFormatVersionRefusal, validateStoredEvents,
   type SessionAccess, type SessionHandle,
   type SessionHandleReadResult,
   type SessionLocation, type SessionPersistenceCreateOptions,
+  type SessionPersistenceDeleteOptions, type SessionDeleteResult,
   type SessionPersistenceListOptions, type SessionPersistenceOpenOptions,
   type SessionPersistenceSnapshot, type SessionPersistenceStatOptions,
   type SessionPersistenceRevision as PersistenceRevision,
@@ -449,6 +450,42 @@ class JsonlSessionPersistence extends SessionPersistence {
       options?.signal?.throwIfAborted()
       if (isENOENT(error)) return undefined
       throw error
+    }
+  }
+
+  /**
+   * Remove one stored session: claim its in-process write slot, take the
+   * cross-process lease in its directory, then remove that directory with
+   * every generation it holds. A pending (created-but-unmaterialized) session
+   * belongs to its active creator and rejects as owned.
+   * @param id - the stored session to remove.
+   * @param options - optional cancellation.
+   * @returns whether a stored session directory was removed.
+   * @throws {SessionAlreadyOwnedError} when a write handle or lease is active.
+   */
+  async delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionDeleteResult> {
+    options?.signal?.throwIfAborted()
+    await this.ensureRootEncoding()
+    options?.signal?.throwIfAborted()
+    if (this.tracker.hasPending(id)) throw new SessionAlreadyOwnedError(id)
+    this.tracker.claimWrite(id)
+    try {
+      const resolved = await this.findLog(id, options?.signal)
+      if (resolved === undefined) return { deleted: false }
+      const dir = dirname(resolved.currentPath)
+      const lease = await this.acquireLease(id, undefined, dir)
+      try {
+        await rm(dir, { recursive: true, force: true })
+      } finally {
+        try {
+          await lease.release()
+        } catch {
+          // The directory is gone; a lock-release failure cannot retain the session.
+        }
+      }
+      return { deleted: true }
+    } finally {
+      this.tracker.releaseClaim(id)
     }
   }
 

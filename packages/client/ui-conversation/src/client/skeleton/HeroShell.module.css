@@ -23,10 +23,13 @@
   overflow: visible;
 }
 
-/* figma 34:10411: fish + title, gap 10, centered; 26/32 wt500. The preview
-   badge is a product addition outside that source: a mono superscript pill
-   riding the title's top-right. */
+/* figma 34:10411: mark + title, gap 10, centered; 26/32 wt500. The preview
+   badge is a product addition outside that source: an outlined uppercase
+   pill riding the title's top-right. */
 .headline {
+  position: relative;
+  /* Keeps the ember glow (z-index -1) behind the mark and title but above the canvas. */
+  isolation: isolate;
   display: flex;
   /* Overflow-driven: the fish and the title group are two wrap units sharing
      one centered line while they fit; squeezed, the fish takes its own line
@@ -42,6 +45,22 @@
   line-height: 32px;
   font-weight: 500;
   color: var(--dsw-alias-label-primary);
+}
+
+/* Ember glow behind the mark and title: the theme's ember color fading out
+   from the headline's center. It breathes slowly unless reduced motion is
+   requested. */
+.headline::before {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 50%;
+  width: 360px;
+  height: 220px;
+  background: radial-gradient(closest-side, var(--dsh-ember-glow), transparent);
+  content: '';
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 /* Title text + badge as one wrap unit so the title never breaks mid-text with
@@ -62,20 +81,21 @@
 .previewBadge {
   align-self: flex-start;
   margin-top: 2px;
-  padding: 1px 7px 0;
-  border: 0.5px solid var(--dsw-alias-interactive-bg-hover);
+  padding: 0 7px;
+  border: 1px solid var(--dsh-ember-stroke);
   border-radius: 24px;
-  background: var(--dsw-alias-state-business-tertiary);
-  color: var(--dsw-alias-label-primary-bluish);
-  font-family: var(--ds-font-family-code);
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
+  background: transparent;
+  color: var(--dsw-alias-brand-text);
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 /* Keep hover detection on a stationary box while the mark moves within it;
-   hover rules target the hitbox so a slot-occupant mark swims too. */
+   hover rules target the hitbox so a slot-occupant mark flares too. */
 .fishHitbox {
   display: inline-flex;
   flex: none;
@@ -83,38 +103,70 @@
   justify-content: center;
 }
 
-/* The swim morph's curves poke slightly past the viewBox edges, so clipping
-   would slice the tail mid-wag. The hero mark stays in the same primary ink
-   as its headline. */
+/* The flare's halo paints past the viewBox edges, so the mark does not clip.
+   The mark carries the brand color in both appearances, like the sidebar
+   mark, inside an ember halo. */
 .fish {
   display: block;
   overflow: visible;
-  transform-origin: 50% 60%;
-  color: var(--dsw-alias-label-primary);
+  color: var(--dsw-alias-brand-primary);
+  filter: drop-shadow(0 0 12px var(--dsh-ember-halo));
 }
 
-/* Hover swim: a slow continuous sway about the body center — the head
-   (left) lifts as the whale rises, then settles back with a small
-   counter-tilt, like treading water. Negative rotation = head up (the head
-   is the left half; origin 50% 60%). */
-@keyframes hero-fish-swim {
+/* The glow breathes on a slow cycle. */
+@keyframes hero-ember-breathe {
   0%,
   100% {
+    opacity: 0.7;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+}
+
+/* The eyes brighten briefly once per cycle. */
+@keyframes hero-eye-glint {
+  0%,
+  70%,
+  100% {
+    opacity: 0.8;
+  }
+
+  82% {
+    opacity: 1;
+  }
+}
+
+/* Hover flare: the mark swells slightly and its halo widens. */
+@keyframes hero-mark-flare {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 12px var(--dsh-ember-halo));
     transform: none;
   }
 
-  35% {
-    transform: rotate(-4deg) translate(-0.4px, -0.9px);
+  50% {
+    filter: drop-shadow(0 0 22px var(--dsh-ember-halo));
+    transform: scale(1.05);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .headline::before {
+    animation: hero-ember-breathe 6s ease-in-out infinite;
   }
 
-  70% {
-    transform: rotate(1.6deg) translate(0.3px, 0.2px);
+  .fish [data-part='pupil'] {
+    animation: hero-eye-glint 4s ease-in-out infinite;
   }
 }
 
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .fishHitbox:hover .fish {
-    animation: hero-fish-swim 1.6s ease-in-out infinite;
+    animation: hero-mark-flare 1.6s ease-in-out infinite;
   }
 }
 

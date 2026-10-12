@@ -16,7 +16,10 @@ import {
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
-import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
+import { SessionQueryError, type SessionLineageNode, type SessionObservation } from '@deepseek-ai/dsh-session-query'
+import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
+// Type-only: makes the optional sub-agent service available to `ctx.get('subagents')`.
+import type {} from '@deepseek-ai/dsh-subagent'
 import { SessionTitleInvalidError } from '@deepseek-ai/dsh-session-title'
 import { canonicalClientTimeZone } from '@deepseek-ai/dsh-util-time'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
@@ -33,6 +36,8 @@ import {
   inspectApiSession,
 } from './agent.ts'
 import type {
+  SessionDeleteRequest,
+  SessionDeleteValue,
   SessionAttachmentRequest,
   SessionAttachmentValue,
   SessionCancelRequest,
@@ -41,6 +46,8 @@ import type {
   SessionCreateValue,
   SessionForkRequest,
   SessionForkValue,
+  SessionRewindRequest,
+  SessionRewindValue,
   SessionPromptRequest,
   SessionPromptValue,
   SessionRenameRequest,
@@ -206,23 +213,7 @@ export class SessionCommandController {
     } catch {
       throw new RemoteError('gateway/bad-request', 'atSeq must be a non-negative safe integer', {})
     }
-    let observed: SessionObservation
-    try {
-      observed = await this.ctx.sessionQuery.observeSession(request.sessionId)
-    } catch (error) {
-      if (error instanceof SessionQueryError
-        && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') {
-        throw new RemoteError('session/not-found', `session "${request.sessionId}" not found`, {
-          sessionId: request.sessionId,
-        })
-      }
-      throw new RemoteError(
-        'gateway/internal',
-        `fork source unavailable for session "${request.sessionId}": ${String(error)}`,
-        {},
-      )
-    }
-    using source = observed
+    using source = await this.observeSource(request.sessionId, 'fork')
     const lastSeq = source.events.at(-1)?.seq ?? -1
     const anchoredBoundary = atSeq === undefined
       ? undefined
@@ -289,6 +280,160 @@ export class SessionCommandController {
       }
     }
     return { sessionId: childId }
+  }
+
+  /**
+   * Rewind: fork at the completed boundary right before the turn that holds
+   * `atSeq`, so the child ends where that turn began and its prompt can be
+   * resent, edited or not. The first turn has no boundary before it and is
+   * refused, as is an anchor past the log's end.
+   * @param request - source Session and an event seq inside the turn to rewind to.
+   * @returns the child identity plus the rewound turn's first user prompt text.
+   */
+  async rewind(request: SessionRewindRequest): Promise<SessionRewindValue> {
+    let atSeq: ReturnType<typeof SessionSeq>
+    try {
+      atSeq = SessionSeq(request.atSeq)
+    } catch {
+      throw new RemoteError('gateway/bad-request', 'atSeq must be a non-negative safe integer', {})
+    }
+    const unavailable = (detail: string): RemoteError => new RemoteError(
+      'session/rewind-unavailable',
+      `session "${request.sessionId}" cannot rewind: ${detail}`,
+      { sessionId: request.sessionId },
+    )
+    let boundarySeq: number
+    let prompt: string | undefined
+    {
+      using source = await this.observeSource(request.sessionId, 'rewind')
+      const lastSeq = source.events.at(-1)?.seq ?? -1
+      if (atSeq > lastSeq) throw unavailable(`event ${String(atSeq)} is past the end of the log`)
+      const start = source.events.findLast(event => event.type === 'turn/start' && event.seq <= atSeq)
+      if (start === undefined) throw unavailable(`event ${String(atSeq)} belongs to no turn`)
+      const boundary = source.events.findLast(event => event.type === 'turn/end' && event.seq < start.seq)
+      if (boundary === undefined) throw unavailable('the first turn has no completed boundary before it')
+      boundarySeq = boundary.seq
+      prompt = firstUserPromptAfter(source.events, start.seq)
+    }
+    const { sessionId } = await this.fork({ sessionId: request.sessionId, atSeq: boundarySeq })
+    return { sessionId, ...(prompt === undefined ? {} : { prompt }) }
+  }
+
+  /**
+   * Delete one stored Session and its derived state. A live Session this Host
+   * opened is closed first when its turn is settled; one whose turn is running,
+   * or one opened by another owner, is refused (`session/live`) and nothing is
+   * removed. The sub-agent Sessions it started go with it, deepest first; its
+   * forks are kept as Sessions whose parent no longer exists, unless `cascade`
+   * is set, which deletes every descendant first. Each removal deletes the stored log,
+   * drops the projection-cache row, detaches the Session from its Workspace
+   * and the archive set, and announces `api-session/removed` so clients drop
+   * the row. The SQLite search index reconciles on its next observation.
+   * @param request - Session identity and cascade choice.
+   * @returns every identity removed, descendants before their parents.
+   */
+  async delete(request: SessionDeleteRequest): Promise<SessionDeleteValue> {
+    await this.releaseSubagentChild(request.sessionId)
+    this.assertClosable(request.sessionId)
+    const targets = await this.deleteTargets(request)
+    // Refuse before closing anything, so a refusal leaves every target in place.
+    for (const id of targets) {
+      await this.releaseSubagentChild(id)
+      this.assertClosable(id)
+    }
+    // A Session that was live and never wrote an event has no stored log; once
+    // its Agent is closed there is nothing left, which is a removal, not a miss.
+    const closed = new Set<SessionId>()
+    for (const id of targets) {
+      if (await this.agents.close(id) === 'closed') closed.add(id)
+    }
+    const removed: SessionId[] = []
+    for (const id of targets) {
+      let result: { readonly deleted: boolean }
+      try {
+        result = await this.ctx.sessionPersistence.delete(id)
+      } catch (error) {
+        if (error instanceof SessionAlreadyOwnedError) {
+          throw new RemoteError('session/owned', `session "${id}" is owned by another writer`, { sessionId: id })
+        }
+        throw new RemoteError('gateway/internal', `failed to delete session "${id}": ${String(error)}`, {})
+      }
+      if (!result.deleted && !closed.has(id) && id === request.sessionId && removed.length === 0) {
+        throw new RemoteError('session/not-found', `session "${id}" not found`, { sessionId: id })
+      }
+      await this.ctx.get('sessionProjectionCache')?.forget(id)
+      for (const workspace of this.ctx.workspaceRegistry.list()) {
+        if (workspace.sessionIds.includes(id)) await workspace.detachSession(id)
+      }
+      await this.ctx.workspaceRegistry.unarchiveSession(id)
+      this.ctx.emit('api-session/removed', id)
+      removed.push(id)
+    }
+    return { sessionIds: removed }
+  }
+
+  private assertClosable(id: SessionId): void {
+    const live = this.ctx.agents.get(id)
+    if (live === undefined) return
+    if (live.status === 'running') {
+      throw new RemoteError('session/live', `session "${id}" is running a turn; stop it before deleting`, { sessionId: id })
+    }
+    if (!this.agents.owns(live)) {
+      const parent = live.session.header.parentSession
+      const detail = parent === undefined
+        ? 'is live under another owner; close it there before deleting'
+        : `is a live sub-agent of session "${parent}"; close that session first`
+      throw new RemoteError('session/live', `session "${id}" ${detail}`, { sessionId: id })
+    }
+  }
+
+  /**
+   * Release an idle sub-agent child that its live parent still holds, so a
+   * delete from the GUI does not need the parent closed first. The child's
+   * own turn must be settled; the sub-agent service, when composed, drops the
+   * parent's hold on exactly that child. Anything else is left for
+   * {@link assertClosable} to refuse.
+   * @param id - Session identity about to be deleted.
+   */
+  private async releaseSubagentChild(id: SessionId): Promise<void> {
+    const live = this.ctx.agents.get(id)
+    if (live === undefined || live.status === 'running' || this.agents.owns(live)) return
+    const parentId = live.session.header.parentSession
+    if (parentId === undefined) return
+    const parent = this.ctx.agents.get(parentId)
+    if (parent === undefined || !this.ctx.agents.isOwnedBy(id, parent)) return
+    const subagents = this.ctx.get('subagents')
+    if (subagents === undefined) return
+    await subagents.drainContinuableChildren(parent, [id])
+  }
+
+  /**
+   * Resolve the ordered removal list: the sub-agent Sessions the target
+   * started (children through an uninterrupted chain of `origin: 'subagent'`),
+   * or every descendant with `cascade`, deepest first, then the target. Forks,
+   * and everything under them, are kept without `cascade`.
+   * @param request - the delete request.
+   * @returns identities in removal order.
+   */
+  private async deleteTargets(request: SessionDeleteRequest): Promise<SessionId[]> {
+    let descendants: SessionLineageNode[] = []
+    try {
+      descendants = (await this.ctx.sessionQuery.traceSession(request.sessionId)).descendants
+    } catch (error) {
+      // An unknown target has no lineage; persistence decides whether it exists.
+      if (!(error instanceof SessionQueryError && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND')) throw error
+    }
+    const ordered: SessionId[] = []
+    const visit = (nodes: SessionLineageNode[]): void => {
+      for (const node of nodes) {
+        if (request.cascade !== true && node.session.header.origin !== 'subagent') continue
+        visit(node.descendants)
+        ordered.push(node.session.header.id)
+      }
+    }
+    visit(descendants)
+    ordered.push(request.sessionId)
+    return ordered
   }
 
   /**
@@ -550,6 +695,28 @@ export class SessionCommandController {
     return { id: inspected.meta.id, header: inspected.meta, events: inspected.events }
   }
 
+  /**
+   * Observe the source Session of a fork or rewind.
+   * @param sessionId - the source Session.
+   * @param operation - the operation named in an internal failure.
+   * @returns the observation, owned by the caller.
+   * @throws {RemoteError} `session/not-found` for an unknown Session; `gateway/internal` for any other failure.
+   */
+  private async observeSource(sessionId: SessionId, operation: 'fork' | 'rewind'): Promise<SessionObservation> {
+    try {
+      return await this.ctx.sessionQuery.observeSession(sessionId)
+    } catch (error) {
+      if (error instanceof SessionQueryError && error.code === 'SESSION_QUERY_SESSION_NOT_FOUND') {
+        throw new RemoteError('session/not-found', `session "${sessionId}" not found`, { sessionId })
+      }
+      throw new RemoteError(
+        'gateway/internal',
+        `${operation} source unavailable for session "${sessionId}": ${String(error)}`,
+        {},
+      )
+    }
+  }
+
   private async forkWorkspace(source: SessionHeader): Promise<Workspace | undefined> {
     const workspaces = this.ctx.workspaceRegistry.list()
     const direct = workspaces.find(workspace => workspace.sessionIds.includes(source.id))
@@ -656,4 +823,24 @@ function referencedImage(
 
 function routeServed(ctx: Context, provider: string): boolean {
   return ctx.llm.listProviders().some(entry => entry.id === provider)
+}
+
+/**
+ * The text of the first human `user/message` after `afterSeq` and before the
+ * next `turn/start`, or `undefined` when that turn holds none.
+ * @param events - the observed log in seq order.
+ * @param afterSeq - the seq of the turn's `turn/start`.
+ * @returns the joined text parts of that message.
+ */
+function firstUserPromptAfter(events: readonly SessionEvent[], afterSeq: number): string | undefined {
+  for (const event of events) {
+    if (event.seq <= afterSeq) continue
+    if (event.type === 'turn/start') return undefined
+    if (event.type !== 'user/message' || event.data.source.kind !== 'user') continue
+    const text = event.data.content
+      .flatMap(part => part.type === 'text' ? [part.text] : [])
+      .join('')
+    return text.length === 0 ? undefined : text
+  }
+  return undefined
 }

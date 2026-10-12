@@ -42,9 +42,12 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 
 分叉复制截至选中已结束轮次的历史，并包含其 `turn/end`。该位置之后的事件均被排除，包括排队输入和模型设置变更。省略锚点或锚点超出日志末尾时，选择最后一个已结束轮次；位于未结束轮次内的锚点会被拒绝。
 
+`session.delete` 在一次 Host 操作中移除一个已存储 Session 及其派生状态。由本 Host 打开的活动 Session 会在轮次结束时先被关闭：controller 保留它创建或恢复的每个 Agent 的销毁句柄，此前正是丢弃了该句柄，才让 Web Session 一直保持活动、无法删除，直到 Host 退出。轮次正在运行的 Session，或由其他所有者打开的 Session，会被拒绝（`session/live`）且不移除任何内容；未设置 `cascade` 时，带有 fork 后代的 Session 同样被拒绝（`session/has-descendants`，携带后代 id），设置 `cascade` 时后代先删、最深的在前。已关闭但从未写入事件的 Session 计为已移除，而非不存在。
+
 恢复会话时若已有写句柄占用，返回 `session/writer-held`，并携带会话 id；其他恢复失败仍返回 `gateway/internal`。
 
 <a id="client-references"></a>
+
 ## Client 引用
 
 `sessions.retain(target, { source, signal? })` 立即获取一个精确 Client generation 的引用，并启动其共享的首次历史打开。目标是已知 Session id 或持久的直接父子 subagent 地址；Host 在打开历史时校验显式地址。返回引用支持幂等的 `release()` 和 `Symbol.dispose`；其 `ready` Promise 跟随共享的 `Session.open()` 结果，并在该次尝试结算时解析为确切 binding，包括 Remote failure 以 `openState: 'error'` 表示的情况。仅当 `Session.open()` 拒绝、等待方取消或引用提前释放时，`ready` 才拒绝。取消一个等待方不会取消其他 owner 的打开。`sessions.using(target, options, operation)` 等待该次结算，持有引用直到回调结束，并传播被拒绝的就绪与回调失败。
@@ -87,6 +90,7 @@ Session 对象还承载本地提交回显：`session.beginSubmission` 在调用�
 - follow 恢复失败会对调用方可见，而不会无限重试。
 - 浏览器原始字节上传使用一次不带断点续传偏移的流式 HTTP 请求；重试会从第零字节重新传输整个文件。
 - 文件引用补全使用共享 Agent lookup，因此可能恢复冷 Session；`skills/list` 目录是不激活 Agent 的 skill 元数据读取路径。
+- `session.delete` 绝不打断正在运行的轮次，也无法关闭并非由它打开的 Agent，这两种情况仍会拒绝；Web UI 没有单独的关闭操作，因此运行中的 Session 要等轮次结束后才能删除。Spill 与附件文件不会被移除，因为这两个包不提供按 Session 的删除；SQLite 搜索索引在下一次观察时才会丢弃该 Session。
 
 
 <a id="dev-note"></a>

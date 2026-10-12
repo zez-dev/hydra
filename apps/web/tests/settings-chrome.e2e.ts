@@ -135,8 +135,9 @@ describe('web e2e: settings modal and General preferences', () => {
     expect(await dialog.locator('[data-plugin-count]').getAttribute('data-plugin-count'))
       .toBe(String(expectedPluginCount))
     expect(await dialog.getByRole('button', { name: '内置插件', exact: true }).getAttribute('aria-current')).toBe('true')
-    // One contribution shows as the page itself, without a tab row.
-    expect(await dialog.getByRole('tab').count()).toBe(0)
+    // Two contributions (the built-in plugin list and the learning tab) show
+    // as a tab row; a single one would be the page itself.
+    expect(await dialog.getByRole('tab').allTextContents()).toEqual(['插件列表', '学习记忆'])
     expect(await dialog.getByRole('button', { name: '模型' }).getAttribute('aria-current')).toBeNull()
     const pluginsSnapshot = await captureStableAria(
       page,
@@ -291,7 +292,8 @@ describe('web e2e: settings modal and General preferences', () => {
       })
       expect(state).toEqual({
         attr: true,
-        background: 'rgb(21, 21, 23)',
+        // The dragon theme's dark canvas (boot-theme DARK_BACKGROUND).
+        background: 'rgb(7, 7, 8)',
         colorScheme: 'dark',
       })
     } finally {

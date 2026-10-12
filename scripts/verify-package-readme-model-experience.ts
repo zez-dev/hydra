@@ -45,6 +45,8 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/api/terminal-controller': { kind: 'none', reason: 'User-owned terminal processes and screen streams never enter model requests or Session events.' },
+  'packages/api/usage-controller': { kind: 'none', reason: 'The Remote projects a report the Web dashboard reads; the model reaches the same fold through the usage tool dsh-session-usage owns.' },
+  'packages/client/ui-usage': { kind: 'none', reason: 'Browser presentation of a Remote value; it registers no prompt, schema, or result and reaches no model request.' },
   'packages/client/ui-sidebar-terminal': { kind: 'none', reason: 'The browser renders user terminal screens without exposing them to the model.' },
   'packages/ssh/ssh': { kind: 'none', reason: 'The connection owner transports private provider operations; consumers own all model-facing content.' },
   'packages/ssh/fs-ssh': { kind: 'indirect', reason: 'The remote filesystem delegates model rendering to the existing filesystem consumers.' },
@@ -54,6 +56,13 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/experimental/browser-use-runtime': { kind: 'indirect', reason: 'Browser providers call the library to own resources and expose upstream MCP tools.' },
   'packages/computer-use/computer-use': { kind: 'none', reason: 'The registry only reserves provider names; providers own all model-facing tools and guidance.' },
   'packages/document/office-to-pdf': { kind: 'none', reason: 'The provider returns PDF bytes without constructing model input.' },
+  'packages/finance/market-data': { kind: 'indirect', reason: 'The market-data seam delegates every schema, cap, and result rendering to dsh-tool-market.' },
+  'packages/api/learning-controller': { kind: 'indirect', reason: 'The Remote edits the memory store; the recall message of the next step is rendered by dsh-memory.' },
+  'packages/client/ui-brand-hydra': { kind: 'none', reason: 'Browser presentation of the brand mark and name; it registers no prompt, schema, or result and reaches no model request.' },
+  'packages/client/ui-learning': { kind: 'indirect', reason: 'Browser edits of memory entries and skill files reach the model through dsh-memory recall and dsh-skill loading, which own the rendering.' },
+  'packages/goal/digest': { kind: 'none', reason: 'The digest is a workspace file written for the human; the model reads it only through the ordinary file tools.' },
+  'packages/webhook/notify': { kind: 'none', reason: 'Outbound notifications leave the host over HTTP and never enter a model request or a Session event.' },
+  'packages/workflow/workflow-journal': { kind: 'indirect', reason: 'The run records reach a model only through the resumeRunId parameter dsh-tool-workflow owns; the journal registers no tool or prompt text.' },
   'packages/attachment/attachment': { kind: 'indirect', reason: 'The storage seam delegates model request rendering to provider adapters.' },
   'packages/attachment/attachment-local': { kind: 'indirect', reason: 'The local backend delegates model request rendering to provider adapters.' },
   'packages/shell/shell': { kind: 'indirect', reason: 'The service interface delegates all model rendering to dsh-tool-bash.' },

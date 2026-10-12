@@ -79,6 +79,23 @@ describe('shared config schema catalog', () => {
     expect(new Set(provider?.schemaKeys)).toEqual(new Set(['mode', 'headless', 'endpoint']))
   })
 
+  it('collects the fields a schema object spreads from a same-file const', () => {
+    const { root } = fixture(sharedSchema
+      .replace("Schema.object({ mode: Schema.const('launch'), headless: Schema.boolean() })", 'Schema.object({ ...launchFields })')
+      .replace('export const Shared', "const launchFields = { mode: Schema.const('launch'), headless: Schema.boolean() }\nexport const Shared"))
+    const provider = collectConfigCatalog(root).find(entry => entry.pkg === '@test/provider')
+    expect(new Set(provider?.schemaKeys)).toEqual(new Set(['mode', 'headless', 'endpoint']))
+  })
+
+  it('rejects a spread that names no same-file const object of plain fields', () => {
+    const unresolved = fixture(sharedSchema.replace('headless: Schema.boolean()', 'headless: Schema.boolean(), ...missingFields'))
+    expect(() => collectConfigCatalog(unresolved.root)).toThrow("schema object property '...missingFields' is not a plain key")
+    const nested = fixture(sharedSchema
+      .replace('headless: Schema.boolean()', 'headless: Schema.boolean(), ...extraFields')
+      .replace('export const Shared', 'const extraFields = { ...launchExtras }\nexport const Shared'))
+    expect(() => collectConfigCatalog(nested.root)).toThrow("spread schema field '...launchExtras' is not a plain key")
+  })
+
   it('rejects type-only imports used as runtime schemas', () => {
     const { root, write } = fixture()
     write('packages/test/provider/src/index.ts', `

@@ -187,10 +187,14 @@ export function registerSidebarChat(ctx: Context, t: TranslateNS<typeof NS>): vo
     priority: 'builtin',
     canOpen: address => parseSubagentChatAddress(address) !== undefined,
     title: (address) => {
-      const child = parseSubagentChatAddress(address)?.childSessionId
-      return child === undefined
-        ? t('sidebar.chat')
-        : ctx.sessions.list.getSnapshot().byId[child]?.projectionValues?.subagent?.label ?? child
+      const parsed = parseSubagentChatAddress(address)
+      if (parsed === undefined) return t('sidebar.chat')
+      const list = ctx.sessions.list.getSnapshot()
+      // A cold child has no projected identity until its log is opened; the
+      // parent's catalog row already carries the label the dropdown showed.
+      const row = list.subagentsByParent[parsed.parentSessionId]?.entries.find(entry => entry.id === parsed.childSessionId)
+      const catalogLabel = row?.kind === 'child' ? row.label : undefined
+      return list.byId[parsed.childSessionId]?.projectionValues?.subagent?.label ?? catalogLabel ?? parsed.childSessionId
     },
   } satisfies SidebarRightTabDefinition), 'ui-subagent: Sidebar chat type')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({

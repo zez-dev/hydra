@@ -11,7 +11,7 @@ import type {
   TokenUsage,
   ToolResultMessage,
   ToolSchema,
-  UserMessage,
+  UserMessage, Message,
 } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
@@ -260,12 +260,34 @@ export interface RequestContext {
  */
 export type RequestHeaderReason = 'initial' | 'resume' | 'change' | 'series'
 
+/** The three roles a QA iteration round could take, as the retired checkpoint critic recorded them. */
+export type RetiredIterationRole = 'finder' | 'fixer' | 'verifier'
+
+/** Log-only record of one retired checkpoint-critic request, written before the model was called. */
+export interface CheckpointCriticEventData {
+  /** The round's role. */
+  readonly role: RetiredIterationRole
+  /** The round number. */
+  readonly round: number
+  /** The ticket under review. */
+  readonly ticketId: string
+  /** Provider and model that answered. */
+  readonly route: { readonly provider: string; readonly model: string }
+  /** Exact system prompt sent. */
+  readonly system: string
+  /** Exact messages sent. */
+  readonly messages: readonly Message[]
+  /** Output-token cap sent. */
+  readonly maxTokens: number
+}
+
 /**
  * The merge-extensible, append-only source of truth for an agent interaction.
  * Message history is derived from this log. Every event is lossless JSON and
  * sequence numbers stay contiguous. Assistant attempt events embed their exact
  * compact raw streams so persistence stores one durable settlement per attempt.
  */
+
 export interface SessionEventMap {
   /**
    * Opens turn `turn` before the loop claims queued input or runs pre-step.
@@ -403,6 +425,13 @@ export interface SessionEventMap {
    * so tolerating concurrent writers needs a signal beyond the log.
    */
   'session/end-seed': { inherited?: true }
+  /**
+   * Retired on 2026-09-26 with the checkpoint plugin, whose producer left the tree; released logs still carry it, appended `ignorable`,
+   * so the declaration stays and nothing replays it. Log-only pre-dispatch record of one checkpoint-critic model request.
+   * @param data - the exact auxiliary request as the retired producer logged it.
+   */
+  'session/checkpoint-critic': CheckpointCriticEventData
+
 }
 
 /** The appendable event-type keys of {@link SessionEventMap}, plugin-merged extensions included. */
@@ -453,6 +482,21 @@ export type SurfaceIntent<T extends SurfaceEventType = SurfaceEventType> = {
   /** Complete non-empty set of known earlier source-event seqs. */
   sourceEventSeqs?: SessionSeq[]
 })
+
+/**
+ * Append options for a log-only event. A surface event never takes these: an
+ * event the surface reads is required on read by construction.
+ */
+export interface LogOnlyIntent {
+  /**
+   * Mark this record safe for a reader that does not recognize its `type` to
+   * skip, instead of refusing the whole log. Set it only when losing the record
+   * cannot change how the rest of the log is interpreted, which in practice
+   * means a purely informational record nothing reads back. See
+   * {@link SessionEvent.ignorable}.
+   */
+  readonly ignorable?: true
+}
 
 /**
  * One immutable entry in the session log.

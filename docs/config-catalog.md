@@ -203,7 +203,7 @@ Source: [`packages/api/gateway/src/index.ts:119`](../packages/api/gateway/src/in
 
 ## `@deepseek-ai/dsh-api-session-controller`
 
-Requires: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `llm` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `workspaceRegistry`
+Requires: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `llm` · `sessions` · `sessionPersistence` · `sessionProjections` · `sessionQuery` · `typert` · `workspaceRegistry`
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
@@ -213,7 +213,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/api/session-controller/src/index.ts:71`](../packages/api/session-controller/src/index.ts)
+Source: [`packages/api/session-controller/src/index.ts:75`](../packages/api/session-controller/src/index.ts)
 
 <a id="deepseek-aidsh-api-settings-controller"></a>
 
@@ -336,6 +336,41 @@ export interface Config {
 ```
 
 Source: [`packages/attachment/attachment-local/src/index.ts:61`](../packages/attachment/attachment-local/src/index.ts)
+
+<a id="deepseek-aidsh-auto-continue"></a>
+
+## `@deepseek-ai/dsh-auto-continue`
+
+Requires: `agents` · `llm`
+
+```ts config-catalog
+/** Auto-continue configuration. */
+export interface Config {
+  /**
+   * Required cap on continuations steered within one turn. Each continuation
+   * costs a full model request over the whole context, so the value is the
+   * spend the deployment accepts for one truncated answer.
+   */
+  maxContinuationsPerTurn: number
+  /**
+   * A cut answer whose visible text is shorter than this many characters was
+   * cut before its answer: the cap was spent on something else, usually a
+   * reasoning model's thinking. Defaults to `80`.
+   */
+  minVisibleChars?: number
+  /**
+   * Continuations per turn for an answer cut before its visible text (see
+   * `minVisibleChars`). Such a continuation asks the model to answer now, and
+   * its request asks the route for its lowest selectable reasoning effort
+   * (`off`, `none`, `minimal`, or `low`, whichever the route offers first) so
+   * the cap goes to the answer; they count toward `maxContinuationsPerTurn`.
+   * `0` stops such a turn at once. Defaults to `1`.
+   */
+  maxReasoningContinuationsPerTurn?: number
+}
+```
+
+Source: [`packages/guard/auto-continue/src/index.ts:23`](../packages/guard/auto-continue/src/index.ts)
 
 <a id="deepseek-aidsh-bash-local"></a>
 
@@ -469,6 +504,38 @@ export interface Config {
 
 Source: [`packages/client/ui-sidebar-documentpreview/src/config.ts:5`](../packages/client/ui-sidebar-documentpreview/src/config.ts)
 
+<a id="deepseek-aidsh-command-gate"></a>
+
+## `@deepseek-ai/dsh-command-gate`
+
+Requires: `tools` · `commands`
+
+```ts config-catalog
+/** Command-gate configuration. */
+export interface Config {
+  /**
+   * `off` disables the gate; `confirm` asks a human before a command that
+   * destroys uncommitted work and denies the rest; `deny` refuses both without
+   * asking.
+   */
+  mode: 'off' | 'confirm' | 'deny'
+  /**
+   * What a `confirm` verdict becomes when no human can answer. `deny` refuses
+   * with the gate's own explanation; `confirm` still raises the approval, which
+   * a machine answerer may grant and an absent channel turns into a denial.
+   */
+  unattendedMode: 'confirm' | 'deny'
+  /** Rule ids downgraded to `allow`, for a deployment that accepts one risk. */
+  allow: string[]
+  /** Extra command prefixes to deny, each written as it would be typed. */
+  denyExtra: string[]
+  /** Absolute paths where destroying files is expected, such as a scratch root. */
+  temporaryRoots: string[]
+}
+```
+
+Source: [`packages/guard/command-gate/src/index.ts:39`](../packages/guard/command-gate/src/index.ts)
+
 <a id="deepseek-aidsh-compaction-basic"></a>
 
 ## `@deepseek-ai/dsh-compaction-basic`
@@ -502,6 +569,43 @@ export interface CompactionPolicyConfig {
   compactionRetries?: number
   /** Maximum retries after canonical context overflow; `0` disables recovery. Defaults to `1`. */
   maxOverflowRetries?: number
+  /**
+   * Fraction of the window kept free beyond the request's output cap, absorbing
+   * heuristic pricing error on code and JSON. A request must fit in
+   * `contextWindow − outputCap − margin`. Defaults to `0.05`.
+   */
+  reserveMarginRatio?: number
+  /**
+   * Fraction of the window reserved for the reply when deciding to condense:
+   * the surface condenses once it leaves less than the lower of the output
+   * cap and `contextWindow × outputReserveRatio`, plus the margin. A request
+   * that leaves less than its whole cap asks for the room left instead.
+   * Defaults to `0.25`.
+   */
+  outputReserveRatio?: number
+  /**
+   * Steps a failed step-boundary compaction waits before trying again, unless the surface grows by
+   * `failureBackoffGrowthRatio` of the window, a checkpoint lands, or a reply is cut at its output
+   * cap first. Defaults to `8`.
+   */
+  failureBackoffSteps?: number
+  /** Fraction of the window the surface must grow by to retry before `failureBackoffSteps` pass. Defaults to `0.1`. */
+  failureBackoffGrowthRatio?: number
+  /** Smallest output cap a request is shrunk to when condensing cannot make room. Defaults to `256`. */
+  minOutputTokens?: number
+  /**
+   * Upper bound on the summarization cap as a fraction of the window, so a
+   * `maxTokens` sized for large models does not reserve most of a small
+   * window. Defaults to `0.25`.
+   */
+  summaryWindowRatio?: number
+  /**
+   * Multiplier for the summarization cap after a checkpoint was cut at it,
+   * applied up to three times and never above what the window affords
+   * (`summaryWindowRatio` and the room the condensed range leaves); `1`
+   * disables the retry. Defaults to `4`.
+   */
+  outputRetryFactor?: number
 }
 
 /** Exact provider/model override merged over the default compaction policy. */
@@ -513,7 +617,7 @@ export interface ModelCompactPolicyConfig extends CompactionPolicyConfig {
 }
 ```
 
-Source: [`packages/compaction/compaction-basic/src/types.ts:38`](../packages/compaction/compaction-basic/src/types.ts)
+Source: [`packages/compaction/compaction-basic/src/types.ts:75`](../packages/compaction/compaction-basic/src/types.ts)
 
 <a id="deepseek-aidsh-compaction-tool-result-pruner"></a>
 
@@ -570,6 +674,60 @@ export interface Config {
 ```
 
 Source: [`packages/credentials/credentials-local/src/index.ts:64`](../packages/credentials/credentials-local/src/index.ts)
+
+<a id="deepseek-aidsh-cron-sessions"></a>
+
+## `@deepseek-ai/dsh-cron-sessions`
+
+Requires: `agents` · `commands` · `storageDomain` · `sessions`
+
+```ts config-catalog
+/** Cron sessions configuration. */
+export interface Config {
+  /** Milliseconds between schedule evaluations; a due minute is caught when the tick is shorter than a minute. */
+  tickMs: number
+  /** Maximum schedules running at once; further due schedules wait for the next tick. */
+  maxConcurrent: number
+  /** Whether a schedule whose expression matched while the process was down runs once at activation. */
+  catchUp: boolean
+}
+```
+
+Source: [`packages/schedule/cron-sessions/src/index.ts:53`](../packages/schedule/cron-sessions/src/index.ts)
+
+<a id="deepseek-aidsh-digest"></a>
+
+## `@deepseek-ai/dsh-digest`
+
+Requires: `agents` · `commands` · `goals`
+
+```ts config-catalog
+/** Digest configuration. */
+export interface Config {
+  /** Local `HH:MM` at which the day's report is written for every live workspace. Omitted: `/report` only. */
+  dailyAt?: string
+  /** Local `<weekday> HH:MM` at which the weekly review is written for every live workspace. Omitted: `/report week` only. */
+  weeklyOn?: string
+}
+```
+
+Source: [`packages/goal/digest/src/index.ts:48`](../packages/goal/digest/src/index.ts)
+
+<a id="deepseek-aidsh-doctor"></a>
+
+## `@deepseek-ai/dsh-doctor`
+
+Requires: `commands` · `llm`
+
+```ts config-catalog
+/** Doctor configuration. */
+export interface Config {
+  /** Deadline of one live probe request in milliseconds. */
+  probeTimeoutMs: number
+}
+```
+
+Source: [`packages/boot/doctor/src/index.ts:46`](../packages/boot/doctor/src/index.ts)
 
 <a id="deepseek-aidsh-experimental-agent-team"></a>
 
@@ -911,12 +1069,107 @@ Requires: `agents` · `sessionProjections`
 ```ts config-catalog
 /** Deployment defaults for goal creation. */
 export interface Config {
-  /** Total rounds used when a create request omits its own cap. */
+  /** Total rounds used when a create request omits its own cap; `0` means unlimited. */
   defaultMaxGoalRounds?: number
 }
 ```
 
-Source: [`packages/goal/goal/src/index.ts:172`](../packages/goal/goal/src/index.ts)
+Source: [`packages/goal/goal/src/index.ts:188`](../packages/goal/goal/src/index.ts)
+
+<a id="deepseek-aidsh-goal-evaluator"></a>
+
+## `@deepseek-ai/dsh-goal-evaluator`
+
+Requires: `tools` · `llm` · `goals`
+
+```ts config-catalog
+/** Evaluator configuration. */
+export interface Config {
+  /** How many most-recent tool results are sent as evidence. */
+  evidenceEvents: number
+  /** Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted. */
+  maxWorkspaceChangeEntries: number
+  /** Output-token cap for the evaluation request. */
+  maxOutputTokens: number
+  /** Deadline for one evaluation request, in milliseconds. */
+  timeoutMs: number
+  /** Explicit evaluator provider; configure with `model`. Omitted: the session's own logged route. */
+  provider?: string
+  /** Explicit evaluator model; configure with `provider`. Omitted: the session's own logged route. */
+  model?: string
+}
+```
+
+Source: [`packages/goal/goal-evaluator/src/index.ts:51`](../packages/goal/goal-evaluator/src/index.ts)
+
+<a id="deepseek-aidsh-goal-resume-on-open"></a>
+
+## `@deepseek-ai/dsh-goal-resume-on-open`
+
+Requires: `goals` · `agents`
+
+```ts config-catalog
+/** Resume policy configuration. */
+export interface Config {
+  /**
+   * `ask` re-arms only after the approval service answers `allowed-once`;
+   * `always` re-arms every active goal on resume without asking.
+   */
+  policy: 'ask' | 'always'
+}
+```
+
+Source: [`packages/goal/goal-resume-on-open/src/index.ts:22`](../packages/goal/goal-resume-on-open/src/index.ts)
+
+<a id="deepseek-aidsh-goal-round-driver"></a>
+
+## `@deepseek-ai/dsh-goal-round-driver`
+
+Requires: `agents` · `goals` · `sessions`
+
+```ts config-catalog
+/** Driver configuration. */
+export interface Config {
+  /**
+   * Re-arm after a goal round that ends in a request or stream error, a
+   * provider failure, or a max-tokens cut, instead of disarming. The delay
+   * doubles per consecutive failure from `delayMs`; after `maxConsecutive`
+   * consecutive failures the goal is blocked with reason
+   * `transient-retries-exhausted` until a human resumes it. A successful
+   * round resets the count. Omit to keep every such failure a disarm. A user
+   * cancellation or explicit pause is never retried.
+   */
+  transientRetry?: {
+    /** Delay before the first re-arm, in milliseconds. */
+    delayMs: number
+    /** Consecutive failures tolerated before blocking. */
+    maxConsecutive: number
+  } | undefined
+}
+```
+
+Source: [`packages/goal/goal-round-driver/src/index.ts:23`](../packages/goal/goal-round-driver/src/index.ts)
+
+<a id="deepseek-aidsh-goal-supervisor"></a>
+
+## `@deepseek-ai/dsh-goal-supervisor`
+
+Requires: `agents` · `sessionQuery` · `goals` · `commands` · `sessions`
+
+```ts config-catalog
+/** Supervisor configuration: the concurrency cap is required; the daily budget is optional (absent means unlimited). */
+export interface Config {
+  /** Maximum stored sessions with active goals resumed at activation. */
+  maxConcurrent: number
+  /**
+   * Goal rounds one goal may run per local day before it is paused. A paused
+   * goal resumes by itself at the next local midnight. Omit for no budget.
+   */
+  dailyRoundBudget?: number
+}
+```
+
+Source: [`packages/goal/goal-supervisor/src/index.ts:33`](../packages/goal/goal-supervisor/src/index.ts)
 
 <a id="deepseek-aidsh-headless"></a>
 
@@ -1143,6 +1396,164 @@ export interface Config {
 
 Source: [`packages/jobs/jobs-local/src/index.ts:31`](../packages/jobs/jobs-local/src/index.ts)
 
+<a id="deepseek-aidsh-knowledge"></a>
+
+## `@deepseek-ai/dsh-knowledge`
+
+Requires: `commands`
+
+```ts config-catalog
+/** Knowledge base configuration. */
+export interface Config {
+  /** Index database file; `:memory:` keeps it for the process only. */
+  path: string
+  /** Folders to index, each under a short name used in citations and filters. */
+  collections: KnowledgeCollection[]
+  /** Folder names skipped anywhere under a root. */
+  excludeDirs?: string[]
+  /** Text files larger than this many bytes are skipped (default 4 MiB). */
+  maxFileBytes?: number
+  /** PDF, Word, and EPUB files larger than this many bytes are skipped (default 64 MiB). */
+  maxDocumentBytes?: number
+  /** Characters a passage grows to before a paragraph break may end it (default 2400). */
+  targetChars?: number
+  /** Characters at which a passage ends even without a break (default 4800). */
+  maxChars?: number
+  /** Characters of passage text one search hit carries (default 1500). */
+  hitChars?: number
+  /** Most lines one read returns (default 300). */
+  maxReadLines?: number
+  /** Bring the index up to date in the background when the plugin starts (default true). */
+  indexOnStart?: boolean
+  /** Seconds between background passes that pick up new and changed files; 0 runs only at start (default 900). */
+  reindexIntervalSeconds?: number
+  /** Provider of the route that writes file summaries; with `enrichModel`, or neither to use the invoking session's route. */
+  enrichProvider?: string
+  /** Model of the route that writes file summaries. */
+  enrichModel?: string
+  /** Summary requests in flight at once (default 2). */
+  enrichConcurrency?: number
+  /** Characters of file text one summary request shows (default 6000). */
+  enrichMaxInputChars?: number
+  /** Output cap of one summary request (default 1024). */
+  enrichMaxTokens?: number
+  /** Milliseconds one summary request may take (default 180000). */
+  enrichTimeoutMs?: number
+  /**
+   * Summarize new and changed files and roll folders up after each background pass, when
+   * `enrichProvider` and `enrichModel` are set (default true).
+   */
+  autoEnrich?: boolean
+  /** An OpenAI-compatible embedding endpoint; set it to rank passages by meaning as well as by words. */
+  embeddings?: {
+    /** Base URL of the OpenAI-compatible API, such as `http://gpu-box:8000/v1`. */
+    baseURL: string
+    /** Embedding model id the endpoint serves. */
+    model: string
+    /** Environment variable holding the API key, when the endpoint needs one. */
+    apiKeyEnv?: string
+    /** Requested vector size, for models that can shorten their vectors. */
+    dimensions?: number
+    /** Passages sent per request (default 32). */
+    batchSize?: number
+    /** Milliseconds one request may take (default 60000). */
+    timeoutMs?: number
+  } | undefined
+  /** Embed new passages after each background pass, when `embeddings` is set (default true). */
+  autoEmbed?: boolean
+  /**
+   * After summarizing files, write a rollup for each folder with at least this many summarized
+   * children; 0 turns rollups off (default 2).
+   */
+  folderRollupMinChildren?: number
+}
+
+/** One configured folder of documents indexed under a name. */
+export interface KnowledgeCollection {
+  /** Short name used in citations and filters, such as `policies`. */
+  readonly name: string
+  /** Absolute folder whose files are indexed, recursively. */
+  readonly root: string
+}
+```
+
+Source: [`packages/learning/knowledge/src/index.ts:45`](../packages/learning/knowledge/src/index.ts)
+
+<a id="deepseek-aidsh-learning"></a>
+
+## `@deepseek-ai/dsh-learning`
+
+Requires: `memory` · `llm` · `commands` · `agents` · `sessions`
+
+```ts config-catalog
+/** Learning plugin configuration. */
+export interface Config {
+  /** Review each finished turn for candidates with one extraction request; imports work either way. */
+  reviewTurns?: boolean
+  /**
+   * The review's deadline is the larger of `timeoutMs` and this factor times
+   * the longest model request of the turn it reviews, so a slow local route
+   * gets the time it demonstrably needs and a fast API keeps `timeoutMs`.
+   * Defaults to `4`.
+   */
+  reviewTimeoutFactor?: number
+  /** Review state new knowledge is filed in: `approved` recalls it from the next step on; `candidate` waits for `/learn approve`. */
+  fileAs?: 'approved' | 'candidate'
+  /** Turns with fewer logged tool calls are not reviewed. */
+  minToolCalls: number
+  /** Cap on candidates stored from one turn. */
+  maxCandidatesPerTurn: number
+  /** UTF-8 byte cap on the transcript sent to the extraction model. */
+  maxTranscriptBytes: number
+  /**
+   * Output-token cap for the extraction request. An answer cut at this cap
+   * (a model that thinks before it answers spends part of it on that) is
+   * retried with the cap times `outputRetryFactor`, up to three raises and
+   * never above the route's own configured cap, and the raised cap is kept
+   * for that route for the life of the plugin.
+   */
+  maxOutputTokens: number
+  /** Multiplier for the output cap after a truncated answer, applied up to three times; `1` disables the retry. Defaults to `4`. */
+  outputRetryFactor?: number
+  /** Deadline for one extraction request, in milliseconds. */
+  timeoutMs: number
+  /** Explicit extraction provider; configure with `model`. Omitted: the session's own logged route. */
+  provider?: string
+  /** Explicit extraction model; configure with `provider`. Omitted: the session's own logged route. */
+  model?: string
+  /** Directory receiving promoted `<name>/SKILL.md` bundles. Omitted: `$DSH_HOME/skills`. */
+  skillsRoot?: string
+  /** `/learn from`: files larger than this many bytes are skipped (default 262144). */
+  maxFileBytes?: number
+  /** `/learn from`: files beyond this count in one import are skipped (default 200). */
+  maxFilesPerImport?: number
+  /** `/learn from`: extra accepted file extensions without the dot, beside the built-in text list. */
+  extensions?: string[]
+  /** `/digest`: entries kept from one model request; more are counted and reported as dropped (default 20). */
+  digestMaxEntriesPerPart?: number
+  /** `/digest`: directory receiving skill drafts that wait for `/learn publish`. Omitted: `$DSH_HOME/skill-drafts`. */
+  skillDraftsRoot?: string
+  /** `/learn consolidate`: note similarity at or above which a note joins a group's first note (default 0.4). */
+  consolidateRelatedThreshold?: number
+  /** `/learn consolidate`: most notes sent to the model in one group (default 20). */
+  consolidateMaxGroupSize?: number
+  /** `/learn consolidate`: most groups one run sends, largest first; the rest wait for the next run (default 25). */
+  consolidateMaxGroups?: number
+  /** Second extraction pass over tool failures followed by a working retry (default enabled, 5 pairs per turn). */
+  errorPatterns?: ErrorPatternConfig
+}
+
+/** The error-pattern pass: a second extraction over tool failures followed by a working retry. */
+export interface ErrorPatternConfig {
+  /** Whether the pass runs at all. */
+  enabled: boolean
+  /** Cap on failure-then-recovery pairs reviewed per turn. */
+  maxPairsPerTurn: number
+}
+```
+
+Source: [`packages/learning/learning/src/index.ts:92`](../packages/learning/learning/src/index.ts)
+
 <a id="deepseek-aidsh-llm-deepseek"></a>
 
 ## `@deepseek-ai/dsh-llm-deepseek`
@@ -1197,7 +1608,7 @@ export interface Config {
   fileRefreshMarginSeconds?: number
   /** Oldest harness-owned files deleted before one quota-recovery upload retry (default 100). */
   fileQuotaCleanupBatch?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  /** Provider-owned model-request retry policy; omission uses normal mode with twelve retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -1320,6 +1731,19 @@ export interface PiAiProviderProfile {
   headers?: Record<string, string>
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
+  /**
+   * On a custom route (one the installed catalog does not describe): whether
+   * its `openai-completions` models that declare no `reasoningEfforts` offer
+   * the levels off, low, medium, high, xhigh, and max. A request with a
+   * chosen level then carries it as `chat_template_kwargs` (`enable_thinking`,
+   * `thinking`, `reasoning_effort`) and as `reasoning_effort`, with `off` sent
+   * as thinking disabled and effort `low`; a request with no chosen level
+   * carries none, so the server's own default stands. A server that refuses
+   * `xhigh` or `max` is asked for `high` instead for the rest of the process,
+   * and one that refuses the fields has them dropped for the rest of the
+   * process. Defaults to `true`; `false` sends none of these fields.
+   */
+  reasoningLevels?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -1330,8 +1754,16 @@ export interface PiAiProviderProfile {
   timeoutMs?: number
   /** WebSocket connection timeout in milliseconds. */
   websocketConnectTimeoutMs?: number
-  /** Maximum provider idle time while one stream read is outstanding. */
+  /** Maximum provider idle time while one stream read is outstanding, once streaming has started. */
   streamIdleTimeoutMs?: number
+  /**
+   * The slowest prompt processing the route is allowed before its first
+   * byte, in prompt tokens per second, until a completed stream has measured
+   * the route: the first-byte wait is the larger of `streamIdleTimeoutMs`
+   * and twice the prompt's estimated tokens divided by this rate (or by the
+   * measured rate once known). Defaults to `50`.
+   */
+  minPromptTokensPerSecond?: number
   /**
    * Maximum base64-encoded image payload per request. When a request's
    * accumulated images exceed it, the oldest images are replaced by text
@@ -1346,7 +1778,7 @@ export interface PiAiProviderProfile {
    * the smallest quality-ladder output is used when no quality fits.
    */
   requestImageMaxBytes?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  /** Provider-owned model-request retry policy; omission uses normal mode with twelve retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -1469,6 +1901,8 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `bedrock-converse-stream`.
    */
   supportsStrictMode?: boolean
+  /** Whether to send z.ai's top-level `tool_stream: true` when tools are present so GLM streams tool calls; `openai-completions`. */
+  zaiToolStream?: boolean
   /** Prompt-cache marker convention; `openai-completions`. */
   cacheControlFormat?: NonNullable<OpenAICompletionsCompat['cacheControlFormat']>
   /**
@@ -1512,7 +1946,7 @@ export type PiAiThinkingTokenBudgetField = NonNullable<OpenAICompletionsCompat['
 
 Depends on: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`)
 
-Source: [`packages/llm/llm-pi-ai/src/config.ts:221`](../packages/llm/llm-pi-ai/src/config.ts)
+Source: [`packages/llm/llm-pi-ai/src/config.ts:252`](../packages/llm/llm-pi-ai/src/config.ts)
 
 <a id="deepseek-aidsh-llm-replay"></a>
 
@@ -1648,6 +2082,36 @@ export interface LspLocalServerConfig {
 
 Source: [`packages/lsp/lsp-stdio/src/index.ts:82`](../packages/lsp/lsp-stdio/src/index.ts)
 
+<a id="deepseek-aidsh-market-data"></a>
+
+## `@deepseek-ai/dsh-market-data`
+
+```ts config-catalog
+/** Plugin config for the market-data seam and its built-in provider. */
+export interface Config {
+  /**
+   * Contact string sent as `User-Agent` to SEC EDGAR, which requires a
+   * declaring name and email and refuses anonymous traffic. Supply your own,
+   * for example `Jane Roe jane@example.com`; activation fails without it.
+   */
+  secUserAgent: string
+  /** Deadline for one source request, in milliseconds; schema default 15000. */
+  timeoutMs?: number
+  /** How long a source response stays reusable, in milliseconds; schema default 300000. */
+  cacheTtlMs?: number
+  /** Minimum gap between two requests to one host, in milliseconds; schema default 120. */
+  minRequestGapMs?: number
+  /** Cap on one response body, in bytes; schema default 1048576. */
+  maxBodyBytes?: number
+  /** Provider id to use; omitted auto-selects when exactly one is usable. */
+  provider?: string
+  /** Register the built-in keyless provider; schema default true. Set false only when supplying another. */
+  builtinProvider?: boolean
+}
+```
+
+Source: [`packages/finance/market-data/src/index.ts:36`](../packages/finance/market-data/src/index.ts)
+
 <a id="deepseek-aidsh-mcp-client"></a>
 
 ## `@deepseek-ai/dsh-mcp-client`
@@ -1725,6 +2189,51 @@ export interface ReconnectConfig {
 
 Source: [`packages/mcp/mcp-client/src/index.ts:104`](../packages/mcp/mcp-client/src/index.ts)
 
+<a id="deepseek-aidsh-memory"></a>
+
+## `@deepseek-ai/dsh-memory`
+
+Requires: `storageDomain` · `commands` · `agents`
+
+```ts config-catalog
+/** Memory plugin configuration. */
+export interface Config {
+  /** Byte cap on the `<retrieved_memory>` block recalled into a request; trailing entries are dropped. */
+  maxRecallBytes: number
+  /** The most entries retrieved for one request by relevance to its text (default 5). */
+  recallLimit?: number
+  /** Entry kinds recalled with every request whatever its text, ahead of the retrieved entries (default `['preference']`). */
+  alwaysRecallKinds?: MemoryEntryKind[]
+  /** Distinct words of the current work a retrieved entry must share, capped at the work's own count (default 2). */
+  recallMinMatchedTerms?: number
+  /** Fraction of the best retrieved entry's score below which an entry is left out (default 0.5). */
+  recallScoreFloor?: number
+  /**
+   * Fraction of an entry's own words that, once the work matches them, retrieves it with fewer than
+   * `recallMinMatchedTerms` shared words: a short note about the word stays, a long one that mentions it does not (default 0.3).
+   */
+  recallNoteCoverage?: number
+  /** Days without recall or use before an approved entry turns `stale`; omit to never age. */
+  staleAfterDays?: number
+  /** Days without recall or use before an entry turns `archived`; omit to never archive. */
+  archiveAfterDays?: number
+  /**
+   * Note similarity (`noteSimilarity`) at or above which two entries are the same note: storing one updates the
+   * stored entry to the new wording, and curation merges a group into its newest entry (default 0.7).
+   */
+  duplicateThreshold?: number
+  /** Similarity at or above which recalled entries cluster into a skill suggestion; omit to never suggest. */
+  skillSuggestThreshold?: number
+  /** Smallest cluster that becomes a skill suggestion (default 3). */
+  skillSuggestMinEntries?: number
+}
+
+/** What kind of knowledge an entry records. */
+export type MemoryEntryKind = 'fact' | 'shortcut' | 'preference'
+```
+
+Source: [`packages/learning/memory/src/index.ts:59`](../packages/learning/memory/src/index.ts)
+
 <a id="deepseek-aidsh-message-feedback"></a>
 
 ## `@deepseek-ai/dsh-message-feedback`
@@ -1740,6 +2249,124 @@ export interface Config {
 ```
 
 Source: [`packages/feedback/message-feedback/src/index.ts:40`](../packages/feedback/message-feedback/src/index.ts)
+
+<a id="deepseek-aidsh-notify"></a>
+
+## `@deepseek-ai/dsh-notify`
+
+Requires: `commands`
+
+```ts config-catalog
+/** Plugin configuration; see {@link NotifyConfig}. */
+export type Config = NotifyConfig
+
+/** Plugin configuration. */
+export interface NotifyConfig {
+  /** Destinations, each addressed by `name`. */
+  channels: NotifyChannel[]
+  /** Which events are announced. */
+  events: NotifyEvents
+  /** Minimum time between two sends to the same channel, in milliseconds; a send inside it is dropped. */
+  minIntervalMs: number
+  /** HTTP timeout per send, in milliseconds. */
+  timeoutMs: number
+}
+
+/** One configured destination. */
+export type NotifyChannel = WebhookChannel | TelegramChannel | DiscordChannel
+
+/** Per-event switches. */
+export interface NotifyEvents {
+  /** A goal entered `blocked` for any reason other than exhausted transient retries. */
+  goalBlocked: boolean
+  /** A goal completed. */
+  goalCompleted: boolean
+  /** The round driver blocked a goal with `transient-retries-exhausted`. */
+  transientRetriesExhausted: boolean
+  /** An agent turn or step errored. */
+  sessionError: boolean
+  /** A `dsh-cron-sessions` run finished, with its outcome. */
+  cronRun: boolean
+  /** `dsh-spend-guard` crossed a session or daily token budget. */
+  spendBudgetReached: boolean
+  /** `dsh-research` recorded a breakthrough in a journal. */
+  researchBreakthrough: boolean
+  /** `dsh-digest` wrote the day's report on its timer. */
+  dailyDigest: boolean
+  /** `dsh-digest` wrote the weekly review on its timer. */
+  weeklyDigest: boolean
+  /** `dsh-off-peak` finished draining a window's queue. */
+  offPeakDrained: boolean
+}
+
+/** A generic HTTP endpoint receiving the JSON payload. */
+export interface WebhookChannel {
+  /** Channel name used by `/notify test` and in warnings. */
+  name: string
+  /** Transport discriminator. */
+  kind: 'webhook'
+  /** Destination URL. */
+  url: string
+  /** Extra request headers. */
+  headers?: Record<string, string>
+}
+
+/** A Telegram bot chat. */
+export interface TelegramChannel {
+  /** Channel name used by `/notify test` and in warnings. */
+  name: string
+  /** Transport discriminator. */
+  kind: 'telegram'
+  /** Credential reference (environment variable name) holding the bot token; never the token itself. */
+  botTokenEnv: string
+  /** Target chat id. */
+  chatId: string
+  /** Bot API base; defaults to `https://api.telegram.org`. */
+  apiBaseUrl?: string
+}
+
+/** A Discord channel webhook. */
+export interface DiscordChannel {
+  /** Channel name used by `/notify test` and in warnings. */
+  name: string
+  /** Transport discriminator. */
+  kind: 'discord'
+  /** The channel's webhook URL. */
+  url: string
+}
+```
+
+Source: [`packages/webhook/notify/src/index.ts:37`](../packages/webhook/notify/src/index.ts)
+
+<a id="deepseek-aidsh-off-peak"></a>
+
+## `@deepseek-ai/dsh-off-peak`
+
+Requires: `agents` · `commands` · `storageDomain`
+
+```ts config-catalog
+/** Off-peak configuration. */
+export interface Config {
+  /** Whether deferral and draining run at all; `false` leaves every round alone. */
+  enabled: boolean
+  /** Local-time windows in which deferred work runs. */
+  windows: OffPeakWindow[]
+  /** Maximum sessions resumed at once when a window opens. */
+  maxConcurrent: number
+  /** Whether a round already running when the window closes may finish. */
+  finishRoundInFlight: boolean
+}
+
+/** One configured wall-clock window; `start` later than `end` wraps past midnight. */
+export interface OffPeakWindow {
+  /** Zero-padded 24-hour local start time, `HH:MM`. */
+  readonly start: string
+  /** Zero-padded 24-hour local end time, `HH:MM`, exclusive. */
+  readonly end: string
+}
+```
+
+Source: [`packages/schedule/off-peak/src/index.ts:55`](../packages/schedule/off-peak/src/index.ts)
 
 <a id="deepseek-aidsh-office-to-pdf"></a>
 
@@ -2039,6 +2666,48 @@ export interface Config {
 
 Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
+<a id="deepseek-aidsh-research"></a>
+
+## `@deepseek-ai/dsh-research`
+
+Requires: `goals` · `commands` · `agents` · `sessions`
+
+```ts config-catalog
+/** Research plugin configuration. */
+export interface Config {
+  /** Research directory; a relative path resolves against each session's workspace directory. */
+  dir: string
+  /** Byte cap on the `<research_journal>` block injected into a request. */
+  maxRecallBytes: number
+  /** How many most-recent experiments the block lists. */
+  recentExperiments: number
+  /** How many breakthroughs of other journals the recall block lists (schema default 5; `0` disables). */
+  relatedBreakthroughs?: number
+  /** Hypothesis scoring after each recorded experiment. */
+  scoring: ScoringConfig
+  /** Upper bound on a `run_experiment` timeout in milliseconds; a larger request is capped. */
+  maxExperimentMs: number
+  /** Byte cap on the output a `run_experiment` call records and returns. */
+  maxOutputBytes: number
+}
+
+/** Hypothesis scoring configuration. */
+export interface ScoringConfig {
+  /** Whether an auxiliary request re-ranks open hypotheses after each experiment. */
+  enabled: boolean
+  /** Output cap of one scoring request. */
+  maxOutputTokens: number
+  /** Deadline of one scoring request in milliseconds. */
+  timeoutMs: number
+  /** Provider of the scoring route; absent with `model` absent reuses the session's route. */
+  provider?: string
+  /** Model of the scoring route. */
+  model?: string
+}
+```
+
+Source: [`packages/goal/research/src/index.ts:85`](../packages/goal/research/src/index.ts)
+
 <a id="deepseek-aidsh-sandbox-local"></a>
 
 ## `@deepseek-ai/dsh-sandbox-local`
@@ -2198,7 +2867,7 @@ export interface Config {
 export type JsonlCompression = 'zstd' | 'none'
 ```
 
-Source: [`packages/session/session-persistence-jsonl/src/index.ts:88`](../packages/session/session-persistence-jsonl/src/index.ts)
+Source: [`packages/session/session-persistence-jsonl/src/index.ts:89`](../packages/session/session-persistence-jsonl/src/index.ts)
 
 <a id="deepseek-aidsh-session-projection-cache"></a>
 
@@ -2475,6 +3144,33 @@ export interface Config {
 
 Source: [`packages/skill/skill-filesystem/src/index.ts:49`](../packages/skill/skill-filesystem/src/index.ts)
 
+<a id="deepseek-aidsh-skill-lock"></a>
+
+## `@deepseek-ai/dsh-skill-lock`
+
+Requires: `skills` · `commands`
+
+```ts config-catalog
+/** Skill-lock configuration. */
+export interface Config {
+  /** Whether the service and command are registered at all. */
+  enabled: boolean
+  /**
+   * Lockfile location, resolved against the session workspace when relative.
+   * The default keeps it beside the other workspace-owned Hydra state.
+   */
+  path: string
+  /**
+   * Log one warning per drifted skill when a status runs. Off by default: a
+   * long autonomous loop calling status repeatedly would otherwise repeat the
+   * same warning for every round.
+   */
+  warnOnDrift: boolean
+}
+```
+
+Source: [`packages/skill/skill-lock/src/index.ts:41`](../packages/skill/skill-lock/src/index.ts)
+
 <a id="deepseek-aidsh-skill-office"></a>
 
 ## `@deepseek-ai/dsh-skill-office`
@@ -2490,6 +3186,29 @@ export interface Config {
 ```
 
 Source: [`packages/skill/skill-office/src/index.ts:15`](../packages/skill/skill-office/src/index.ts)
+
+<a id="deepseek-aidsh-spend-guard"></a>
+
+## `@deepseek-ai/dsh-spend-guard`
+
+Requires: `agents` · `commands` · `storageDomain`
+
+```ts config-catalog
+/** Spend guard configuration. */
+export interface Config {
+  /** Tokens one session may consume before the action fires; absent means unlimited. */
+  perSessionTokens?: number
+  /** Tokens all sessions may consume per local day before the action fires; absent means unlimited. */
+  perDayTokens?: number
+  /** `pause-goal` pauses an active goal and asks the model to finish the step; `stop` cancels the turn. */
+  action: SpendAction
+}
+
+/** What the guard does when a budget is crossed. */
+export type SpendAction = 'pause-goal' | 'stop'
+```
+
+Source: [`packages/guard/spend-guard/src/index.ts:39`](../packages/guard/spend-guard/src/index.ts)
 
 <a id="deepseek-aidsh-spill-local"></a>
 
@@ -2672,7 +3391,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/subagent/subagent/src/index.ts:190`](../packages/subagent/subagent/src/index.ts)
+Source: [`packages/subagent/subagent/src/index.ts:192`](../packages/subagent/subagent/src/index.ts)
 
 <a id="deepseek-aidsh-subagent-acp"></a>
 
@@ -3023,6 +3742,12 @@ Requires: `tools` · `shell` · `systemPrompt` · `shellEnv`
 export interface Config {
   /** Expose `run_in_background` (default true); disabled calls are also rejected. */
   enableRunInBackground?: boolean
+  /**
+   * Whether the model must supply the UI-only `description` parameter (default
+   * true). `false` makes it optional for models whose function calling omits
+   * annotation parameters; the command text then stands in for the UI.
+   */
+  requireDescription?: boolean
 }
 ```
 
@@ -3177,6 +3902,28 @@ export interface Config {
 
 Source: [`packages/lsp/tool-lsp/src/index.ts:57`](../packages/lsp/tool-lsp/src/index.ts)
 
+<a id="deepseek-aidsh-tool-market"></a>
+
+## `@deepseek-ai/dsh-tool-market`
+
+Requires: `tools` · `marketData` · `commands`
+
+```ts config-catalog
+/** Plugin config for the market tools. */
+export interface Config {
+  /** Symbols one `market_quote` call may name. */
+  maxSymbols: number
+  /** Bars one `market_history` call may return. */
+  maxBars: number
+  /** Filings one `market_filings` call may return. */
+  maxFilings: number
+  /** Sessions the `/market` summary reads for its range. */
+  summaryBars: number
+}
+```
+
+Source: [`packages/finance/tool-market/src/index.ts:28`](../packages/finance/tool-market/src/index.ts)
+
 <a id="deepseek-aidsh-tool-present"></a>
 
 ## `@deepseek-ai/dsh-tool-present`
@@ -3204,10 +3951,16 @@ Requires: `tools` · `shell` · `systemPrompt` · `shellEnv`
 export interface Config {
   /** Expose `run_in_background` (default true); disabled calls are also rejected. */
   enableRunInBackground?: boolean
+  /**
+   * Whether the model must supply the UI-only `description` parameter (default
+   * true). `false` makes it optional for models whose function calling omits
+   * annotation parameters; the command text then stands in for the UI.
+   */
+  requireDescription?: boolean
 }
 ```
 
-Source: [`packages/shell/tool-pwsh/src/index.ts:51`](../packages/shell/tool-pwsh/src/index.ts)
+Source: [`packages/shell/tool-pwsh/src/index.ts:52`](../packages/shell/tool-pwsh/src/index.ts)
 
 <a id="deepseek-aidsh-tool-pwsh-persistent"></a>
 
@@ -3411,10 +4164,23 @@ export interface Config {
    * rejected.
    */
   allowParallelInProgress: boolean
+  /**
+   * Whether open tasks the model can no longer see (its latest `todo_write` left the visible
+   * history, as after a checkpoint) or was cut off from (the previous turn ended in an error, a
+   * cancel, or the output limit) come back as a task-state message on its next request (default true).
+   */
+  remindOpenTodos?: boolean
+  /**
+   * How many times one turn that wrote the list may be asked to continue or update it when it
+   * ends with open tasks (default 0, never). Off by default because a turn often stops with a
+   * plan on purpose (the user asked only for the plan, or the reply hit its output limit), and
+   * the push would spend a model call working against that.
+   */
+  maxOpenTodoContinuationsPerTurn?: number
 }
 ```
 
-Source: [`packages/todo/tool-todo/src/index.ts:29`](../packages/todo/tool-todo/src/index.ts)
+Source: [`packages/todo/tool-todo/src/index.ts:33`](../packages/todo/tool-todo/src/index.ts)
 
 <a id="deepseek-aidsh-tool-web"></a>
 
@@ -3460,7 +4226,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/tool-workflow/src/index.ts:32`](../packages/workflow/tool-workflow/src/index.ts)
+Source: [`packages/workflow/tool-workflow/src/index.ts:33`](../packages/workflow/tool-workflow/src/index.ts)
 
 <a id="deepseek-aidsh-tools"></a>
 
@@ -3490,13 +4256,32 @@ export interface Config {
    * restores strictly serial dispatch. Must be a positive integer.
    */
   maxParallelSubCalls?: number
+  /**
+   * Repair of model-supplied argument values before validation. `none`
+   * (default) validates the parsed arguments as sent; `lenient` first applies
+   * {@link coerceArguments} against the tool's parameter schema, for models
+   * whose function calling emits numbers and booleans as strings or `null` for
+   * an omitted optional parameter. Pre-execute listeners, guards, and the tool
+   * body all see the coerced arguments; the logged `tool/call` keeps the
+   * model's original text.
+   */
+  argumentCoercion?: 'none' | 'lenient'
+  /**
+   * Model-visible form of nullable parameters. `oneOf` (default) sends each
+   * tool's parameter schema as declared; `flat` applies
+   * {@link flattenNullableParameters} so a `oneOf: [X, {type: 'null'}]` parameter
+   * is presented as `X`, for function-call parsers that mishandle `oneOf`.
+   * Execution still validates against the declared schema, so `null` stays
+   * accepted.
+   */
+  nullableParameters?: 'oneOf' | 'flat'
 }
 
 /** How the registry presents its tools to the model (see {@link Config.mode}). */
 export type ToolPresentationMode = 'native' | 'ptc' | 'both'
 ```
 
-Source: [`packages/core/tools/src/index.ts:656`](../packages/core/tools/src/index.ts)
+Source: [`packages/core/tools/src/index.ts:668`](../packages/core/tools/src/index.ts)
 
 <a id="deepseek-aidsh-typert-loader"></a>
 
@@ -3715,6 +4500,24 @@ export interface Config {
 
 Source: [`packages/webhook/webhook-github/src/index.ts:17`](../packages/webhook/webhook-github/src/index.ts)
 
+<a id="deepseek-aidsh-workflow-journal"></a>
+
+## `@deepseek-ai/dsh-workflow-journal`
+
+Requires: `storageDomain` · `commands`
+
+```ts config-catalog
+/** Plugin configuration (all optional — `Config` supplies the defaults). */
+export interface Config {
+  /** Runs retained before the oldest settled ones are pruned (default 200). */
+  retainRuns?: number
+  /** Rows `/workflows` prints when the caller names no run (default 20). */
+  listLimit?: number
+}
+```
+
+Source: [`packages/workflow/workflow-journal/src/index.ts:32`](../packages/workflow/workflow-journal/src/index.ts)
+
 <a id="deepseek-aidsh-workflow-ptc"></a>
 
 ## `@deepseek-ai/dsh-workflow-ptc`
@@ -3737,7 +4540,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/workflow/workflow-ptc/src/index.ts:32`](../packages/workflow/workflow-ptc/src/index.ts)
+Source: [`packages/workflow/workflow-ptc/src/index.ts:36`](../packages/workflow/workflow-ptc/src/index.ts)
 
 <a id="deepseek-aidsh-workspace-changes"></a>
 
@@ -3772,7 +4575,9 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 
 - `@deepseek-ai/dsh-acp-app` — requires `cmdlineArgs` ([`packages/bundle/acp-app/src/index.ts`](../packages/bundle/acp-app/src/index.ts))
 - `@deepseek-ai/dsh-agent` ([`packages/core/agent/src/index.ts`](../packages/core/agent/src/index.ts))
+- `@deepseek-ai/dsh-api-learning-controller` — requires `memory` · `learning` ([`packages/api/learning-controller/src/index.ts`](../packages/api/learning-controller/src/index.ts))
 - `@deepseek-ai/dsh-api-remotes` — requires `typertGateway` ([`packages/api/remotes/src/index.ts`](../packages/api/remotes/src/index.ts))
+- `@deepseek-ai/dsh-api-usage-controller` — requires `sessionUsage` ([`packages/api/usage-controller/src/index.ts`](../packages/api/usage-controller/src/index.ts))
 - `@deepseek-ai/dsh-api-workspace-controller` — requires `typert` · `workspaceRegistry` ([`packages/api/workspace-controller/src/index.ts`](../packages/api/workspace-controller/src/index.ts))
 - `@deepseek-ai/dsh-authorization` — requires `credentials` ([`packages/credentials/authorization/src/index.ts`](../packages/credentials/authorization/src/index.ts))
 - `@deepseek-ai/dsh-browser-use` ([`packages/browser-use/browser-use/src/index.ts`](../packages/browser-use/browser-use/src/index.ts))
@@ -3783,6 +4588,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-agent-preset` ([`packages/client/ui-agent-preset/src/index.ts`](../packages/client/ui-agent-preset/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-approval` ([`packages/client/ui-approval/src/index.ts`](../packages/client/ui-approval/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-attachment` ([`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-brand-hydra` ([`packages/client/ui-brand-hydra/src/index.ts`](../packages/client/ui-brand-hydra/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-brand-official` ([`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-chat` ([`packages/client/ui-chat/src/index.ts`](../packages/client/ui-chat/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-commands` ([`packages/client/ui-commands/src/index.ts`](../packages/client/ui-commands/src/index.ts))
@@ -3795,6 +4601,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-input-trigger` ([`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-jobs` ([`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-layout` ([`packages/client/ui-layout/src/index.ts`](../packages/client/ui-layout/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-learning` ([`packages/client/ui-learning/src/index.ts`](../packages/client/ui-learning/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-message-feedback` ([`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-model-selection` ([`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-open-in-app` ([`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts))
@@ -3821,6 +4628,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-theme` ([`packages/client/ui-theme/src/index.ts`](../packages/client/ui-theme/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-usage` ([`packages/client/ui-usage/src/index.ts`](../packages/client/ui-usage/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
@@ -3837,7 +4645,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-experimental-computer-use-cua-driver-native` — requires `computerUse` · `tools` · `systemPrompt` ([`packages/experimental/computer-use-cua-driver-native/src/index.ts`](../packages/experimental/computer-use-cua-driver-native/src/index.ts))
 - `@deepseek-ai/dsh-fs-observation-policy` ([`packages/fs/fs-observation-policy/src/index.ts`](../packages/fs/fs-observation-policy/src/index.ts))
 - `@deepseek-ai/dsh-fs-ssh` — requires `ssh` · `sandboxPolicy` ([`packages/ssh/fs-ssh/src/index.ts`](../packages/ssh/fs-ssh/src/index.ts))
-- `@deepseek-ai/dsh-goal-round-driver` — requires `agents` · `goals` · `sessions` ([`packages/goal/goal-round-driver/src/index.ts`](../packages/goal/goal-round-driver/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-auto` — requires `webServer` · `loader` ([`packages/host/directory-picker-auto/src/index.ts`](../packages/host/directory-picker-auto/src/index.ts))
 - `@deepseek-ai/dsh-host-directory-picker-native` ([`packages/host/directory-picker-native/src/index.ts`](../packages/host/directory-picker-native/src/index.ts))
 - `@deepseek-ai/dsh-host-plugin-inventory` — requires `loader` ([`packages/host/plugin-inventory/src/index.ts`](../packages/host/plugin-inventory/src/index.ts))
@@ -3851,6 +4658,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-session-projection` ([`packages/session/session-projection/src/index.ts`](../packages/session/session-projection/src/index.ts))
 - `@deepseek-ai/dsh-session-stats` — requires `sessionProjections` ([`packages/session/session-stats/src/index.ts`](../packages/session/session-stats/src/index.ts))
 - `@deepseek-ai/dsh-session-turn-outline` — requires `sessionProjections` ([`packages/session/session-turn-outline/src/index.ts`](../packages/session/session-turn-outline/src/index.ts))
+- `@deepseek-ai/dsh-session-usage` — requires `sessionQuery` · `commands` · `storageDomain` ([`packages/session-query/session-usage/src/index.ts`](../packages/session-query/session-usage/src/index.ts))
 - `@deepseek-ai/dsh-skill-badge` — requires `skills` ([`packages/skill/skill-badge/src/index.ts`](../packages/skill/skill-badge/src/index.ts))
 - `@deepseek-ai/dsh-storage` ([`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))

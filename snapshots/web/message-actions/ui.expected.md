@@ -20,8 +20,9 @@
 - button "Copy":
   - img
 - tooltip "Copy"
-- button "Think The user wants me to read a.txt and b.txt, then reply with \"DONE\". Let me do both reads in parallel.":
+- 'button "Rewind to here: redo this turn in a new conversation"':
   - img
+- button "Think The user wants me to read a.txt and b.txt, then reply with \"DONE\". Let me do both reads in parallel.":
   - img
   - text: Think The user wants me to read a.txt and b.txt, then reply with "DONE". Let me do both reads in parallel.
 - paragraph: I will read both files before answering.
@@ -55,6 +56,8 @@
 - text: Now give the final answer. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - paragraph: DONE
 - button "Copy":
   - img
@@ -69,6 +72,8 @@
   - text: Ran for {{duration}}
 - text: {{clock}} Keep this later input in the original conversation. {{clock}}
 - button "Copy":
+  - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
   - img
 - paragraph: ORIGINAL ONLY
 - button "Copy":

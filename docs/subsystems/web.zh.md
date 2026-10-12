@@ -146,6 +146,60 @@ HTTP 提供方会解析每个实际请求，拒绝包括通过当前 DNS64 前�
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxmarketdata--marketdataruntime"></a>
+
+### `ctx.marketData` — `MarketDataRuntime`
+
+The market-data service. Registered as `ctx.marketData`.
+
+Every operation resolves its provider at call time: a configured id that is registered and usable wins; otherwise exactly one usable provider is required, so selection never depends on registration order. Data is informational and historical, delayed to the last settled session for the built-in source, and is not investment advice.
+
+```ts cordis-catalog
+/**
+ * Register a market-data provider under its own id.
+ * @param provider - the provider; its `id` is the registry key.
+ * @returns a disposer that unregisters it.
+ * @throws Error when the id is already registered.
+ */
+register(provider: MarketDataProvider): () => void
+
+/**
+ * Latest settled close for each symbol.
+ * @param symbols - symbols to quote.
+ * @param signal - optional cancellation signal.
+ * @returns one quote per symbol the source knows.
+ */
+async quote(symbols: readonly string[], signal?: AbortSignal): Promise<readonly Quote[]>
+
+/**
+ * Daily bars for one symbol.
+ * @param symbol - the symbol to read.
+ * @param request - date bounds and bar cap.
+ * @param signal - optional cancellation signal.
+ * @returns the series, oldest bar first.
+ */
+async history(symbol: string, request: HistoryRequest = {}, signal?: AbortSignal): Promise<History>
+
+/**
+ * The issuer behind a symbol.
+ * @param symbol - the symbol to describe.
+ * @param signal - optional cancellation signal.
+ * @returns the profile.
+ */
+async profile(symbol: string, signal?: AbortSignal): Promise<MarketProfile>
+
+/**
+ * Recent regulatory filings for a symbol.
+ * @param symbol - the symbol to read.
+ * @param request - form filter and count cap.
+ * @param signal - optional cancellation signal.
+ * @returns the filings, newest first.
+ */
+async filings(symbol: string, request: FilingsRequest = {}, signal?: AbortSignal): Promise<readonly Filing[]>
+```
+
+Source: [`packages/finance/market-data/src/index.ts`](../../packages/finance/market-data/src/index.ts)
+
 <a id="ctxweb--webruntime"></a>
 
 ### `ctx.web` — `WebRuntime`

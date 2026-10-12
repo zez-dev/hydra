@@ -30,6 +30,9 @@
       "path": "../../compaction/compaction"
     },
     {
+      "path": "../../learning/learning"
+    },
+    {
       "path": "../../core/agent"
     },
     {

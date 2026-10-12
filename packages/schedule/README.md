@@ -25,6 +25,8 @@ The schedule group lets an agent create, list, and cancel reminders for the curr
 | Package | Role | ctx key |
 |---|---|---|
 | [`schedule/`](schedule/README.md) | Session-local reminders: schedule, list, and cancel active records; publish an optional read-only projection for the header catalog and list-row marker; deliver due reminders as conversation messages | — (tools only, in the exact agent scope) |
+| [`cron-sessions/`](cron-sessions/README.md) | Durable cron schedules that start fresh sessions on a timer, with `/cron` management, catch-up, and run outcomes | `ctx.cronSessions` |
+| [`off-peak/`](off-peak/README.md) | Deferral of goal rounds outside the configured local-time windows into a durable queue, drained when a window opens, with `/offpeak` and an `off_peak` tool | `ctx.offPeak` |
 
 -----
 

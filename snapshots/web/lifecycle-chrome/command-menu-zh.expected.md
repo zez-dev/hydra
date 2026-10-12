@@ -9,3 +9,18 @@
   - option "权限 permission 切换权限预设（沙箱模式与审批策略）"
   - option "模型 model 选择本会话使用的模型"
   - option "下载日志 export 将当前会话内容导出为 ZIP"
+  - option "commands-gate Show the command gate policy and what it recently blocked"
+  - option "cron Schedule prompts that run in fresh sessions on a cron timer"
+  - 'option "digest Read a file or folder of knowledge and keep what it holds: procedures as skills, facts and rules as memory entries, or both"'
+  - 'option "doctor Check this machine: home, workspace, sandbox, native addon, git, plugins, tool calling, credentials"'
+  - option "kb Show knowledge base collections, attach or detach workspace folders, reindex, summarize, or embed them, or search passages"
+  - option "learn Review learned-memory candidates, promote entries or a suggested cluster to a skill, or import a file or folder of knowledge"
+  - option "memory List learned memory entries, forget one, curate, show archived entries, or list skill suggestions"
+  - option "offpeak Queue work for the next off-peak window and inspect the queue"
+  - 'option "report Write today''s Hydra report for this workspace to .dsh/reports; `week` writes the weekly review"'
+  - option "research Start or resume a research goal with a discovery journal that survives sessions and compaction"
+  - option "research-ingest Read a file or folder of papers, notes, or code into the active research journal as hypotheses, results, and dead ends"
+  - option "skills-lock Report which skills changed since they were trusted, and record the current content"
+  - option "spend Show token spend for this session and today against the budgets"
+  - 'option "usage Show token usage across every session: totals, a per-model table, and the last 12 weeks by day"'
+  - option "workflows List recent workflow runs and what resuming one would replay"

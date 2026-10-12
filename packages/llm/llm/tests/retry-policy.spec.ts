@@ -12,11 +12,12 @@ describe('provider retry policy', () => {
 
     expect(policy).toEqual({
       mode: 'normal',
-      maxRetries: 5,
-      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'TIMEOUT', 'TRANSPORT'],
+      maxRetries: 12,
+      retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'STREAM_CLOSED', 'TIMEOUT', 'TRANSPORT'],
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
+      maxProviderDelayMs: 60_000,
     })
     expect(Object.isFrozen(policy)).toBe(true)
     if (policy.mode !== 'normal') throw new Error('expected normal policy')
@@ -46,6 +47,7 @@ describe('provider retry policy', () => {
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0,
+      maxProviderDelayMs: 60_000,
     })
   })
 
@@ -55,6 +57,7 @@ describe('provider retry policy', () => {
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
+      maxProviderDelayMs: 60_000,
     })
     expect(RetryPolicySchema).toBeDefined()
   })
@@ -71,6 +74,7 @@ describe('provider retry policy', () => {
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
+      maxProviderDelayMs: 60_000,
     })
   })
 
@@ -84,6 +88,8 @@ describe('provider retry policy', () => {
     [{ mode: 'always', backoff: { maxDelayMs: MAX_TIMER_DELAY_MS + 1 } }, /maxDelayMs/],
     [{ mode: 'normal', backoff: { initialDelayMs: 20, maxDelayMs: 10 } }, /less than or equal/],
     [{ mode: 'always', backoff: { jitterRatio: 1.1 } }, /jitterRatio/],
+    [{ mode: 'normal', backoff: { maxProviderDelayMs: Number.POSITIVE_INFINITY } }, /maxProviderDelayMs/],
+    [{ mode: 'always', backoff: { maxProviderDelayMs: MAX_TIMER_DELAY_MS + 1 } }, /maxProviderDelayMs/],
     [{ mode: 'normal', retryableCodes: [] }, /must not be empty/],
     [{ mode: 'normal', retryableCodes: ['SERVER', 'SERVER'] }, /duplicates/],
     [{ mode: 'normal', retryableCodes: [''] }, /non-empty strings/],

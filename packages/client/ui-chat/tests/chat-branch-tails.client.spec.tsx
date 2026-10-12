@@ -39,12 +39,13 @@ const useDetachedChat: ChatNodeViewProps['useChat'] = bindSnapshotSelector({
 interface MessageItemProps {
   readonly node: ConversationNode
   readonly t: ChatNodeViewProps['t']
+  readonly rewindTo?: (seq: number) => void
   readonly referenceLabels?: readonly string[]
   readonly skillNames?: readonly string[]
 }
 
 /** Legacy-node fixture adapter for the independently registered renderers. */
-function MessageItem({ node, t: translate, referenceLabels, skillNames }: MessageItemProps) {
+function MessageItem({ node, t: translate, referenceLabels, skillNames, rewindTo }: MessageItemProps) {
   const kind = node.kind === 'assistant' ? 'assistant-step' : node.kind
   const viewNode: ChatConversationViewNode = {
     key: `fixture:${node.kind}:${node.seq}`,
@@ -66,6 +67,7 @@ function MessageItem({ node, t: translate, referenceLabels, skillNames }: Messag
   }
   const props = {
     node: viewNode, t: translate, renderMessageImages, openFile: vi.fn(), openSkill: vi.fn(), useChat: useDetachedChat,
+    ...(rewindTo === undefined ? {} : { rewindTo }),
   } as unknown as ChatNodeViewProps
   switch (node.kind) {
     case 'user':
@@ -83,6 +85,43 @@ function MessageItem({ node, t: translate, referenceLabels, skillNames }: Messag
       throw new Error(`unsupported MessageItem fixture kind: ${node.kind}`)
   }
 }
+
+describe('user message rewind action', () => {
+  it('offers Rewind to here on a durable user message and reports its anchor seq', () => {
+    const rewindTo = vi.fn()
+    const view = render(
+      <MessageItem
+        t={t}
+        rewindTo={rewindTo}
+        node={{
+          kind: 'user',
+          seq: 9,
+          time: 1_000,
+          content: [{ type: 'text', text: 'first try' }] as never,
+          source: null,
+        }}
+      />,
+    )
+    fireEvent.click(view.getByRole('button', { name: zh['message.rewind'] }))
+    expect(rewindTo).toHaveBeenCalledExactlyOnceWith(9)
+  })
+
+  it('hides the rewind action when the view supplies no rewind seat', () => {
+    const view = render(
+      <MessageItem
+        t={t}
+        node={{
+          kind: 'user',
+          seq: 9,
+          time: 1_000,
+          content: [{ type: 'text', text: 'first try' }] as never,
+          source: null,
+        }}
+      />,
+    )
+    expect(view.queryByRole('button', { name: zh['message.rewind'] })).toBeNull()
+  })
+})
 
 describe('MessageItem arms', () => {
   it('renders an adjacent session mention as a chip even without trailing whitespace', () => {

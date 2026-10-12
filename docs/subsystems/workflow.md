@@ -10,7 +10,7 @@ Sources: browser-safe vocabulary in [`packages/workflow/workflow/src/types.ts`](
 
 ## The start request
 
-What a caller asks for when starting a run. The ordinary workflow tool builds this from the model's `{ script, meta, args }` call plus the calling agent; specialized consumers may also select one engine-wide `subagentProvider` and lower `maxTotalAgents` for the run, but the script cannot observe or replace either policy. `meta` and `args` are plain JSON DATA (the engine validates `meta` against its schema and rejects loud BEFORE anything runs — no script text is ever evaluated to obtain it). `parent` is REQUIRED — every child the script starts is attributed to it, and cwd, lineage, and depth pass through the [subagent seam](subagent.md).
+What a caller asks for when starting a run. The ordinary workflow tool builds this from the model's `{ script, meta, args, resumeRunId }` call plus the calling agent; specialized consumers may also select one engine-wide `subagentProvider` and lower `maxTotalAgents` for the run, but the script cannot observe or replace either policy. `meta` and `args` are plain JSON DATA (the engine validates `meta` against its schema and rejects loud BEFORE anything runs — no script text is ever evaluated to obtain it). `parent` is REQUIRED — every child the script starts is attributed to it, and cwd, lineage, and depth pass through the [subagent seam](subagent.md).
 
 ```ts type-equiv
 /**
@@ -29,6 +29,15 @@ interface WorkflowStartRequest {
   subagentProvider?: string
   /** Optional per-run total-child ceiling. */
   maxTotalAgents?: number
+  /**
+   * Resume a journaled run: `agent()` calls whose position and input hash
+   * still match a completed call of that run return its recorded result
+   * instead of spawning a child, and everything else runs for real. This is a
+   * NEW run that records `resumedFrom`; the resumed run is never rewritten.
+   * Requires a mounted journal Service Provider, and names a run the journal
+   * knows — an engine rejects the request otherwise.
+   */
+  resumeRunId?: WorkflowRunId
   /** The agent on whose behalf the run executes (parent of every child). */
   parent: Agent
   /** Cancels the run when aborted. */
@@ -115,6 +124,14 @@ interface WorkflowRun {
 
 Hook misuse inside a script — bad arguments, unknown/deferred `agent()` options, a schema outside the [structured-output subset](../../packages/core/tools/README.md), a tripped cap, a seam start failure, cancellation — throws a `WorkflowError` with `fatal: true`. The `parallel()`/`pipeline()` combinators RE-THROW fatal errors instead of mapping the item to `null`: a typo'd option must kill the script loudly, never dissolve into something that reads as an ordinary child failure. The per-item `null` is reserved for child-run failures (a non-`completed` stop reason) and ordinary in-stage script errors.
 
+## The run journal and resuming: `ctx.workflowJournal`
+
+A second, OPTIONAL seam records what a run did, so a run cut off by a lost connection or a spent budget continues instead of starting over. Service Definition: `WorkflowJournalService` in [`journal-types.ts`](../../packages/workflow/workflow/src/journal-types.ts). Service Provider: [dsh-workflow-journal](../../packages/workflow/workflow-journal), which keeps one record per run in the `workflow_runs` storage domain and contributes `/workflows`. Consumer: the engine, which reads it through `ctx.get('workflowJournal')` and works unchanged when nothing provides it.
+
+The engine `open`s a record when a run starts, `record`s every `agent()` call as it settles, and `close`s the record with the terminal result. A run's result does not resolve until that closing write is durable, so a settled run never reads back as `running`. A record still marked `running` when the journal next opens belonged to a process that is gone and reconciles to `interrupted` — the first moment anything could observe it.
+
+A call is recorded REPLAYABLE only when its child reached `stopReason: 'completed'`; a child that hit a rate limit or a cut connection is recorded not-ok, so a resume runs it again rather than reproducing the failure. Two hashes decide what a resume reuses: `scriptHash(body)` over the script verbatim, reported by `plan()` as `scriptChanged`, and `callKeyHash({prompt, provider, model, schema})` per call. A `resumeRunId` run matches each call by ORDINAL AND key hash together: a match returns the recorded result without starting a child, and everything else — an edited prompt, a changed route, a call that never completed — runs for real. The resumed run is never rewritten; the resume is a new run recording `resumedFrom`.
+
 ## Events
 
 The `workflow/*` events (`workflow/start`, `workflow/phase`, `workflow/log`, `workflow/agent-start`, `workflow/agent-end`, `workflow/end` — see the [events catalog](#cordis-surface)) are **observe-only** emits carrying DATA SNAPSHOTS: every payload starts with `WorkflowRunInfo` (id + meta), never the live `WorkflowRun`, so a subscriber cannot gain `cancel`/`dispose`, and `workflow/end` deliberately omits the result value (a listener observing outcomes must not receive a mutable alias of the caller's result). Every emit is per-listener contained — a throwing subscriber is logged, never propagated, and cannot starve the listeners registered after it — and every listener receives its own payload clone, so mutating it corrupts neither the engine nor other listeners; the containment mirrors `subagent/start`/`subagent/end`.
@@ -152,6 +169,61 @@ abstract start(request: WorkflowStartRequest): WorkflowRun
 ```
 
 Source: [`packages/workflow/workflow/src/index.ts`](../../packages/workflow/workflow/src/index.ts)
+
+<a id="ctxworkflowjournal--workflowjournalservice"></a>
+
+### `ctx.workflowJournal` — `WorkflowJournalService`
+
+Durable record of workflow runs. A Service Provider orders writes per run id, so a caller may start `open`, `record` and `close` without awaiting the previous one and still have them applied in call order; a `record` that names a run the journal never opened is dropped rather than inventing one.
+
+```ts cordis-catalog
+/**
+ * Record a run as it starts.
+ * @param open - the run's identity, session, script hash and meta.
+ * @returns once the opening record is durable.
+ */
+open(open: WorkflowRunOpen): Promise<void>
+
+/**
+ * Append one settled `agent()` call to a run.
+ * @param id - the run the call belongs to.
+ * @param call - the settled call.
+ * @returns once the call is durable.
+ */
+record(id: WorkflowRunId, call: JournalCall): Promise<void>
+
+/**
+ * Close a run with its terminal result.
+ * @param id - the run that settled.
+ * @param result - the run's terminal result.
+ * @returns once the closing record is durable.
+ */
+close(id: WorkflowRunId, result: WorkflowResult): Promise<void>
+
+/**
+ * Read one run.
+ * @param id - the run to read.
+ * @returns the record, or `undefined` when the journal has never seen it.
+ */
+get(id: WorkflowRunId): WorkflowRunRecord | undefined
+
+/**
+ * Read recent runs, newest first.
+ * @param limit - maximum records to return; the Service Provider's configured page size by default.
+ * @returns the records, newest first.
+ */
+list(limit?: number): readonly WorkflowRunRecord[]
+
+/**
+ * Describe what resuming a run with a given script would replay.
+ * @param id - the run to resume.
+ * @param scriptHash - hash of the script body the resume would run.
+ * @returns the plan, or `undefined` when the journal has never seen the run.
+ */
+plan(id: WorkflowRunId, scriptHash: string): ResumePlan | undefined
+```
+
+Source: [`packages/workflow/workflow/src/journal-types.ts`](../../packages/workflow/workflow/src/journal-types.ts)
 
 <a id="workflow-events"></a>
 

@@ -10,6 +10,8 @@ import GoalService, {
   GoalId,
   decodeGoalChange,
   foldGoal,
+  isUnlimitedGoalRounds,
+  UNLIMITED_GOAL_ROUNDS,
 } from '@deepseek-ai/dsh-goal'
 import type { GoalChangeMeta, GoalRef, GoalSnapshotChangeMeta } from '@deepseek-ai/dsh-goal'
 import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
@@ -149,7 +151,7 @@ describe('GoalService creation and replay', () => {
     expect(() => ctx.goals.create(agent, { objective: '   ' })).toThrow(expect.objectContaining({
       code: 'GOAL_INVALID_OBJECTIVE',
     }))
-    expect(() => ctx.goals.create(agent, { objective: 'x', maxGoalRounds: 0 })).toThrow(expect.objectContaining({
+    expect(() => ctx.goals.create(agent, { objective: 'x', maxGoalRounds: -3 })).toThrow(expect.objectContaining({
       code: 'GOAL_INVALID_MAX_ROUNDS',
     }))
     expect(() => ctx.goals.create(agent, { objective: 'x', maxGoalRounds: 1.5 })).toThrow(GoalError)
@@ -842,5 +844,27 @@ describe('goal replay validation', () => {
       roundsStarted: 0,
       lastRef: { id: change.goal.id, revision: 2 },
     })
+  })
+})
+
+describe('unlimited round cap', () => {
+  it('treats defaultMaxGoalRounds: 0 as an unlimited deployment default', async () => {
+    const { ctx, agent } = await harness({ defaultMaxGoalRounds: 0 })
+    const goal = ctx.goals.create(agent, { objective: 'run for days' })
+    expect(goal.maxGoalRounds).toBe(UNLIMITED_GOAL_ROUNDS)
+    expect(isUnlimitedGoalRounds(goal.maxGoalRounds)).toBe(true)
+    expect(isUnlimitedGoalRounds(256)).toBe(false)
+  })
+
+  it('treats maxGoalRounds: 0 on a create request as unlimited', async () => {
+    const { ctx, agent } = await harness({ defaultMaxGoalRounds: 3 })
+    const goal = ctx.goals.create(agent, { objective: 'run for days', maxGoalRounds: 0 })
+    expect(goal.maxGoalRounds).toBe(UNLIMITED_GOAL_ROUNDS)
+  })
+
+  it('still rejects a negative cap', async () => {
+    const { ctx, agent } = await harness({ defaultMaxGoalRounds: 3 })
+    expect(() => ctx.goals.create(agent, { objective: 'x', maxGoalRounds: -1 }))
+      .toThrow(expect.objectContaining({ code: 'GOAL_INVALID_MAX_ROUNDS' }))
   })
 })

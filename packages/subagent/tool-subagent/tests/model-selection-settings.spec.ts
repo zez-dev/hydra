@@ -297,6 +297,7 @@ describe('SubagentModelSelectionConfig', () => {
     const payload = {
       agent: enabled.agent,
       messages: [],
+      prompt: { systemPrompt: '', tools: [] },
       turn: 1,
       step: 1,
       signal: new AbortController().signal,
@@ -451,6 +452,7 @@ describe('SubagentModelSelectionConfig', () => {
     const payload = {
       agent: disabled,
       messages: [],
+      prompt: { systemPrompt: '', tools: [] },
       turn: 1,
       step: 1,
       signal: new AbortController().signal,

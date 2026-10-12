@@ -74,6 +74,8 @@ export interface IdleWatchdog {
   next<T>(iterator: AsyncIterator<T>): Promise<IteratorResult<T>>
   /** Rearm an outstanding demand after transport activity that yields no iterator value; otherwise a no-op. */
   pulse(): void
+  /** Give the next read the first-read budget again, for a caller that reopened the producer's source. */
+  restart(): void
   /** Clear an armed timer; safe to call once at the owning stream's exit. */
   [Symbol.dispose](): void
 }
@@ -121,14 +123,20 @@ export function deadline(
  * @param upstream - caller cancellation fused into the stable signal.
  * @param timeoutMs - positive finite idle interval in milliseconds.
  * @param code - capability-owned code carried by the timeout reason.
+ * @param firstTimeoutMs - optional positive finite budget for the first read
+ *   alone, and for the first read after {@link IdleWatchdog.restart}, for a
+ *   producer that is silent while it prepares its first result; later reads
+ *   use `timeoutMs`.
  * @returns a stable signal, guarded next operation, and timer disposer.
  */
 export function idleWatchdog(
   upstream: AbortSignal | undefined,
   timeoutMs: number,
   code: string,
+  firstTimeoutMs?: number,
 ): IdleWatchdog {
   assertTimerDelay(timeoutMs, 'idleWatchdog timeoutMs')
+  if (firstTimeoutMs !== undefined) assertTimerDelay(firstTimeoutMs, 'idleWatchdog firstTimeoutMs')
   const timeout = new AbortController()
   const signal = upstream === undefined
     ? timeout.signal
@@ -136,12 +144,14 @@ export function idleWatchdog(
   let timer: ReturnType<typeof setTimeout> | undefined
   let outstanding = false
   let disposed = false
+  let reads = 0
 
   const arm = (): void => {
     if (timer !== undefined) clearTimeout(timer)
+    const budget = reads === 0 && firstTimeoutMs !== undefined ? firstTimeoutMs : timeoutMs
     timer = setTimeout(() => {
-      timeout.abort(new TimeoutReason(code, timeoutMs))
-    }, timeoutMs)
+      timeout.abort(new TimeoutReason(code, budget))
+    }, budget)
   }
 
   return {
@@ -157,11 +167,15 @@ export function idleWatchdog(
         clearTimeout(timer)
         timer = undefined
         outstanding = false
+        reads += 1
       }
     },
     pulse(): void {
       if (disposed || !outstanding) return
       arm()
+    },
+    restart(): void {
+      reads = 0
     },
     [Symbol.dispose](): void {
       if (disposed) return

@@ -43,13 +43,13 @@ async function harness() {
     runId: WorkflowRunId('run'), seq: 1, label: 'workflow-child', childId,
   })
   const step = (overrides = {}) => agentEvents(ctx, agent).waterfall('agent/pre-step', {
-    turn: 1, step: 1, messages, signal: controller.signal, ...overrides,
+    turn: 1, step: 1, messages, prompt: { systemPrompt: '', tools: [] }, signal: controller.signal, ...overrides,
   }, next)
   return { ctx, fiber, parent, other, session, agent, controller, decision, next, start, step }
 }
 
 describe('advanced Python snapshot workflow ordering', () => {
-  it('blocks a real spawned child before its descriptor and first model request', async () => {
+  it('blocks a real spawned child after its descriptor and before its first model request', async () => {
     const ctx = new Context()
     const entered = Promise.withResolvers<Agent>()
     const order: string[] = []
@@ -82,13 +82,14 @@ describe('advanced Python snapshot workflow ordering', () => {
     const child = await entered.promise
     expect(child.id).toBe(run.id)
     expect(adapter.requests).toHaveLength(0)
-    expect(child.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(false)
+    expect(child.session.snapshotEvents().some(event => event.type === 'subagent/descriptor')).toBe(true)
     parent.session.append('tool-workflow/agent-start', {
       runId: WorkflowRunId('run'), seq: 1, label: 'workflow-child', childId: child.id,
     })
     expect((await run.result).output).toEqual([{ type: 'text', text: 'child complete' }])
     expect(adapter.requests).toHaveLength(1)
-    expect(order).toEqual(['tool-workflow/agent-start', 'subagent/descriptor'])
+    // The descriptor lands in the child's creation setup, before any listener here sees the session.
+    expect(order).toEqual(['tool-workflow/agent-start'])
   })
 
   it('holds the child until the exact parent records the exact member', async () => {

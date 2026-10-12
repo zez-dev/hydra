@@ -1,7 +1,8 @@
 /**
  * Incremental chunk-to-message assembler. This is the single canonical assembly
  * algorithm used by the agent loop to build an assistant message from a chunk
- * stream while logging the raw chunks for replay fidelity.
+ * stream while logging the raw chunks for replay fidelity. `streamText` runs
+ * the same assembly for a text-only request and returns its text.
  *
  * @module @deepseek-ai/dsh-llm/assembler
  */
@@ -204,5 +205,64 @@ export class BlockAssembler {
    */
   message(source: MessageSource = { kind: 'plugin', plugin: 'dsh-llm/assembler' }): Message {
     return createMessage({ role: 'assistant', content: this.blocks(), source })
+  }
+}
+
+/** The caller's errors for the two finish reasons that end a text-only request without its answer. */
+interface TextRequestErrors {
+  /** Error for output cut at the request's output-token cap. */
+  readonly maxTokens: () => Error
+  /** Error for output that requested a tool. */
+  readonly toolCalls: () => Error
+}
+
+/**
+ * Assemble one text-only model request to its end and return its text.
+ * @param chunks - the request's stream, as `ctx.llm.stream(options)` returns it.
+ * @param signal - checked after every chunk; an abort throws its reason.
+ * @param errors - the caller's errors for truncated and tool-calling output.
+ * @returns the text blocks, concatenated.
+ * @throws the signal's abort reason; an `Error` with the failure's message and
+ *   `code` for a failed or aborted request; the caller's error for truncated or
+ *   tool-calling output; an error naming any other finish reason.
+ */
+export async function streamText(
+  chunks: AsyncIterable<StreamChunk>,
+  signal: AbortSignal,
+  errors: TextRequestErrors,
+): Promise<string> {
+  const assembler = new BlockAssembler()
+  for await (const chunk of chunks) {
+    signal.throwIfAborted()
+    assembler.push(chunk)
+  }
+  const failure = textFinishFailure(assembler.finish, errors)
+  if (failure !== undefined) throw failure
+  return assembler.blocks()
+    .filter((block): block is Extract<ContentBlock, { type: 'text' }> => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+}
+
+/**
+ * The error a text-only request's finish reason represents.
+ * @param finish - the assembled finish reason.
+ * @param errors - the caller's errors for truncated and tool-calling output.
+ * @returns `undefined` for a clean stop, else the error to throw.
+ */
+function textFinishFailure(finish: FinishReason, errors: TextRequestErrors): Error | undefined {
+  switch (finish.kind) {
+    case 'stop':
+      return undefined
+    case 'error':
+    case 'aborted':
+      return Object.assign(new Error(finish.failure.message), { code: finish.failure.code })
+    case 'max-tokens':
+      return errors.maxTokens()
+    case 'tool-calls':
+      return errors.toolCalls()
+    default:
+      // FinishReasonMap is merge-extensible; a reason this function does not know is no clean stop.
+      return new Error(`unsupported finish reason "${String((finish as { kind?: unknown }).kind)}"`)
   }
 }

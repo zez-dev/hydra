@@ -71,6 +71,22 @@ const EXCEEDS_MODEL_CONTEXT = new RegExp(
 )
 
 /**
+ * Gateway-specific overflow wording that names no "context" at all. One entry
+ * per provider family, each pinned by a test: z.ai/GLM (`tokens exceed the
+ * maximum context length`, error 1261), DashScope/Qwen (`Range of input length
+ * should be [...]`, `input length exceeds`), OpenAI-compatible relays (`input or output tokens must be
+ * reduced`; bare `too many tokens` stays rate-limit wording), and Anthropic-style
+ * `prompt is too long: N tokens > M maximum`.
+ */
+const GATEWAY_CONTEXT_OVERFLOW: readonly RegExp[] = [
+  /\btokens?\s+exceed(?:s|ed)?\s+(?:the\s+)?(?:maximum|max)\b/i,
+  /\brange\s+of\s+input\s+length\s+should\s+be\b/i,
+  /\binput\s+length\s+exceed(?:s|ed)?\b/i,
+  /\binput\s+or\s+output\s+tokens\s+must\s+be\s+reduced\b/i,
+  /\bprompt\s+is\s+too\s+long\b/i,
+]
+
+/**
  * Recognize the context-overflow wording used by OpenAI-compatible providers
  * and library adapters. Adapters pass all available provider code, type, and
  * message text so both thrown and in-band delivery styles share one classifier.
@@ -79,6 +95,7 @@ const EXCEEDS_MODEL_CONTEXT = new RegExp(
  */
 export function isContextWindowExceededError(detail: string): boolean {
   return STRUCTURED_CONTEXT_OVERFLOW.test(detail)
+    || GATEWAY_CONTEXT_OVERFLOW.some(pattern => pattern.test(detail))
     || /\b(?:maximum|max)(?:\s+(?:allowed|supported))?\s+context\s+(?:length|window)\b/i.test(detail)
     || TOO_LARGE_FOR_CONTEXT.test(detail)
     || /\b(?:input|prompt|request)\s+(?:is\s+)?too\s+(?:long|large)\s+for\s+(?:this|the)\s+model\b/i.test(detail)

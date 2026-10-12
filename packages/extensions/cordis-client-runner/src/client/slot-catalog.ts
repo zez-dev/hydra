@@ -176,7 +176,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.chat.assistant-actions\', () => ctx.slots.register(\n      { name: \'conversation.chat.assistant-actions\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-chat/src/client/contract/slots.ts:219',
+    source: 'packages/client/ui-chat/src/client/contract/slots.ts:223',
   },
   {
     key: 'conversation.chat.commandview',
@@ -224,7 +224,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     occupants: [],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.chat.commandview\', () => ctx.slots.register(\n      { name: \'conversation.chat.commandview\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-chat/src/client/contract/slots.ts:207',
+    source: 'packages/client/ui-chat/src/client/contract/slots.ts:211',
   },
   {
     key: 'conversation.chat.node',
@@ -241,7 +241,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       },
     ],
     ownerProps: [
-      '/** Stable owner currency delivered to a keyed Chat renderer. */\nexport interface ChatNodeOwnerProps {\n  cwd?: string | undefined\n  /** Open the current source file of a skill referenced by a sent message. */\n  openSkill: (name: string) => void\n  openFile: (path: string, options?: OpenFileOptions) => void\n  inspectCall: (callId: ToolCallId) => void\n  forkAt: (seq: number) => void\n  /**\n   * Session-authorized image loader, down-threaded from the Chat view so a\n   * chat-node renderer can render the attachment presentation slot directly\n   * with only the durable references plus this loader, instead of receiving a\n   * rendering closure.\n   */\n  loadImage: MessageImageLoader\n  renderMessageImages: RenderMessageImages\n  fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined\n  /** Turn-process state when this Node belongs to a projected Turn. */\n  turnProcess?: TurnProcessOwnerProps | undefined\n}',
+      '/** Stable owner currency delivered to a keyed Chat renderer. */\nexport interface ChatNodeOwnerProps {\n  cwd?: string | undefined\n  /** Open the current source file of a skill referenced by a sent message. */\n  openSkill: (name: string) => void\n  openFile: (path: string, options?: OpenFileOptions) => void\n  inspectCall: (callId: ToolCallId) => void\n  forkAt: (seq: number) => void\n  /** Rewind: open a fork cut before the turn holding `seq`, its prompt pre-filled in the composer; absent hides the action. */\n  rewindTo?: ((seq: number) => void) | undefined\n  /**\n   * Session-authorized image loader, down-threaded from the Chat view so a\n   * chat-node renderer can render the attachment presentation slot directly\n   * with only the durable references plus this loader, instead of receiving a\n   * rendering closure.\n   */\n  loadImage: MessageImageLoader\n  renderMessageImages: RenderMessageImages\n  fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined\n  /** Turn-process state when this Node belongs to a projected Turn. */\n  turnProcess?: TurnProcessOwnerProps | undefined\n}',
     ],
     ownerPropsReferences: [
       'MarkdownFileMentions',
@@ -268,7 +268,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'useProjection: UseProjection',
       'useTrajectory: UseTrajectory',
     ],
-    keyDomain: 'fixed by the owner\'s key table { [Kind in ChatNodeKind]: { node: ChatNode<Kind> } }, already taken: assistant-step, command, command-input, compaction, context, manual-compaction, model-retry, steering, system-prompt, tool-call, turn-error, turn-max-tokens, turn-process, turn-tail, unknown, user, workflow-run',
+    keyDomain: 'fixed by the owner\'s key table { [Kind in ChatNodeKind]: { node: ChatNode<Kind> } }, already taken: assistant-step, command, command-input, compaction, context, learning-review, manual-compaction, model-retry, steering, system-prompt, tool-call, turn-error, turn-max-tokens, turn-process, turn-tail, unknown, user, workflow-run',
     hookContext: 'ConversationLocationDataStore<ConversationTurnDataMap> | undefined',
     slotInject: 'ChatNodeTurnDataInjected',
     declaredBy: 'an entry in \'conversation.view\' (client-ui-chat), so it exists while that entry is mounted',
@@ -284,6 +284,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-chat RetryNodeView key \'model-retry\'',
       'client-ui-chat TurnErrorNodeView key \'turn-error\'',
       'client-ui-chat TurnMaxTokensNodeView key \'turn-max-tokens\'',
+      'client-ui-chat LearningReviewNodeView key \'learning-review\'',
       'client-ui-chat TurnProcessNodeView key \'turn-process\'',
       'client-ui-chat TurnTailNodeView key \'turn-tail\'',
       'client-ui-chat UnknownNodeView key \'unknown\'',
@@ -293,7 +294,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.chat.node\', () => ctx.slots.register(\n      { name: \'conversation.chat.node\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-chat/src/client/contract/slots.ts:188',
+    source: 'packages/client/ui-chat/src/client/contract/slots.ts:192',
   },
   {
     key: 'conversation.chat.turnTail',
@@ -354,7 +355,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.chat.turnTail\', () => ctx.slots.register(\n      { name: \'conversation.chat.turnTail\', id: \'my-entry\', order: 100, label: \'My entry\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-chat/src/client/contract/slots.ts:213',
+    source: 'packages/client/ui-chat/src/client/contract/slots.ts:217',
   },
   {
     key: 'conversation.composer',
@@ -564,8 +565,10 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     hookContext: '',
     slotInject: '',
     declaredBy: 'factory \'conversation.content\' (client-ui-conversation), so it exists while that definition is registered',
-    occupants: [],
-    replaceRisk: 'none',
+    occupants: [
+      'client-ui-brand-hydra HydraHeroMark',
+    ],
+    replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.hero.brand.mark\', () => ctx.slots.register(\n      { name: \'conversation.hero.brand.mark\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
     source: 'packages/client/ui-conversation/src/client/contract/slots.ts:184',
   },
@@ -1062,7 +1065,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     ],
     replaceRisk: 'shadows-shipped-ui',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'conversation.message.images\', () => ctx.slots.register(\n      { name: \'conversation.message.images\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
-    source: 'packages/client/ui-chat/src/client/contract/slots.ts:201',
+    source: 'packages/client/ui-chat/src/client/contract/slots.ts:205',
   },
   {
     key: 'conversation.plan-review.actions',
@@ -2186,6 +2189,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'settings.section\' (client-ui-settings-plugins), so it exists while that entry is mounted',
     occupants: [
+      'client-ui-learning LearningSettingsTab id \'learning\'',
       'client-ui-settings-plugin-inventory PluginInventorySettingsTab id \'all\'',
     ],
     replaceRisk: 'none',
@@ -2381,6 +2385,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'sidebar\' (client-ui-sidebar), so it exists while that entry is mounted',
     occupants: [
+      'client-ui-brand-hydra HydraBrandMark',
       'client-ui-brand-official OfficialBrandMark',
     ],
     replaceRisk: 'shadows-shipped-ui',
@@ -2412,6 +2417,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
     slotInject: '',
     declaredBy: 'an entry in \'sidebar\' (client-ui-sidebar), so it exists while that entry is mounted',
     occupants: [
+      'client-ui-brand-hydra HydraBrandName',
       'client-ui-brand-official OfficialBrandName',
     ],
     replaceRisk: 'shadows-shipped-ui',
@@ -2601,6 +2607,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-sidebar-right GuideBody',
       'client-ui-sidebar-terminal LazyTerminalBody',
       'client-ui-subagent SidebarChatTab',
+      'client-ui-usage UsageBody',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.pane.tab\', () => ctx.slots.register(\n      { name: \'sidebar.right.pane.tab\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',
@@ -2650,6 +2657,7 @@ export const CLIENT_SLOT_API: readonly ClientSlotEntry[] = [
       'client-ui-sidebar-files FilesTitle',
       'client-ui-sidebar-right GuideTitle',
       'client-ui-sidebar-terminal TerminalTitle',
+      'client-ui-usage UsageTitle',
     ],
     replaceRisk: 'none',
     example: 'return {\n  inject: [\'slots\'],\n  apply(ctx) {\n    ctx.slots.inject(\'sidebar.right.pane.tab.title\', () => ctx.slots.register(\n      { name: \'sidebar.right.pane.tab.title\', key: \'<one key the owner dispatches>\' },\n      () => React.createElement(\'div\', null, \'hello\'),\n    ))\n  },\n}',

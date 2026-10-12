@@ -1,62 +1,200 @@
-# DeepSeek Harness
+# Hydra
 
 English | [中文](README.zh.md)
 
-DeepSeek Harness (`dsh`) is an open-source agent harness developed by [DeepSeek AI](https://deepseek.com).
+Hydra is an unofficial community fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), the open-source agent harness developed by [DeepSeek](https://deepseek.com). It keeps the upstream **everything-is-a-plugin** architecture, powered by [Cordis](https://github.com/cordiverse/cordis), and adds plugins for long-running goals, research journals, learning memory, and models with weak tool calling such as GLM, Qwen, and local models.
 
-It is built on an **everything-is-a-plugin** architecture and powered by [Cordis](https://github.com/cordiverse/cordis), whose design is described in [_A Programming Paradigm for Spatiotemporal Composability_](https://arxiv.org/abs/2608.25512).
+Hydra is built on DeepSeek Harness. It is not affiliated with, endorsed by, or supported by DeepSeek. "DeepSeek Harness" is a trademark of DeepSeek and is used here only to describe what Hydra is built on.
 
-Documentation: [https://deepseek-harness.github.io/deepseek-harness/](https://deepseek-harness.github.io/deepseek-harness/)
+## Credits
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), Copyright (c) 2026 DeepSeek, released under the [MIT License](LICENSE). This repository keeps the upstream history: every upstream commit is here, and Hydra's changes sit on top of it.
+- [Cordis](https://github.com/cordiverse/cordis), vendored by upstream; see [vendor/README.md](vendor/README.md).
+- Third-party dependencies and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## What Hydra adds
+
+| Area | What it does |
+|---|---|
+| Tool calling for GLM, Qwen, and local models | Arguments are coerced before validation, and the shell tools no longer require the UI-only `description` argument (`dsh-tools`, `dsh-tool-bash`). |
+| Turns that keep going | A max-output stop continues by itself, a context-length error triggers compaction and a retry instead of ending the turn, and a summary that comes back without text is retried (`dsh-auto-continue`, `dsh-compaction-basic`). |
+| Goals that run for days | No round cap, retries with backoff after request errors, and an independent check of the model's "complete" claim. Opening a session never restarts a goal; `/goal resume` does (`dsh-goal-evaluator`). |
+| Research journals | `/research <objective>` keeps a discovery journal of breakthroughs, hypotheses, experiments, dead ends, and next steps, recalled into every request. `/research list` and `/research continue <name>` pick a journal up in a new session (`dsh-research`). |
+| Learning memory | Notes are extracted at the end of a turn and scoped to the project they came from. `/learn` approves, rejects, or promotes them to skills, `/learn from <path>` imports files, repeated notes merge as they are stored, and `/learn consolidate` rewrites related notes into fewer current ones (`dsh-memory`, `dsh-learning`). |
+| Knowledge base | `/kb` indexes folders into a local full-text index the model can search (`dsh-knowledge`). |
+| Resumable workflows | A workflow run cut off by a lost connection or a spent budget resumes without paying again for the steps that finished (`dsh-workflow-journal`). |
+| Sessions | Archived sessions can be shown, forks nest under their parent, sessions can be deleted (their forks are kept), and a session can be rewound to any of your messages. |
+| Safety | A command gate refuses shell commands that would discard uncommitted work, rewrite history, write outside the workspace, or reconfigure the machine (`dsh-command-gate`). `/skills-lock` reports skills that were edited or replaced (`dsh-skill-lock`). |
+| Health check | `/doctor` checks keys, sandbox, native addon, home folder, and git, with a one-line fix for each failure (`dsh-doctor`). |
+| Reports | `/digest` writes a daily report and `/digest week` a weekly review (`dsh-digest`). |
+| Optional, off by default | Off-peak scheduling (`dsh-off-peak`) and market data tools for research (`dsh-market-data`, `dsh-tool-market`). |
 
 ## Developer preview
 
-DeepSeek Harness is in _developer preview_ and iterating rapidly. **THERE WILL BE COMPATIBILITY-BREAKING CHANGES.**
+DeepSeek Harness, and therefore Hydra, is in _developer preview_. **Expect compatibility-breaking changes.** Read the [safety notice](SAFETY.md) before running it: the agent runs commands and edits files in the folder you start it in.
 
-Review the [safety notice](SAFETY.md) before running the project.
+## Requirements
+
+- [Node.js](https://nodejs.org) 22.19 or newer, or 24 or newer (`node --version`).
+- pnpm 11.7.0 through Corepack, which ships with Node.js: run `corepack enable` once.
+- Git 2.26 or newer.
+- A C compiler for the native addon: `gcc` or `clang` on Linux, the Xcode Command Line Tools on macOS (`xcode-select --install`).
+- A model: a [DeepSeek API key](https://platform.deepseek.com/), another hosted API, or any OpenAI-compatible server such as vLLM, llama.cpp, Ollama, or LM Studio.
 
 ## Run
 
-### Run from `npm`
-
-Install `Node.js`, then run:
-
-```sh
-npx @deepseek-ai/dsh web
-```
-
-The command starts the Web UI at `http://127.0.0.1:3080` by default and opens it in the default browser for a local launch. An SSH launch only prints the host URL because the SSH client or editor owns the local forwarded address. Pass `--no-open` to run the server without opening a browser. See [Web UI guide](docs/user/guide/index.md).
-
 ### Run from source
 
-To run from a repository checkout:
-
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git
-cd deepseek-harness
+git clone https://github.com/zez-dev/hydra.git ~/hydra
+cd ~/hydra
+corepack enable
 pnpm install
-pnpm run build
-pnpm dsh web
+pnpm run build:native-system   # the native host addon, built with your C compiler
+pnpm run build:lib             # the host and client libraries
+pnpm run build:web             # the Web UI
 ```
 
-`pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+`pnpm install` may warn that it failed to create the `dsh` bin; that file only exists after the build, so the warning is expected on a fresh clone.
 
-## Community and support
+On Linux, also build the file sandbox launcher. It needs no root, and the binary is not tracked, so build it on every machine (on an ARM machine, write `linux-arm64` instead of `linux-x64`). macOS uses its built-in sandbox and skips this step.
 
-- Submit feedback or bug reports through [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
-- Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic to your plugin repository for discoverability.
-- Join <a href="https://discord.gg/Ycq5dCaS4">DeepSeek Harness Discord community</a>.
+```sh
+gcc -std=c11 -Os -Wall -Wextra -Werror -s \
+  -o native/system/packages/linux-x64/bin/landlock-run \
+  native/system/packages/entry/src/main.c
+./native/system/packages/linux-x64/bin/landlock-run --probe   # expect: landlock: fully enforced
+```
 
-## Contributing
+### Start Hydra
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Start Hydra from the folder you want the agent to work in:
 
-## Development
+```sh
+cd ~/my-project
+node ~/hydra/apps/cli/lib/bin.js web
+```
 
-Start with the [development guide](docs/development.md) and [architecture documentation](docs/architecture.md).
+The Web UI starts at `http://127.0.0.1:3080` and opens in your browser. The printed link carries an access token that changes on every start, so open the link rather than the bare address.
 
-For agents, follow [AGENTS.md](AGENTS.md).
+- `--port 4000` picks another port, and `--no-open` skips opening a browser, for example on a server or over SSH: `node ~/hydra/apps/cli/lib/bin.js web --port 4000 --no-open`.
+- To run one task without the Web UI: `node ~/hydra/apps/cli/lib/bin.js --profile headless "fix the failing test"`.
+- Inside the repository, `pnpm dsh web` runs the same app from source.
+
+Hydra keeps its settings, sessions, and keys in `~/.dsh`. To use another folder, export `DSH_HOME=/some/dir` before starting; a `.env` file cannot set it.
+
+## Set up a model
+
+For DeepSeek, open **Settings → Models** in the Web UI, paste your API key, and save; it works without a restart.
+
+For other providers, add them on the same page, or write them into `~/.dsh/settings.yaml` and put each key in `~/.dsh/.env`. A model that is not in the installed catalog needs its `contextWindow` and `maxTokens`; compaction starts at 80 percent of `contextWindow`.
+
+```yaml
+llm-pi-ai:
+  providers:
+    local:
+      api: openai-completions
+      baseURL: http://HOST:PORT/v1
+      apiKeyEnv: LOCAL_LLM_KEY        # put LOCAL_LLM_KEY=<key> in ~/.dsh/.env; any word for a keyless server
+      models:
+        - id: my-model                # the id exactly as the server lists it
+          contextWindow: 100000       # never above the server's real limit
+          maxTokens: 16384            # a model that thinks first needs room for its thinking here
+```
+
+Then pick the model in the session's model menu.
+
+### GLM and Qwen
+
+```yaml
+llm-pi-ai:
+  providers:
+    zhipu:                    # GLM the way Z.ai's own client drives it
+      api: anthropic-messages
+      baseURL: https://api.z.ai/api/anthropic
+      apiKeyEnv: ZHIPU_API_KEY
+      models:
+        - id: glm-4.5
+    qwen:                     # Qwen through DashScope's OpenAI-compatible endpoint
+      api: openai-completions
+      baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+      apiKeyEnv: DASHSCOPE_API_KEY
+      models:
+        - id: qwen3-coder-plus
+          compat: { thinkingFormat: qwen, supportsReasoningEffort: false, supportsStrictMode: false, supportsDeveloperRole: false }
+```
+
+Use the Anthropic Messages route for GLM: Z.ai's own coding client uses it, so it is the path their models are tested against. The OpenAI-compatible endpoint at `https://open.bigmodel.cn/api/paas/v4` also works with `api: openai-completions`.
+
+### Ollama and LM Studio
+
+Local servers speak the same OpenAI-compatible protocol. The client still sends an `Authorization` header, so name a placeholder key and give it any value in `~/.dsh/.env`, for example `LOCAL_LLM_KEY=local`.
+
+```yaml
+llm-pi-ai:
+  providers:
+    ollama:                   # default Ollama endpoint
+      api: openai-completions
+      baseURL: http://127.0.0.1:11434/v1
+      apiKeyEnv: LOCAL_LLM_KEY
+      models:
+        - id: qwen3-coder:30b
+          contextWindow: 65536
+          maxTokens: 8192
+          compat: { supportsStrictMode: false, supportsDeveloperRole: false, thinkingFormat: qwen }
+    lmstudio:                 # default LM Studio endpoint
+      api: openai-completions
+      baseURL: http://127.0.0.1:1234/v1
+      apiKeyEnv: LOCAL_LLM_KEY
+      models:
+        - id: qwen2.5-coder-14b-instruct
+          contextWindow: 32768
+          maxTokens: 4096
+          compat: { supportsStrictMode: false, supportsDeveloperRole: false }
+```
+
+Use the model id exactly as the server lists it (`ollama list`, or LM Studio's model page). Qwen-based models take `thinkingFormat: qwen`; models without a thinking mode omit it.
+
+## Research goals
+
+`/research <objective> [--criteria "a; b"]` starts a goal for open-ended research and keeps a discovery journal at `.dsh/research/<slug>/journal.md` in the workspace. The model records findings with the `journal` tool as they happen, the turn-end extractor files what it missed, and the journal is recalled into every request, so a compacted context or a new session continues from the current state. `run_experiment` runs a measured experiment straight into the journal and re-scores the open hypotheses afterwards. `/research list` shows the journals, `/research continue <name>` picks one up, and `/research status`, `/research pause`, and `/research resume` control the goal. The journal is a Markdown file you can read and edit.
+
+## Mac app
+
+There is no Hydra Mac app (`.dmg`) yet. On a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. The desktop app under `apps/desktop` is upstream's: packaging it needs an Apple Developer ID, and its update checks go to DeepSeek's servers, so Hydra does not ship it.
+
+## Updating
+
+```sh
+cd ~/hydra
+git pull
+pnpm install
+pnpm run build:native-system && pnpm run build:lib && pnpm run build:web
+```
+
+Restart Hydra afterwards.
+
+## Machine setup and troubleshooting
+
+Run `/doctor` in a session first. It checks keys, tool-calling settings, sandbox, native addon, home folder, workspace, plugins, skills, and git, and prints one of these fixes for each problem:
+
+| Problem | Fix |
+|---|---|
+| Linux sandbox blocked by AppArmor | `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (persist it under `/etc/sysctl.d`), or install bubblewrap |
+| No Landlock runner | `sudo apt install musl-tools && (cd native/system && pnpm run build:native)` to build the Landlock runner, or the `gcc` command under [Run from source](#run-from-source) |
+| Native addon missing | `cd native/system && pnpm tsx ./scripts/build.ts --host-addon-only` (or `pnpm run build` at the repo root) |
+| Home folder not writable | `export DSH_HOME=<writable directory>` before running dsh; a `.env` file cannot set it |
+| Git identity missing | `git config user.name "<you>" && git config user.email "<you@example>"` in the workspace (commits the harness makes are attributed to you) |
+
+General `dsh` usage is documented upstream at [deepseek-harness.github.io](https://deepseek-harness.github.io/deepseek-harness/).
+
+## Feedback and contributing
+
+Report Hydra problems and ideas in this repository's issues. Problems that also happen in unmodified DeepSeek Harness belong upstream, in [its discussions](https://github.com/deepseek-ai/deepseek-harness/discussions). For development, start with the [development guide](docs/development.md) and the [architecture documentation](docs/architecture.md); coding agents follow [AGENTS.md](AGENTS.md).
 
 ## Citation
+
+Hydra is built on DeepSeek Harness. If you cite it, cite upstream:
 
 ```bibtex
 @misc{deepseek-harness2026,
@@ -70,6 +208,4 @@ For agents, follow [AGENTS.md](AGENTS.md).
 
 ## License
 
-[MIT](LICENSE)
-
-Third-party dependencies and their licenses are disclosed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE), the same license as DeepSeek Harness. The upstream copyright notice in [LICENSE](LICENSE) stays as published by DeepSeek; Hydra's changes are released under the same terms.

@@ -318,6 +318,22 @@ describe('deriveGroups', () => {
     expect(groups[0]!.sessionCount).toBe(1)
   })
 
+  it('reveals archived rows in their accounting slots while showArchived is on', () => {
+    const kept = summary('kept', 1, '/projects/first')
+    const gone = summary('gone', 2, '/projects/first')
+    const looseGone = summary('loose-gone', 3, '/other')
+    const sessions = list(kept, gone, looseGone)
+    const groups = deriveGroups(
+      sessions, [workspace('first', ['kept', 'gone'])], archived('gone', 'loose-gone'),
+      noAttention, { ...view(['first', UNGROUPED_KEY]), showArchived: true },
+    )
+    expect(groups.map(group => group.key)).toEqual(['first', UNGROUPED_KEY])
+    expect(groups[0]!.sessions.map(node => node.id)).toEqual([kept.id, gone.id])
+    expect(groups[0]!.sessions.map(node => node.archived)).toEqual([false, true])
+    expect(groups[0]!.sessionCount).toBe(2)
+    expect(groups[1]!.sessions.map(node => node.id)).toEqual([looseGone.id])
+  })
+
   it('marks selected Workspace and Ungrouped sessions without relying on an Intent', () => {
     const owned = summary('owned', 1)
     const loose = summary('loose', 2)
@@ -371,6 +387,102 @@ describe('deriveFlat', () => {
     const gone = summary('gone', 2)
     expect(visibleSessionIds(list(kept, gone), archived('gone'))).toEqual([kept.id])
   })
+
+  it('reveals archived flat rows and marks them while showArchived is on', () => {
+    const kept = summary('kept', 1)
+    const gone = summary('gone', 2)
+    const sessions = list(kept, gone)
+    const ids = visibleSessionIds(sessions, archived('gone'), true)
+    expect(ids).toEqual([kept.id, gone.id])
+    const rows = deriveFlat(sessions, ids, noAttention, { archivedSessionIds: archived('gone') })
+    expect(rows.map(row => row.archived)).toEqual([false, true])
+  })
+})
+
+describe('fork lineage', () => {
+  const lineageView = (expandedGroups: readonly string[]) => ({
+    ...view(expandedGroups),
+    lineage: true,
+  })
+
+  it('nests ordinary forks under their parent with an indent depth and a fork count', () => {
+    const parent = summary('parent', 10)
+    const forkA = { ...summary('fork-a', 30), parentId: parent.id }
+    const forkB = { ...summary('fork-b', 20), parentId: parent.id }
+    const grandchild = { ...summary('grandchild', 40), parentId: forkA.id }
+    const sessions = list(parent, forkA, forkB, grandchild)
+    const groups = deriveGroups(
+      sessions,
+      [workspace('first', ['parent', 'fork-a', 'fork-b', 'grandchild'])],
+      noArchive, noAttention, lineageView(['first']),
+    )
+    const rows = groups[0]!.sessions
+    expect(rows.map(row => row.id)).toEqual([parent.id, forkA.id, grandchild.id, forkB.id])
+    expect(rows.map(row => row.depth)).toEqual([0, 1, 2, 1])
+    expect(rows.map(row => row.forkCount)).toEqual([2, 1, 0, 0])
+  })
+
+  it('nests forks in the flat list too', () => {
+    const parent = summary('parent', 10)
+    const fork = { ...summary('fork', 30), parentId: parent.id }
+    const sessions = list(parent, fork)
+    const rows = deriveFlat(
+      sessions, visibleSessionIds(sessions, noArchive), noAttention, { lineage: true },
+    )
+    expect(rows.map(row => [row.id, row.depth])).toEqual([[parent.id, 0], [fork.id, 1]])
+  })
+
+  it('leaves subagent-origin children out of the fork count', () => {
+    const parent = summary('parent', 10)
+    const fork = { ...summary('fork', 20), parentId: parent.id }
+    const subagent = { ...summary('subagent', 30), parentId: parent.id, origin: 'subagent' as const }
+    const sessions = list(parent, fork, subagent)
+    const groups = deriveGroups(
+      sessions, [workspace('first', ['parent', 'fork', 'subagent'])],
+      noArchive, noAttention, lineageView(['first']),
+    )
+    expect(groups[0]!.sessions.map(row => row.id)).toEqual([parent.id, fork.id])
+    expect(groups[0]!.sessions[0]!.forkCount).toBe(1)
+  })
+
+  it.each([
+    ['unknown to the list', 'missing'],
+    ['archived while archived rows stay hidden', 'archived-parent'],
+    ['accounted by another Workspace', 'other-parent'],
+  ])('degrades a fork whose parent is %s to a root row', (_case, parentId) => {
+    const archivedParent = summary('archived-parent', 50)
+    const otherParent = summary('other-parent', 60)
+    const child = { ...summary('child', 10), parentId: sid(parentId) }
+    const sessions = list(archivedParent, otherParent, child)
+    const groups = deriveGroups(
+      sessions,
+      [workspace('first', ['archived-parent', 'child']), workspace('second', ['other-parent'])],
+      archived('archived-parent'), noAttention, lineageView(['first', 'second']),
+    )
+    const childRow = groups[0]!.sessions.find(row => row.id === child.id)!
+    expect(childRow.depth).toBe(0)
+  })
+
+  it('emits lineage cycle members as root rows', () => {
+    const a = { ...summary('a', 10), parentId: sid('b') }
+    const b = { ...summary('b', 20), parentId: sid('a') }
+    const sessions = list(a, b)
+    const rows = deriveFlat(
+      sessions, visibleSessionIds(sessions, noArchive), noAttention, { lineage: true },
+    )
+    // No row is lost: the first cycle member anchors the branch as a root.
+    expect(rows.map(row => row.id)).toEqual([a.id, b.id])
+    expect(rows[0]!.depth).toBe(0)
+  })
+
+  it('keeps every row a root without the lineage request', () => {
+    const parent = summary('parent', 10)
+    const fork = { ...summary('fork', 30), parentId: parent.id }
+    const sessions = list(parent, fork)
+    const rows = deriveFlat(sessions, visibleSessionIds(sessions, noArchive), noAttention)
+    expect(rows.map(row => row.depth)).toEqual([0, 0])
+    expect(rows.map(row => row.forkCount)).toEqual([0, 0])
+  })
 })
 
 describe('deriveSearchResults archive filtering', () => {
@@ -389,6 +501,25 @@ describe('deriveSearchResults archive filtering', () => {
       10,
     )
     expect(result.items.map(item => item.id)).toEqual([hit.id])
+  })
+
+  it('matches archived sessions and marks the rows while showArchived is on', () => {
+    const hit = summary('hit', 2)
+    hit.displayTitle = 'Needle row'
+    const gone = summary('gone', 1)
+    gone.displayTitle = 'Needle archived'
+    const result = deriveSearchResults(
+      list(hit, gone),
+      [],
+      'needle',
+      archived('gone'),
+      noAttention,
+      { items: [], hasMore: false },
+      10,
+      true,
+    )
+    expect(result.items.map(item => item.id)).toEqual([hit.id, gone.id])
+    expect(result.items.map(item => item.archived)).toEqual([false, true])
   })
 })
 
@@ -435,6 +566,7 @@ describe('deriveSearchResults', () => {
           pendingInteraction: 'plan-review',
           completed: false,
           hasActiveSchedule: false,
+          archived: false,
           snippet: 'title session body excerpt',
         },
         {
@@ -445,6 +577,7 @@ describe('deriveSearchResults', () => {
           runningSubagentCount: 0,
           completed: false,
           hasActiveSchedule: false,
+          archived: false,
         },
         {
           id: contentHit.id,
@@ -454,6 +587,7 @@ describe('deriveSearchResults', () => {
           runningSubagentCount: 0,
           completed: false,
           hasActiveSchedule: false,
+          archived: false,
           snippet: 'body needle excerpt',
         },
       ],
@@ -533,6 +667,28 @@ describe('createWorkspaceViewStore', () => {
       orderBy: 'manual',
       groupExpansion: { alpha: true },
       sessionOrderByAccount: { alpha: ['one', 'two'] },
+    })
+  })
+
+  it('keeps archived rows hidden by default and remembers the reveal', () => {
+    const store = createWorkspaceViewStore().create()
+    expect(store.getSnapshot().showArchived).toBe(false)
+    store.actions.setShowArchived(true)
+    expect(store.getSnapshot().showArchived).toBe(true)
+    store.actions.setShowArchived(false)
+    expect(store.getSnapshot().showArchived).toBe(false)
+  })
+
+  it('selects Lineage as an order mode and discards saved manual positions', () => {
+    const store = createWorkspaceViewStore().create()
+    store.actions.setSessionOrder('alpha', ['two', 'one'], {})
+    store.actions.setOrderBy('lineage', {})
+    expect(store.getSnapshot()).toMatchObject({ orderBy: 'lineage', sessionOrderByAccount: {} })
+    // A drag out of Lineage snapshots the supplied recency orders, as from Last updated.
+    store.actions.setSessionOrder('alpha', ['one', 'two'], { beta: ['three'] })
+    expect(store.getSnapshot()).toMatchObject({
+      orderBy: 'manual',
+      sessionOrderByAccount: { alpha: ['one', 'two'], beta: ['three'] },
     })
   })
 

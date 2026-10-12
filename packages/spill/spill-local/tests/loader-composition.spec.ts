@@ -31,8 +31,10 @@ describe('spill-local real Loader composition through cordis.yml', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-spill-loader-'))
     const oldDir = sessionDir(root, 'old-session')
     const freshDir = sessionDir(root, 'fresh-session')
-    await mkdir(oldDir, { recursive: true })
-    await mkdir(freshDir, { recursive: true })
+    // The sweep skips any directory writable by group or others, so these state
+    // the store's own owner-only mode rather than inheriting the host umask.
+    await mkdir(oldDir, { recursive: true, mode: 0o700 })
+    await mkdir(freshDir, { recursive: true, mode: 0o700 })
     const old = join(oldDir, 'old.txt')
     const fresh = join(freshDir, 'fresh.txt')
     await writeFile(old, 'old')

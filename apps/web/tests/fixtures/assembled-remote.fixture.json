@@ -5283,7 +5283,7 @@
                 "chunk": {
                   "type": "finish",
                   "reason": {
-                    "kind": "stop"
+                    "kind": "max-tokens"
                   }
                 }
               }

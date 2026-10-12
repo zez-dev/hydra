@@ -413,6 +413,67 @@ describe('PiAiAdapter provider routing', () => {
     })
   })
 
+  it('waits for the first byte of a large prompt in proportion to its size, at the configured floor rate', async () => {
+    // 40K characters is about 10K tokens; at the 100 tokens/s floor that is a
+    // 200 s first-byte budget, so a server silent for 150 ms is still fine
+    // although the idle interval between chunks is 40 ms.
+    const server = await mockServer([{ events: textEvents, firstByteDelayMs: 150 }])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 40, minPromptTokensPerSecond: 100 })
+    const result = await assemble(ctx, {
+      model: 'deepseek-v4-flash',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'x'.repeat(40_000) }], source: { kind: 'user' } })],
+    })
+    expect(result.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('counts tool schemas toward the first-byte budget of a large prompt', async () => {
+    // A 40K-character schema is about 10K tokens: a 100 s budget at the 100 tokens/s floor.
+    const server = await mockServer([{ events: textEvents, firstByteDelayMs: 150 }])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 40, minPromptTokensPerSecond: 100 })
+    const result = await assemble(ctx, {
+      model: 'deepseek-v4-flash',
+      messages: [],
+      tools: [{ name: 'lookup', description: 'x'.repeat(40_000), parameters: { type: 'object', properties: {} } }],
+    })
+    expect(result.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('learns the route\'s prompt rate from a completed stream and sizes the next first-byte budget from it', async () => {
+    const measured = [
+      '{"choices":[{"delta":{"role":"assistant","content":"hi"},"index":0,"finish_reason":null}]}',
+      '{"choices":[{"delta":{},"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":400,"completion_tokens":1}}',
+      '[DONE]',
+    ]
+    // Request 1: 400 prompt tokens answered after 40 ms teaches 10K tokens/s.
+    // Request 2: about 1000 tokens then get a 200 ms budget, so a server
+    // silent for 600 ms times out although the configured floor of 1 token/s
+    // would have allowed half an hour.
+    const server = await mockServer([
+      { events: measured, firstByteDelayMs: 40 },
+      { events: textEvents, firstByteDelayMs: 600 },
+    ])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 40, minPromptTokensPerSecond: 1 })
+    const first = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(first.finish).toEqual({ kind: 'stop' })
+    const second = await assemble(ctx, {
+      model: 'deepseek-v4-flash',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'y'.repeat(4_000) }], source: { kind: 'user' } })],
+    })
+    expect(second.finish).toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
+    expect((second.finish as { failure: { message: string } }).failure.message).toMatch(/first byte/u)
+  })
+
+  it('names a stall after the first chunk an idle timeout, not a first-byte timeout', async () => {
+    const server = await mockServer([{
+      events: ['{"choices":[{"delta":{"role":"assistant","content":"hel"},"index":0,"finish_reason":null}]}', ...textEvents.slice(1)],
+      delayMs: 200,
+    }])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 20 })
+    const result = await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
+    expect((result.finish as { failure: { message: string } }).failure.message).toMatch(/stream idle timeout/u)
+  })
+
   it('stops the SDK request when the adapter idle watchdog expires', async () => {
     const server = await mockServer([{ events: textEvents, delayMs: 200 }])
     const ctx = await harness(server.url, { streamIdleTimeoutMs: 20 })
@@ -467,10 +528,11 @@ describe('provider profile lifecycle', () => {
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0.2,
+      maxProviderDelayMs: 60_000,
     })
     expect(ctx.llm.providerRetryPolicy('anthropic')).toMatchObject({
       mode: 'normal',
-      maxRetries: 5,
+      maxRetries: 12,
     })
     await fiber.dispose()
     expect(ctx.llm.listProviders()).toEqual([])
@@ -828,6 +890,10 @@ describe('provider profile lifecycle', () => {
     // loud with migration directions instead of half-working.
     expect(() => resolveProfiles([{ provider: 'openai' }] as never)).toThrow(/dict keyed by provider/)
     expect(() => resolveProfiles({ openai: { provider: 'openai' } as never })).toThrow(/moved to the providers dict key/)
+    expect(() => resolveProfiles({ bbb: { apiKey: 'sk-inline', models: [{ id: 'glm' }] } as never }))
+      .toThrow(/sets "apiKey" inline.*apiKeyEnv/)
+    expect(() => resolveProfiles({ bbb: { apiKeyEnv: 'BBB_API_KEY', models: [{ id: 'glm', maxToken: 4096 }] } as never }))
+      .toThrow(/model "glm" sets "maxToken"; the field is maxTokens/)
     expect(() => resolveProfiles({ openai: { baseURL: '' } })).toThrow(/empty baseURL/)
     expect(() => resolveProfiles({ openai: { apiKeyEnv: 'not-a-var!' } })).toThrow(/must match/)
     expect(() => resolveProfiles({ openai: { maxRequestImageBytes: 0 } })).toThrow(/maxRequestImageBytes/)
@@ -950,6 +1016,9 @@ describe('provider profile lifecycle', () => {
     expect(() => resolveProfiles({
       openai: { streamIdleTimeoutMs: MAX_TIMER_DELAY_MS + 1 },
     })).toThrow(/streamIdleTimeoutMs.*no greater/)
+    expect(() => resolveProfiles({
+      openai: { minPromptTokensPerSecond: 0 },
+    })).toThrow(/minPromptTokensPerSecond.*positive finite/)
   })
 })
 

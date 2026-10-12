@@ -75,6 +75,16 @@ async function harness(config: LlmPiAi.Config): Promise<Context> {
   return ctx
 }
 
+/** One short request on the hand-declared route, at a chosen reasoning level or none. */
+function ask(ctx: Context, level?: string) {
+  return assemble(ctx, {
+    provider: 'acme-gateway',
+    model: 'acme-large',
+    ...level === undefined ? {} : { reasoningEffort: ReasoningEffortId(level) },
+    messages: [createUserMessage({ content: [{ type: 'text', text: 'hi' }], source: { kind: 'plugin', plugin: 'test' } })],
+  })
+}
+
 describe('hand-declared providers', () => {
   it('serves a route pi-ai has never heard of from its own declaration', async () => {
     const server = await mockServer([{ events: textEvents }])
@@ -113,9 +123,72 @@ describe('hand-declared providers', () => {
     })
   })
 
-  it('offers no reasoning control it could not honour', async () => {
-    const server = await mockServer([])
+  it('offers off through max on a custom model and sends only a chosen level', async () => {
+    const server = await mockServer([{ events: textEvents }, { events: textEvents }, { events: textEvents }, { events: textEvents }])
     const ctx = await harness(gateway(`${server.url}/v1`))
+    const info = await ctx.llm.resolveModelInfo('acme-gateway', 'acme-large')
+    expect(info.reasoning?.efforts.map(effort => effort.id)).toEqual(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
+    // No default level: a request that names none leaves the server's own default in charge.
+    expect(info.reasoning).not.toHaveProperty('defaultEffort')
+
+    await ask(ctx)
+    await ask(ctx, 'off')
+    await ask(ctx, 'high')
+    await ask(ctx, 'xhigh')
+    const [plain, off, high, xhigh] = server.requests as Record<string, unknown>[]
+    expect(plain).not.toHaveProperty('reasoning_effort')
+    expect(plain).not.toHaveProperty('chat_template_kwargs')
+    expect(off).toMatchObject({
+      reasoning_effort: 'low',
+      chat_template_kwargs: { enable_thinking: false, thinking: false, reasoning_effort: 'low' },
+    })
+    expect(high).toMatchObject({
+      reasoning_effort: 'high',
+      chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'high' },
+    })
+    expect(xhigh).toMatchObject({
+      reasoning_effort: 'xhigh',
+      chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'xhigh' },
+    })
+  })
+
+  it('asks for high on a route whose server refuses a level above it, and keeps sending the fields', async () => {
+    // An older vLLM validates `reasoning_effort` against low, medium, and high only.
+    const literalError = "1 validation error for ChatCompletionRequest\nreasoning_effort\n  Input should be 'low', 'medium' or 'high' [type=literal_error, input_value='xhigh', input_type=str]"
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: literalError } }) },
+      { events: textEvents },
+      { events: textEvents },
+      { events: textEvents },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const first = await ask(ctx, 'xhigh')
+    expect(first.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    const [refused, retried] = server.requests as Record<string, unknown>[]
+    expect(refused).toMatchObject({ reasoning_effort: 'xhigh' })
+    expect(retried).toMatchObject({
+      reasoning_effort: 'high',
+      chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'high' },
+    })
+    // Remembered for the route: a level above high goes out as high, and the others are unchanged.
+    await ask(ctx, 'max')
+    await ask(ctx, 'off')
+    expect(server.requests[2]).toMatchObject({ reasoning_effort: 'high' })
+    expect(server.requests[3]).toMatchObject({ reasoning_effort: 'low', chat_template_kwargs: { enable_thinking: false } })
+  })
+
+  it('drops the fields when the server refuses high after refusing a level above it', async () => {
+    const refusal = { status: 400, body: JSON.stringify({ error: { message: 'Unrecognized request argument supplied: reasoning_effort' } }) }
+    const server = await mockServer([refusal, refusal, { events: textEvents }])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const reply = await ask(ctx, 'max')
+    expect(reply.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(server.requests.map(request => (request as Record<string, unknown>)['reasoning_effort'])).toEqual(['max', 'high', undefined])
+  })
+
+  it('offers no reasoning control and sends no reasoning field when the provider turns reasoning levels off', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(gateway(`${server.url}/v1`, { reasoningLevels: false }))
 
     // pi-ai reports a model with no reasoning metadata as supporting the single
     // level `off`, but `off` is translated to *omitting* the reasoning option —
@@ -123,6 +196,8 @@ describe('hand-declared providers', () => {
     // own default is to think would keep thinking with `off` selected. The
     // capability is reported unavailable instead of offering that control.
     expect((await ctx.llm.resolveModelInfo('acme-gateway', 'acme-large')).reasoning).toBeUndefined()
+    await ask(ctx)
+    expect(server.requests[0]).not.toHaveProperty('chat_template_kwargs')
 
     // A catalog route is unaffected: its models carry the metadata that makes
     // `off` actually disable thinking.
@@ -131,6 +206,62 @@ describe('hand-declared providers', () => {
     if (catalogModel === undefined) throw new Error('the installed catalog ships no deepseek model')
     expect((await withCatalog.llm.resolveModelInfo('deepseek', catalogModel.id)).reasoning?.efforts.map(e => e.id))
       .toContain('off')
+  })
+
+  it('keeps a declared reasoningEfforts over the automatic levels', async () => {
+    const server = await mockServer([])
+    const ctx = await harness(gateway(`${server.url}/v1`, {
+      models: [{ id: 'acme-large', contextWindow: 65_536, maxTokens: 4096, reasoningEfforts: { off: null, high: 'high', xhigh: 'max' } }],
+    }))
+    expect((await ctx.llm.resolveModelInfo('acme-gateway', 'acme-large')).reasoning?.efforts.map(effort => effort.id))
+      .toEqual(['off', 'high', 'xhigh'])
+  })
+
+  it('passes a server failure that is not about the fields through and keeps sending them', async () => {
+    const server = await mockServer([
+      { status: 500, body: JSON.stringify({ error: { message: 'model is loading' } }) },
+      { events: textEvents },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const failed = await ask(ctx, 'low')
+    expect(failed.finish).toMatchObject({ kind: 'error' })
+    expect(server.requests).toHaveLength(1)
+    await ask(ctx, 'low')
+    expect(server.requests[1]).toHaveProperty('chat_template_kwargs')
+  })
+
+  it('drops the fields on a route whose server refuses them and answers the same request without them', async () => {
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: 'Unrecognized request argument supplied: chat_template_kwargs' } }) },
+      { events: textEvents },
+      { events: textEvents },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const first = await ask(ctx, 'off')
+    expect(first.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(server.requests[0]).toHaveProperty('chat_template_kwargs')
+    expect(server.requests[1]).not.toHaveProperty('chat_template_kwargs')
+    expect(server.requests[1]).not.toHaveProperty('reasoning_effort')
+    // Remembered for the route: the next request never sends them.
+    await ask(ctx, 'high')
+    expect(server.requests[2]).not.toHaveProperty('chat_template_kwargs')
+  })
+
+  it('gives the resend after a refusal its prompt\'s first-byte budget, not the idle interval', async () => {
+    // 40K characters is about 10K tokens: a 100 s first-byte budget at 100 tokens/s against a 40 ms idle interval.
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: 'Unrecognized request argument supplied: chat_template_kwargs' } }) },
+      { events: textEvents, firstByteDelayMs: 150 },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`, { streamIdleTimeoutMs: 40, minPromptTokensPerSecond: 100 }))
+    const result = await assemble(ctx, {
+      provider: 'acme-gateway',
+      model: 'acme-large',
+      reasoningEffort: ReasoningEffortId('off'),
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'x'.repeat(40_000) }], source: { kind: 'plugin', plugin: 'test' } })],
+    })
+    expect(result.finish).toEqual({ kind: 'stop' })
+    expect(server.requests[1]).not.toHaveProperty('chat_template_kwargs')
   })
 
   it('joins the configurable-provider directory so a settings surface can reach it', async () => {

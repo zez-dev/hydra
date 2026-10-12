@@ -100,6 +100,10 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
   const breakdownTotal = breakdown === undefined
     ? 0
     : breakdown.systemTokens + breakdown.toolsTokens + breakdown.messageTokens
+  // The composition rows are heuristic; scaled to the priced total they sum
+  // to the figure the ring shows, and their proportions are all they claim.
+  const scale = breakdownTotal === 0 ? 1 : context.usedTokens / breakdownTotal
+  const threshold = pressure?.thresholdTokens
   const parts = breakdown === undefined || breakdownTotal === 0
     ? [{ key: 'total', color: undefined, width: percent }]
     : ROWS.map(row => ({ key: row.key, color: row.color, width: percent * breakdown[row.key] / breakdownTotal }))
@@ -167,10 +171,13 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
                     <span className={`${css.swatch} ${row.color}`} aria-hidden />
                     {t(row.label)}
                   </dt>
-                  <dd>{`~${formatTokens(breakdown[row.key], t)}`}</dd>
+                  <dd>{`~${formatTokens(Math.round(breakdown[row.key] * scale), t)}`}</dd>
                 </div>
               ))}
             </dl>
+          )}
+          {threshold !== undefined && (
+            <p className={css.threshold}>{t('context.threshold', { tokens: formatTokens(threshold, t) })}</p>
           )}
         </div>,
         document.body,

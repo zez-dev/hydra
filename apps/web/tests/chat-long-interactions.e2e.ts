@@ -95,13 +95,19 @@ async function openSeed(page: Page): Promise<void> {
   await nextPaint(page)
 }
 
+/**
+ * Wheel until the semantic target renders. A long Chat keeps every loaded
+ * row's identity in the column, so a row away from the viewport exists as a
+ * placeholder (`data-chat-placeholder`) with no content until the window
+ * reaches it; the target counts as mounted only once it renders.
+ */
 async function wheelUntilMounted(page: Page, selector: string, deltaY: number): Promise<void> {
   const scrollport = page.locator('[data-conversation-scroll]')
   const box = await scrollport.boundingBox()
   if (box === null) throw new Error('conversation scrollport has no layout box')
   await page.mouse.move(box.x + box.width / 2, box.y + Math.min(140, box.height / 3))
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (await page.locator(selector).count() > 0) return
+    if (await page.locator(`${selector}:not([data-chat-placeholder])`).count() > 0) return
     await page.mouse.wheel(0, deltaY)
     await nextPaint(page)
   }

@@ -61,14 +61,15 @@ describe('workspace browser rows', () => {
     const idle: SessionNode = {
       id: sid('flat'), title: 'Flat Session', blank: false, running: false,
       runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     const view = render(<SessionNodeItem node={idle} currentId={undefined} now={0} onOpen={vi.fn()}
-      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} flat t={t} />)
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} flat t={t} />)
     const title = screen.getByText('Flat Session')
     expect(title.previousElementSibling).toBeNull()
 
     view.rerender(<SessionNodeItem node={{ ...idle, running: true }} currentId={undefined} now={0}
-      onOpen={vi.fn()} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} flat t={t} />)
+      onOpen={vi.fn()} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} flat t={t} />)
     expect(screen.getByText('Flat Session').previousElementSibling?.querySelector('[data-state="ongoing"]')).toBeTruthy()
   })
 
@@ -82,6 +83,7 @@ describe('workspace browser rows', () => {
       runningSubagentCount: 0,
       completed: false,
       hasActiveSchedule: false,
+      archived: false,
       snippet: 'matching message excerpt',
     }
     render(<SearchResultItem result={result} currentId={result.id} onOpen={onOpen} t={t} />)
@@ -101,6 +103,7 @@ describe('workspace browser rows', () => {
     const result: SearchResultNode = {
       id: sid('scheduled-result'), title: 'Scheduled result', workspace: 'Project',
       running: false, runningSubagentCount: 0, completed: false, hasActiveSchedule: true,
+      archived: false,
     }
     render(<SearchResultItem result={result} currentId={undefined} onOpen={onOpen} t={t} />)
 
@@ -125,6 +128,7 @@ describe('workspace browser rows', () => {
       id: sid(pendingInteraction), title: 'Needs input', workspace: 'Project',
       pendingInteraction, running: true, runningSubagentCount: 0, completed: false,
       hasActiveSchedule: false,
+      archived: false,
     }
     render(<SearchResultItem result={result} currentId={undefined} onOpen={vi.fn()} t={t} />)
     const row = screen.getByRole('treeitem')
@@ -154,11 +158,12 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('session'), title: 'Session', blank: false, running: true,
       runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     const onOpen = vi.fn()
     render(
       <SessionNodeItem node={node} currentId={node.id} now={0} onOpen={onOpen}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />,
     )
 
     const row = screen.getByRole('treeitem')
@@ -173,10 +178,11 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('clipped'), title: 'A Session Title Long Enough To Be Clipped (1)', blank: false,
       running: false, runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     render(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />,
     )
     const row = screen.getByRole('treeitem')
     const title = screen.getByText(node.title)
@@ -202,10 +208,11 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('instant-return'), title: 'A Session Title Long Enough To Be Clipped (1)', blank: false,
       running: false, runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     render(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />,
     )
     const row = screen.getByRole('treeitem')
     const title = screen.getByText(node.title)
@@ -224,10 +231,11 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('scheduled-session'), title: 'Scheduled Session', blank: false, running: false,
       runningSubagentCount: 0, completed: false, hasActiveSchedule: true, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     const view = render(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />,
     )
 
     const assertIndicator = (): HTMLElement => {
@@ -246,7 +254,7 @@ describe('workspace browser rows', () => {
 
     view.rerender(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} flat t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} flat t={t} />,
     )
     assertIndicator()
   })
@@ -256,10 +264,11 @@ describe('workspace browser rows', () => {
       <SessionNodeItem
         node={{
           id: sid('s1'), title: 'One', blank: false, running: false,
-          runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0, ...over,
+          runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+          archived: false, depth: 0, forkCount: 0, ...over,
         }}
         currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t}
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t}
       />,
     )
     const stateDot = (view: ReturnType<typeof renderRow>) =>
@@ -289,9 +298,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('owner'), title: 'Delegating', blank: false, running: false,
         runningSubagentCount: 2, completed: false, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       const row = screen.getByRole('treeitem')
       expect(row.querySelector('[data-state="ongoing"]')).not.toBeNull()
       expect(screen.getByText('2 个子代理运行中')).toBeTruthy()
@@ -311,9 +321,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('owner'), title: 'Delegating', blank: false, running: true,
         runningSubagentCount: 1, completed: false, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       const row = screen.getByRole('treeitem')
       expect(row.querySelectorAll('[data-state="ongoing"]')).toHaveLength(1)
       expect(screen.getByText('进行中')).toBeTruthy()
@@ -332,9 +343,10 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('owner'), title: 'Needs input', blank: false, pendingInteraction: 'question',
       running: false, runningSubagentCount: 1, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
     const row = screen.getByRole('treeitem')
     expect(row.querySelector('[data-state="warning"]')).not.toBeNull()
     expect(row.querySelector('[data-state="ongoing"]')).toBeNull()
@@ -347,6 +359,7 @@ describe('workspace browser rows', () => {
       result={{
         id: sid('result'), title: 'Done', workspace: 'Workspace', running: false,
         runningSubagentCount: 0, completed: true, hasActiveSchedule: false,
+        archived: false,
       }}
       currentId={undefined} onOpen={vi.fn()} t={t}
     />)
@@ -479,9 +492,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('s-blank'), title: 'ignored', blank: true, running: false,
         runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={node.id} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       // The placeholder has no content yet: no row verbs, no "now" stamp.
       expect(screen.queryByRole('button', { name: /会话.*的操作/ })).toBeNull()
       expect(screen.queryByText('刚刚')).toBeNull()
@@ -503,12 +517,14 @@ describe('workspace browser rows', () => {
     const onRename = vi.fn()
     const onFork = vi.fn()
     const onArchive = vi.fn()
+    const onUnarchive = vi.fn()
     const node: SessionNode = {
       id: sid('s1'), title: 'One', blank: false, running: false,
       runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen}
-      onRename={onRename} onFork={onFork} onArchive={onArchive} t={t} />)
+      onRename={onRename} onFork={onFork} onArchive={onArchive} onUnarchive={onUnarchive} onDelete={vi.fn()} t={t} />)
     fireEvent.click(screen.getByRole('button', { name: '会话“One”的操作' }))
     expect(onOpen).not.toHaveBeenCalled()
     // Archive is not destructive (log and accounting slot remain): no danger styling.
@@ -531,6 +547,85 @@ describe('workspace browser rows', () => {
     fireEvent.click(screen.getByRole('button', { name: '会话“One”的操作' }))
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
+    expect(onUnarchive).not.toHaveBeenCalled()
+  })
+
+  it('an archived row reads as archived and its menu offers Unarchive in place of Archive', () => {
+    const onArchive = vi.fn()
+    const onUnarchive = vi.fn()
+    const node: SessionNode = {
+      id: sid('s1'), title: 'Put away', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: true, depth: 0, forkCount: 0,
+    }
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={onArchive} onUnarchive={onUnarchive} onDelete={vi.fn()} t={t} />)
+
+    expect(screen.getByText('已归档')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '会话“Put away”的操作' }))
+    expect(screen.queryByRole('menuitem', { name: '归档会话' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消归档会话' }))
+    expect(onUnarchive).toHaveBeenCalledWith(node.id)
+    expect(onArchive).not.toHaveBeenCalled()
+  })
+
+  it('an archived row stays clickable', () => {
+    const onOpen = vi.fn()
+    const node: SessionNode = {
+      id: sid('s1'), title: 'Put away', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: true, depth: 0, forkCount: 0,
+    }
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={onOpen}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
+
+    fireEvent.click(screen.getByRole('treeitem'))
+    expect(onOpen).toHaveBeenCalledWith(node.id)
+  })
+
+  it('a nested fork row indents behind a branch glyph while its parent counts its forks', () => {
+    const parent: SessionNode = {
+      id: sid('parent'), title: 'Parent', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 2,
+    }
+    const fork: SessionNode = { ...parent, id: sid('fork'), title: 'Fork', depth: 1, forkCount: 0 }
+    const onOpen = vi.fn()
+    render(<SessionNodeItem node={parent} currentId={undefined} now={0} onOpen={onOpen}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
+    expect(screen.getByText('2 个分叉')).toBeTruthy()
+    cleanup()
+
+    render(<SessionNodeItem node={fork} currentId={undefined} now={0} onOpen={onOpen}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
+    const row = screen.getByRole('treeitem')
+    expect(row.style.getPropertyValue('--dsh-lineage-indent')).toBe('14px')
+    expect(screen.queryByText('2 个分叉')).toBeNull()
+    // The branch glyph leads the title and is not an action of its own.
+    expect(screen.getByText('Fork').previousElementSibling?.querySelector('svg')).toBeTruthy()
+    fireEvent.click(row)
+    expect(onOpen).toHaveBeenCalledWith(fork.id)
+  })
+
+  it('a single nested fork counts in the singular', () => {
+    const parent: SessionNode = {
+      id: sid('parent'), title: 'Parent', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 1,
+    }
+    render(<SessionNodeItem node={parent} currentId={undefined} now={0} onOpen={vi.fn()}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
+    expect(screen.getByText('1 个分叉')).toBeTruthy()
+  })
+
+  it('an archived search result carries the archived marker', () => {
+    const result: SearchResultNode = {
+      id: sid('gone'), title: 'Archived hit', workspace: 'Project',
+      running: false, runningSubagentCount: 0, completed: false, hasActiveSchedule: false,
+      archived: true,
+    }
+    render(<SearchResultItem result={result} currentId={undefined} onOpen={vi.fn()} t={t} />)
+    expect(screen.getByText('已归档')).toBeTruthy()
   })
 
 
@@ -540,9 +635,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('s1'), title: 'Hovered', blank: false, running: true,
         runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={undefined} now={60_000} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       const wrapper = screen.getByRole('treeitem').parentElement as HTMLElement
       fireEvent.pointerEnter(wrapper)
       act(() => { vi.advanceTimersByTime(500) })
@@ -572,16 +668,17 @@ describe('workspace browser rows', () => {
         id: sid(pendingInteraction), title: 'Needs input', blank: false,
         pendingInteraction, running: true, runningSubagentCount: 0, completed: false,
         hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       const view = render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       const row = screen.getByRole('treeitem')
       expect(row.querySelector('[data-state="warning"]')).toBeTruthy()
       expect(row.querySelector('[data-state="ongoing"]')).toBeNull()
       expect(screen.getByText(label)).toBeTruthy()
 
       view.rerender(<SessionNodeItem node={{ ...node, running: false }} currentId={undefined} now={0}
-        onOpen={vi.fn()} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onOpen={vi.fn()} onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       expect(screen.getByRole('treeitem').querySelector('[data-state="warning"]')).toBeTruthy()
 
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
@@ -599,9 +696,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('s1'), title: 'Quiet', blank: false, running: false,
         runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(500) })
       expect(screen.getByText('空闲')).toBeTruthy()
@@ -617,9 +715,10 @@ describe('workspace browser rows', () => {
       const node: SessionNode = {
         id: sid('s1'), title: 'Done', blank: false, running: false,
         runningSubagentCount: 0, completed: true, hasActiveSchedule: false, updatedAt: 0,
+        archived: false, depth: 0, forkCount: 0,
       }
       render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} t={t} />)
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} t={t} />)
       fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
       act(() => { vi.advanceTimersByTime(500) })
       // Row's visually-hidden reminder label plus the hover card's status line.
@@ -633,11 +732,12 @@ describe('workspace browser rows', () => {
     const node: SessionNode = {
       id: sid('s1'), title: 'Drag me', blank: false, running: false,
       runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
     }
     const inactive = dragProps()
     const { rerender } = render(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} drag={inactive} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} drag={inactive} t={t} />,
     )
     const row = screen.getByRole('treeitem')
     stubRect(row)
@@ -655,7 +755,7 @@ describe('workspace browser rows', () => {
     const active = dragProps({ active: true, marker: 'before' })
     rerender(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} drag={active} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} drag={active} t={t} />,
     )
     stubRect(screen.getByRole('treeitem'))
     // Top half hovers/drops 'before'; bottom half 'after' (row mid = 117).
@@ -669,8 +769,28 @@ describe('workspace browser rows', () => {
     const after = dragProps({ active: true, marker: 'after' })
     rerender(
       <SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
-        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} drag={after} t={t} />,
+        onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={vi.fn()} drag={after} t={t} />,
     )
     expect(screen.getByRole('treeitem').className).toMatch(/dropAfter/)
+  })
+})
+
+describe('session row delete action', () => {
+  it('offers a destructive Delete item last and reports the id and title', () => {
+    const onDelete = vi.fn()
+    const node: SessionNode = {
+      id: sid('doomed'), title: 'Doomed', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, hasActiveSchedule: false, updatedAt: 0,
+      archived: false, depth: 0, forkCount: 0,
+    }
+    render(<SessionNodeItem node={node} currentId={undefined} now={0} onOpen={vi.fn()}
+      onRename={vi.fn()} onFork={vi.fn()} onArchive={vi.fn()} onUnarchive={vi.fn()} onDelete={onDelete} t={t} />)
+    fireEvent.click(screen.getByRole('button', { name: '会话“Doomed”的操作' }))
+    const item = screen.getByRole('menuitem', { name: '删除会话' })
+    expect(item.className).toMatch(/danger/)
+    expect(screen.getAllByRole('menuitem').at(-1)).toBe(item)
+    fireEvent.click(item)
+    expect(onDelete).toHaveBeenCalledWith(sid('doomed'), 'Doomed')
+    expect(screen.queryByRole('menu')).toBeNull()
   })
 })

@@ -28,6 +28,9 @@ export type { RiskConfirmationProps } from './RiskConfirmation.tsx'
 export { ConnectionIndicator } from './ConnectionIndicator.tsx'
 export type { ConnectionIndicatorState } from './ConnectionIndicator.tsx'
 export { FishLogo, FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from './FishLogo.tsx'
+export {
+  HydraLogo, HYDRA_LOGO_EYES, HYDRA_LOGO_FACE, HYDRA_LOGO_NOSTRILS, HYDRA_LOGO_PUPILS, HYDRA_LOGO_RIDGE, HYDRA_LOGO_VIEWBOX,
+} from './HydraLogo.tsx'
 export { BrandWordmark } from './BrandWordmark.tsx'
 export type { BrandWordmarkProps } from './BrandWordmark.tsx'
 export { ReferenceIcon } from './ReferenceIcon.tsx'

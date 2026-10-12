@@ -100,7 +100,7 @@ async function fireStep(ctx: Context, agent: Agent, turn: number, step: number):
   const signal = new AbortController().signal
   const decision = await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages: [], turn, step, signal },
+    { messages: [], prompt: { systemPrompt: '', tools: [] }, turn, step, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
   )
   if (decision.kind === 'enter') {
@@ -118,7 +118,7 @@ async function proposeStep(
   const signal = new AbortController().signal
   return await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages, turn: 1, step: 1, signal },
+    { messages, prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages }),
   )
 }
@@ -150,7 +150,7 @@ async function composePrefix(ctx: Context, cwd: string, signal = new AbortContro
 async function composePrefixForAgent(ctx: Context, agent: Agent, signal = new AbortController().signal): Promise<Message[]> {
   const decision = await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages: [], turn: 1, step: 1, signal },
+    { messages: [], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
   )
   if (decision.kind === 'enter') {
@@ -300,7 +300,7 @@ describe('dsh-tool-skill', () => {
             '- `z-skill`: Long description Long description Long descript...',
             '</available_skills>',
             '',
-            "If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact skill name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.",
+            "Skills are optional references, not rules. If the user names a skill, load it with the `skill` tool. Otherwise load one only when the task clearly needs what its description offers, treat its steps as guidance to adapt to the task at hand, and set it aside where it does not fit. This catalog contains summaries only; do not infer a skill's instructions until it has been loaded.",
             'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
             '</system-reminder>',
           ].join('\n'),
@@ -1086,7 +1086,7 @@ describe('user-explicit invocation injection', () => {
     const signal = new AbortController().signal
     const decision = await agentEvents(ctx, agent).waterfall(
       'agent/pre-step',
-      { messages: [gesture('/hidden-demo blocked step')], turn: 1, step: 1, signal },
+      { messages: [gesture('/hidden-demo blocked step')], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
       () => Promise.resolve({ kind: 'reject' as const }),
     )
     expect(decision).toEqual({ kind: 'reject' })

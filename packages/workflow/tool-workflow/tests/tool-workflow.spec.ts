@@ -108,6 +108,16 @@ function execute(ctx: Context, args: unknown, extra?: {
 }
 
 describe('dsh-tool-workflow', () => {
+  it('passes a resume request to the engine as the run id to resume', async () => {
+    const { ctx, engine, parent } = await setup()
+    const pending = execute(ctx, { script: SCRIPT, meta: META, resumeRunId: 'run-earlier' }, { agent: parent })
+    await vi.waitFor(() => { expect(engine.requests.length).toBe(1) })
+    expect(engine.requests[0]).toMatchObject({ script: SCRIPT, meta: META, resumeRunId: 'run-earlier' })
+    expect(engine.requests[0]).not.toHaveProperty('args')
+    engine.settle({ value: null, stopReason: 'completed', agentsStarted: 0 })
+    expect((await pending).isError).toBe(false)
+  })
+
   it('starts a run with the script/args/parent/signal and renders the completed value', async () => {
     const { ctx, engine, parent } = await setup()
     const controller = new AbortController()

@@ -3,4 +3,4 @@
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/agent-lifecycle.md
 agent-lifecycle.md: 6ffe3c2b47e766ac985b3192a1c08787821fc46e
-agent-lifecycle.zh.md: c4b2fa70dbdb0487c3871b6e65227eac8b062e24
+agent-lifecycle.zh.md: cba1d00232487baeb600df4b2dd410ad39f4ae06

@@ -76,3 +76,19 @@ export function markAgentLoopRequest<T extends GenerateOptions>(request: T): T {
 export function isAgentLoopRequest(request: GenerateOptions): boolean {
   return AGENT_LOOP_REQUESTS.has(request)
 }
+
+/**
+ * Route one auxiliary model request that a plugin sends beside the
+ * conversation: the plugin's configured provider and model when both are
+ * set, otherwise the route of the session's latest logged request.
+ * @param configured - the plugin's configured `provider` and `model`; either one alone names no route.
+ * @param logged - the latest logged request configuration, `session.requestHeader()?.config`.
+ * @returns a new provider and model pair, or `undefined` when neither source names a route.
+ */
+export function auxiliaryRoute(
+  configured: { readonly provider?: string; readonly model?: string },
+  logged: Pick<LlmCallConfig, 'provider' | 'model'> | undefined,
+): { provider: string; model: string } | undefined {
+  if (configured.provider !== undefined && configured.model !== undefined) return { provider: configured.provider, model: configured.model }
+  return logged === undefined ? undefined : { provider: logged.provider, model: logged.model }
+}

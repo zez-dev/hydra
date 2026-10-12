@@ -23,7 +23,7 @@ import type {
 } from '@deepseek-ai/dsh-typert-protocol'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import type { ClientRemote } from '../src/client/index.ts'
-import { apply, inject, RemoteStream } from '../src/client/index.ts'
+import { apply, carrierFailure, inject, RemoteStream } from '../src/client/index.ts'
 import {
   RemoteStreamCarrierError,
   RemoteStreamMuxClient,
@@ -2731,3 +2731,31 @@ async function withFakeWebSocket(
     else Object.defineProperty(globalThis, 'location', locationDescriptor)
   }
 }
+
+describe('carrierFailure', () => {
+  const unreachable = Object.assign(new Error('connection: /api/settings/mutate never reached a server'), { code: 'connection/unreachable' })
+
+  it('explains a request that never reached the Host instead of repeating the browser wording', () => {
+    const failed = carrierFailure('settings/mutate', unreachable)
+    expect(failed.ok).toBe(false)
+    expect(failed.error.code).toBe('gateway/internal')
+    expect(failed.error.message).toContain('never reached the Host')
+    expect(failed.error.message).toContain('nothing was applied')
+    expect(failed.error.message).toContain('fresh access token')
+    expect(failed.error.message).not.toContain('Failed to fetch')
+  })
+
+  it('does not mistake a response-parsing TypeError for an unreachable Host', () => {
+    // The carrier throws a TypeError after the Host has answered with a bad
+    // envelope; by then a mutation may have been applied, so the message must
+    // not claim otherwise.
+    const failed = carrierFailure('settings/mutate', new TypeError('connection: invalid server-response envelope'))
+    expect(failed.error.message).toBe('client api: settings/mutate failed: connection: invalid server-response envelope')
+    expect(failed.error.message).not.toContain('nothing was applied')
+  })
+
+  it('passes any other carrier throw through with its own message', () => {
+    const failed = carrierFailure('settings/mutate', new Error('host refused'))
+    expect(failed.error.message).toBe('client api: settings/mutate failed: host refused')
+  })
+})

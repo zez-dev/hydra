@@ -6,7 +6,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { GoalError } from '@deepseek-ai/dsh-goal'
+import { GoalError, isUnlimitedGoalRounds } from '@deepseek-ai/dsh-goal'
 import type { GoalPhase, GoalRef, GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
@@ -87,7 +87,7 @@ function renderGoal(title: string, goal: GoalView): CommandResult {
       `Status: ${phaseLabel(goal.phase)}`,
       ...blocker,
       `Objective: ${goal.objective}`,
-      `Rounds: ${goal.roundsStarted}/${goal.maxGoalRounds}`,
+      `Rounds: ${goal.roundsStarted}/${isUnlimitedGoalRounds(goal.maxGoalRounds) ? 'unlimited' : goal.maxGoalRounds}`,
       `Activation: ${goal.activation}`,
       '',
       `Commands: ${commandHint(goal)}`,

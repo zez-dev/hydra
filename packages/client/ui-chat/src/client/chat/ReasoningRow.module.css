@@ -22,6 +22,48 @@
   background: var(--dsw-alias-bg-base);
 }
 
+/* The dragon face in the row's ink; while its reasoning streams it wakes:
+   brand red, a pulsing ember halo, and eyes brightening from amber to gold. */
+.dragon {
+  flex: none;
+}
+
+.root[data-state='running'] .dragon {
+  color: var(--dsw-alias-brand-primary);
+}
+
+@keyframes dsh-reasoning-dragon-halo {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+
+  50% {
+    filter: drop-shadow(0 0 3px var(--dsh-ember-halo));
+  }
+}
+
+@keyframes dsh-reasoning-dragon-eyes {
+  0%,
+  100% {
+    fill: var(--dsw-alias-brand-highlight);
+  }
+
+  50% {
+    fill: var(--dsh-dragon-eye-glow);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .root[data-state='running'] .dragon {
+    animation: dsh-reasoning-dragon-halo 1.6s ease-in-out infinite;
+  }
+
+  .root[data-state='running'] .dragon [data-part='pupil'] {
+    animation: dsh-reasoning-dragon-eyes 1.6s ease-in-out infinite;
+  }
+}
+
 .root[data-state='running'] .row::after {
   content: '';
   position: absolute;

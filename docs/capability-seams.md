@@ -245,6 +245,40 @@ flowchart LR
   pkg_workflow["workflow"]
   svc_workflowEngine["ctx.workflowEngine<br/>Workflow script engine"]
   pkg_tool_workflow["tool-workflow"]
+  svc_workflowJournal["ctx.workflowJournal<br/>Workflow run journal"]
+  pkg_workflow_journal["workflow-journal"]
+  pkg_digest["digest"]
+  svc_digest["ctx.digest<br/>Daily digest reports"]
+  pkg_doctor["doctor"]
+  pkg_research["research"]
+  svc_research["ctx.research<br/>Research journals"]
+  pkg_tool_market["tool-market"]
+  pkg_learning["learning"]
+  pkg_memory["memory"]
+  svc_memory["ctx.memory<br/>Durable memories"]
+  pkg_learning_controller["learning-controller"]
+  pkg_knowledge["knowledge"]
+  svc_knowledge["ctx.knowledge<br/>Document knowledge base"]
+  svc_knowledgeWorkspaces["ctx.knowledgeWorkspaces<br/>Workspace knowledge collections"]
+  svc_learning["ctx.learning<br/>Learning capture"]
+  svc_learningController["ctx.learningController<br/>Learning review API"]
+  pkg_session_usage["session-usage"]
+  svc_sessionUsage["ctx.sessionUsage<br/>Session token usage"]
+  pkg_usage_controller["usage-controller"]
+  svc_usageController["ctx.usageController<br/>Usage Remote"]
+  pkg_skill_lock["skill-lock"]
+  svc_skillLock["ctx.skillLock<br/>Skill trust records"]
+  pkg_spend_guard["spend-guard"]
+  svc_spendGuard["ctx.spendGuard<br/>Token spend guard"]
+  pkg_cron_sessions["cron-sessions"]
+  svc_cronSessions["ctx.cronSessions<br/>Scheduled sessions"]
+  pkg_off_peak["off-peak"]
+  svc_offPeak["ctx.offPeak<br/>Off-peak deferral"]
+  pkg_notify["notify"]
+  svc_notify["ctx.notify<br/>Outbound notifications"]
+  pkg_market_data["market-data"]
+  svc_marketData["ctx.marketData<br/>Market data sources"]
+  svc_doctor["ctx.doctor<br/>Composition diagnostics"]
   pkg_webhook["webhook"]
   svc_webhookRuntime["ctx.webhookRuntime<br/>Webhook rule runtime"]
   pkg_webhook_github["webhook-github"]
@@ -288,7 +322,10 @@ flowchart LR
   pkg_cordis_host_runner --> svc_dynamicCordisRunner
   pkg_credentials --> svc_credentials
   pkg_credentials_local --> svc_credentials
+  pkg_cron_sessions --> svc_cronSessions
   pkg_deepseek_llm_api_extensions --> svc_deepseekLlmApiExtensions
+  pkg_digest --> svc_digest
+  pkg_doctor --> svc_doctor
   pkg_experimental_agent_team --> svc_agentTeams
   pkg_experimental_browser_use_chrome_devtools_mcp --> svc_browserUse
   pkg_experimental_browser_use_playwright_mcp --> svc_browserUse
@@ -312,15 +349,23 @@ flowchart LR
   pkg_invariants --> svc_invariants
   pkg_jobs --> svc_jobs
   pkg_jobs_local --> svc_jobs
+  pkg_knowledge --> svc_knowledge
+  pkg_knowledge --> svc_knowledgeWorkspaces
+  pkg_learning --> svc_learning
+  pkg_learning_controller --> svc_learningController
   pkg_llm --> svc_llm
   pkg_llm_deepseek --> svc_llm
   pkg_llm_pi_ai --> svc_llm
   pkg_llm_replay --> svc_llm
   pkg_lsp --> svc_lsp
   pkg_lsp_stdio --> svc_lsp
+  pkg_market_data --> svc_marketData
   pkg_mcp_client --> svc_mcpResources
   pkg_mcp_resources --> svc_mcpResources
+  pkg_memory --> svc_memory
   pkg_message_feedback --> svc_messageFeedback
+  pkg_notify --> svc_notify
+  pkg_off_peak --> svc_offPeak
   pkg_office_to_pdf --> svc_officeToPdf
   pkg_permission_presets --> svc_permissionPresets
   pkg_plan_mode --> svc_planMode
@@ -329,6 +374,7 @@ flowchart LR
   pkg_ptc_runtime --> svc_ptcRuntime
   pkg_ptc_runtime_node --> svc_ptcRuntime
   pkg_pwsh_local --> svc_shell
+  pkg_research --> svc_research
   pkg_sandbox --> svc_sandbox
   pkg_sandbox_local --> svc_sandbox
   pkg_sandbox_policy --> svc_sandboxPolicy
@@ -347,6 +393,7 @@ flowchart LR
   pkg_session_title --> svc_sessionTitle
   pkg_session_title_all_prompts_llm --> svc_sessionTitle
   pkg_session_title_first_prompt_llm --> svc_sessionTitle
+  pkg_session_usage --> svc_sessionUsage
   pkg_settings --> svc_settings
   pkg_settings_file --> svc_settings
   pkg_shell --> svc_shell
@@ -354,7 +401,9 @@ flowchart LR
   pkg_skill --> svc_skills
   pkg_skill_badge --> svc_skills
   pkg_skill_filesystem --> svc_skills
+  pkg_skill_lock --> svc_skillLock
   pkg_skill_office --> svc_skills
+  pkg_spend_guard --> svc_spendGuard
   pkg_spill --> svc_spillStore
   pkg_spill_local --> svc_spillStore
   pkg_ssh --> svc_ssh
@@ -379,6 +428,7 @@ flowchart LR
   pkg_tool_subagent --> svc_subagentModelSelection
   pkg_tools --> svc_tools
   pkg_typert_registry --> svc_typert
+  pkg_usage_controller --> svc_usageController
   pkg_user_approval --> svc_approval
   pkg_user_questions --> svc_userQuestions
   pkg_web --> svc_web
@@ -388,6 +438,8 @@ flowchart LR
   pkg_web_search_perplexity --> svc_web
   pkg_webhook --> svc_webhookRuntime
   pkg_workflow --> svc_workflowEngine
+  pkg_workflow --> svc_workflowJournal
+  pkg_workflow_journal --> svc_workflowJournal
   pkg_workflow_ptc --> svc_workflowEngine
   pkg_workspace --> svc_workspaceRegistry
   pkg_workspace_changes --> svc_workspaceChanges
@@ -421,7 +473,10 @@ flowchart LR
   svc_credentials --> pkg_api_settings_controller
   svc_credentials --> pkg_llm_deepseek
   svc_credentials --> pkg_llm_pi_ai
+  svc_cronSessions --> pkg_digest
+  svc_cronSessions --> pkg_doctor
   svc_deepseekLlmApiExtensions --> pkg_llm_deepseek
+  svc_digest --> pkg_doctor
   svc_directoryPicker --> pkg_api_workspace_controller
   svc_dynamicCordisRunner --> pkg_tool_cordis
   svc_fileReferences --> pkg_api_session_controller
@@ -436,16 +491,34 @@ flowchart LR
   svc_jobs --> pkg_tool_jobs
   svc_jobs --> pkg_tool_subagent
   svc_jobs --> pkg_tool_terminal
+  svc_learning --> pkg_doctor
+  svc_learning --> pkg_learning_controller
   svc_llm --> pkg_agent_loop
   svc_llm --> pkg_compaction_basic
   svc_lsp --> pkg_tool_lsp
+  svc_marketData --> pkg_tool_market
   svc_mcpResources --> pkg_mcp_resources
+  svc_memory --> pkg_digest
+  svc_memory --> pkg_doctor
+  svc_memory --> pkg_learning
+  svc_memory --> pkg_learning_controller
+  svc_memory --> pkg_research
+  svc_notify --> pkg_cron_sessions
+  svc_notify --> pkg_digest
+  svc_notify --> pkg_doctor
+  svc_notify --> pkg_off_peak
+  svc_notify --> pkg_research
+  svc_notify --> pkg_spend_guard
   svc_officeToPdf --> pkg_client_ui_sidebar_documentpreview
   svc_pluginManager --> pkg_plugin_manager
   svc_pluginManager --> pkg_ui_settings_plugin_inventory
   svc_profileContext --> pkg_plugin_manager
   svc_ptcRuntime --> pkg_tools
   svc_ptcRuntime --> pkg_workflow_ptc
+  svc_research --> pkg_digest
+  svc_research --> pkg_doctor
+  svc_research --> pkg_learning
+  svc_research --> pkg_tool_market
   svc_sandbox --> pkg_bash_sandbox
   svc_sandbox --> pkg_terminal_bash
   svc_sandboxPolicy --> pkg_bash_sandbox
@@ -467,6 +540,7 @@ flowchart LR
   svc_sessionProjections --> pkg_tool_todo
   svc_sessionQuery --> pkg_session_reference
   svc_sessionQuery --> pkg_tool_session_query
+  svc_sessionUsage --> pkg_usage_controller
   svc_sessions --> pkg_agent
   svc_sessions --> pkg_agent_loop
   svc_sessions --> pkg_invariants
@@ -484,7 +558,10 @@ flowchart LR
   svc_shell --> pkg_tool_pwsh
   svc_shellEnv --> pkg_tool_bash
   svc_shellEnv --> pkg_tool_pwsh
+  svc_skillLock --> pkg_doctor
   svc_skills --> pkg_tool_skill
+  svc_spendGuard --> pkg_digest
+  svc_spendGuard --> pkg_doctor
   svc_spillStore --> pkg_spill_policy
   svc_ssh --> pkg_fs_ssh
   svc_ssh --> pkg_sandbox_ssh
@@ -530,6 +607,7 @@ flowchart LR
   svc_webhookRuntime --> pkg_webhook_github
   svc_workflowEngine --> pkg_tool_ralph
   svc_workflowEngine --> pkg_tool_workflow
+  svc_workflowJournal --> pkg_workflow_ptc
   svc_workspaceRegistry --> pkg_api_session_controller
   svc_workspaceRegistry --> pkg_api_workspace_controller
   svc_fs -. event gate .-> pkg_fs_observation_policy
@@ -615,6 +693,23 @@ flowchart LR
 | `ctx.webServer` | `core` | [`host-webserver`](../packages/host/webserver) | - | [`client-connection`](../packages/client/connection), [`client-modules`](../packages/client/modules), [`client-hmr`](../packages/client/hmr) | - | Plain node:http carrier: named-route registry, index transform taps, and the static dist fallback; web-transport plugins register their own routes. |
 | `ctx.clientModules` | `core` | [`client-modules`](../packages/client/modules) | - | [`client-hmr`](../packages/client/hmr) | - | Composes the __DSH_BOOT__ entry graph from an incremental dsh.client scan, serves plugin bundles, and notifies rebuilt/graph-changed subscribers. |
 | `ctx.workflowEngine` | `seam` | [`workflow`](../packages/workflow/workflow) | [`workflow-ptc`](../packages/workflow/workflow-ptc) | [`tool-workflow`](../packages/workflow/tool-workflow), [`tool-ralph`](../packages/workflow/tool-ralph) | - | One engine per context, as in bash, with no named-provider registry; the general workflow and fixed Ralph consumers start runs whose agent() calls fan out through ctx.subagents. |
+| `ctx.workflowJournal` | `seam` | [`workflow`](../packages/workflow/workflow) | [`workflow-journal`](../packages/workflow/workflow-journal) | [`workflow-ptc`](../packages/workflow/workflow-ptc) | - | Records each run and the agent() calls that completed, so the engine resumes an interrupted run by replaying matched calls instead of spawning children that already answered. |
+| `ctx.digest` | `core` | [`digest`](../packages/goal/digest) | - | [`doctor`](../packages/boot/doctor) | - | Gathers goals, tickets, checkpoints, memory, spend, cron runs and research into one Markdown report per day in the workspace. |
+| `ctx.research` | `core` | [`research`](../packages/goal/research) | - | [`doctor`](../packages/boot/doctor), [`tool-market`](../packages/finance/tool-market), [`digest`](../packages/goal/digest), [`learning`](../packages/learning/learning) | - | Keeps hypotheses and breakthroughs in workspace files, so a discovery carries into later sessions instead of being restated by hand. |
+| `ctx.memory` | `core` | [`memory`](../packages/learning/memory) | - | `learning-controller`, [`doctor`](../packages/boot/doctor), [`research`](../packages/goal/research), [`learning`](../packages/learning/learning), [`digest`](../packages/goal/digest) | - | Stores approved facts that re-enter later sessions; candidates wait for approval before any of them reaches a model request. |
+| `ctx.knowledge` | `core` | [`knowledge`](../packages/learning/knowledge) | - | - | - | Indexes configured folders of documents, code, and books so the model searches, reads, and cites passages; background passes keep files, summaries, folder rollups, and vectors current. |
+| `ctx.knowledgeWorkspaces` | `core` | [`knowledge`](../packages/learning/knowledge) | - | - | - | Keeps the folders attached to each workspace and one index per workspace, so only sessions in that workspace reach them; background passes index them without summarizing. |
+| `ctx.learning` | `core` | [`learning`](../packages/learning/learning) | - | `learning-controller`, [`doctor`](../packages/boot/doctor) | - | Turns a solution or shortcut found during a session into a memory candidate or a skill draft. |
+| `ctx.learningController` | `core` | `learning-controller` | - | - | - | Serves learning candidates to remote clients for approval; the learning and memory services stay the authority. |
+| `ctx.sessionUsage` | `core` | [`session-usage`](../packages/session-query/session-usage) | - | `usage-controller` | - | Folds every session's token usage by day, provider and model, cached per session, for /usage and the dashboard. |
+| `ctx.usageController` | `core` | `usage-controller` | - | - | - | Serves the token-usage dashboard totals, heatmap and per-model table to the Web client. |
+| `ctx.skillLock` | `core` | [`skill-lock`](../packages/skill/skill-lock) | - | [`doctor`](../packages/boot/doctor) | - | Records what a skill looked like when it was trusted, so a later edit to a loaded skill is visible rather than silent. |
+| `ctx.spendGuard` | `core` | [`spend-guard`](../packages/guard/spend-guard) | - | [`doctor`](../packages/boot/doctor), [`digest`](../packages/goal/digest) | - | Tracks tokens spent against a daily ceiling and refuses further model requests once it is reached. |
+| `ctx.cronSessions` | `core` | [`cron-sessions`](../packages/schedule/cron-sessions) | - | [`doctor`](../packages/boot/doctor), [`digest`](../packages/goal/digest) | - | Starts sessions on a schedule and records each run, so recurring work does not depend on someone being present. |
+| `ctx.offPeak` | `core` | [`off-peak`](../packages/schedule/off-peak) | - | - | - | Holds queued work until a configured window, so bulk runs land when capacity is cheap. |
+| `ctx.notify` | `core` | [`notify`](../packages/webhook/notify) | - | [`doctor`](../packages/boot/doctor), [`digest`](../packages/goal/digest), [`research`](../packages/goal/research), [`spend-guard`](../packages/guard/spend-guard), [`cron-sessions`](../packages/schedule/cron-sessions), [`off-peak`](../packages/schedule/off-peak) | - | One send path for the events a person should see while away; every caller treats it as optional. |
+| `ctx.marketData` | `seam` | [`market-data`](../packages/finance/market-data) | [`market-data`](../packages/finance/market-data) | [`tool-market`](../packages/finance/tool-market) | - | Quotes, price history, company profiles and SEC filings behind one provider interface; the built-in keyless provider ships with the seam and others register beside it. |
+| `ctx.doctor` | `core` | [`doctor`](../packages/boot/doctor) | - | - | - | Reports which optional seams are mounted and what each one holds, so a composition problem is visible without reading cordis.yml. |
 | `ctx.webhookRuntime` | `core` | [`webhook`](../packages/webhook/webhook) | - | [`webhook-github`](../packages/webhook/webhook-github) | - | Provider adapters dispatch authenticated deliveries; trusted plugins register independent process-local rules, and the runtime turns non-null results into ordinary Workspace-backed Sessions without delivery or completion state. |
 | `ctx.lsp` | `seam` | [`lsp`](../packages/lsp/lsp) | [`lsp-stdio`](../packages/lsp/lsp-stdio) | [`tool-lsp`](../packages/lsp/tool-lsp) | - | Provider registration and selection plus normalized query execution over exactly four operations; the seam offers no protocol escape hatch, so a backend translates into the normalized request and result. |
 | `ctx.dynamicCordisRunner` | `core` | [`cordis-host-runner`](../packages/extensions/cordis-host-runner) | - | [`tool-cordis`](../packages/extensions/tool-cordis) | - | Owns the in-memory definition registry, the vm sandbox for host halves, and the request-run round trip; browser pages reach the same service over the wire through its remote namespace. |

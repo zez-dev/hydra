@@ -106,6 +106,8 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
     archiveSession: vi.fn(async () => {}),
+    unarchiveSession: vi.fn(async () => {}),
+    deleteSession: vi.fn(async () => ({ kind: 'deleted' as const })),
     insertWorkspaceBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
@@ -400,9 +402,9 @@ describe('WorkspaceBrowser', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
     expect(screen.getByText('分组方式')).toBeTruthy() // the menu heading label
-    expect(screen.getByRole('separator')).toBeTruthy()
+    expect(screen.getAllByRole('separator')).toHaveLength(2)
     expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
-      '按工作区', '按工作区树', '单列表', '手动排序', '最近更新',
+      '按工作区', '按工作区树', '单列表', '手动排序', '最近更新', '按分叉谱系', '显示已归档会话',
     ])
     expect(screen.getByRole('menuitem', { name: '按工作区' }).querySelector('svg')).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: '手动排序' }).querySelector('svg')).toBeTruthy()
@@ -690,6 +692,113 @@ describe('WorkspaceBrowser', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: '单列表' }))
     expect(screen.getByText('kept-s')).toBeTruthy()
     expect(screen.queryByText('gone-s')).toBeNull()
+  })
+
+  it('reveals archived rows through View options and unarchives one from its row menu', () => {
+    const unarchiveSession = vi.fn(async () => {})
+    const open = vi.fn()
+    const b = mount({
+      useSessions: hook(sessionState([summary('kept-s', 2), summary('gone-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['kept-s', 'gone-s'])], [sid('gone-s')])),
+      unarchiveSession,
+      open,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    expect(screen.queryByText('gone-s')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '显示已归档会话' }))
+    expect(b.store.getSnapshot().showArchived).toBe(true)
+    expect(screen.getByText('gone-s')).toBeTruthy()
+    expect(screen.getByText('已归档')).toBeTruthy()
+
+    // A revealed archived row selects and unarchives like any other row.
+    fireEvent.click(screen.getByText('gone-s'))
+    expect(open).toHaveBeenCalledWith(sid('gone-s'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“gone-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '取消归档会话' }))
+    expect(unarchiveSession).toHaveBeenCalledWith(sid('gone-s'))
+
+    // Hiding them again returns the browser to the ordinary projection.
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '显示已归档会话' }))
+    expect(b.store.getSnapshot().showArchived).toBe(false)
+    expect(screen.queryByText('gone-s')).toBeNull()
+  })
+
+  it('reveals archived rows in the flat list and in search results', () => {
+    const b = mount({
+      useSessions: hook(sessionState([summary('kept-s', 2), summary('gone-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['kept-s', 'gone-s'])], [sid('gone-s')])),
+    })
+    act(() => { b.store.actions.setGroupBy('flat') })
+    expect(screen.queryByText('gone-s')).toBeNull()
+    act(() => { b.store.actions.setShowArchived(true) })
+    expect(screen.getByText('gone-s')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '搜索会话' }))
+    fireEvent.change(screen.getByPlaceholderText('搜索会话…'), { target: { value: 'gone' } })
+    expect(screen.getByText('gone-s')).toBeTruthy()
+    expect(screen.getByText('已归档')).toBeTruthy()
+  })
+
+  it('logs and keeps the tree when the unarchive call rejects', async () => {
+    const rejection = new Error('unarchive exploded')
+    const unarchiveSession = vi.fn(async () => { throw rejection })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const b = mount({
+        useSessions: hook(sessionState([summary('alpha-s', 1)])),
+        useWorkspaces: hook(workspaceState([workspace('alpha', ['alpha-s'])], [sid('alpha-s')])),
+        unarchiveSession,
+      })
+      act(() => { b.store.actions.setShowArchived(true) })
+      fireEvent.click(screen.getByText('alpha'))
+      fireEvent.click(screen.getByRole('button', { name: '会话“alpha-s”的操作' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '取消归档会话' }))
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(warn).toHaveBeenCalledWith('session unarchive rejected:', rejection)
+      expect(screen.getByText('alpha-s')).toBeTruthy()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('nests forks under their parent in the Lineage order', () => {
+    const parent = summary('parent-s', 10)
+    const fork = summary('fork-s', 30, { parentId: sid('parent-s') })
+    const b = mount({
+      useSessions: hook(sessionState([parent, fork])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'fork-s'])])),
+    })
+    act(() => { b.store.actions.setGroupBy('flat') })
+    // Recency alone puts the newer fork first and indents nothing.
+    expect(screen.getAllByRole('treeitem').map(row => row.textContent?.slice(0, 6)))
+      .toEqual(['fork-s', 'parent'])
+
+    fireEvent.click(screen.getByRole('button', { name: '视图选项' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '按分叉谱系' }))
+    expect(b.store.getSnapshot().orderBy).toBe('lineage')
+    const rows = screen.getAllByRole('treeitem')
+    expect(rows.map(row => row.textContent?.slice(0, 6))).toEqual(['parent', 'fork-s'])
+    expect(rows[0]!.style.getPropertyValue('--dsh-lineage-indent')).toBe('0px')
+    expect(rows[1]!.style.getPropertyValue('--dsh-lineage-indent')).toBe('14px')
+    expect(screen.getByText('1 个分叉')).toBeTruthy()
+  })
+
+  it('leaves a fork at root level when its parent is archived and hidden', () => {
+    const parent = summary('parent-s', 10)
+    const fork = summary('fork-s', 30, { parentId: sid('parent-s') })
+    const b = mount({
+      useSessions: hook(sessionState([parent, fork])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['parent-s', 'fork-s'])], [sid('parent-s')])),
+    })
+    act(() => { b.store.actions.setGroupBy('flat') })
+    act(() => { b.store.actions.setOrderBy('lineage', {}) })
+    const rows = screen.getAllByRole('treeitem')
+    expect(rows.map(row => row.textContent?.slice(0, 6))).toEqual(['fork-s'])
+    expect(rows[0]!.style.getPropertyValue('--dsh-lineage-indent')).toBe('0px')
   })
 
   it('logs and keeps the tree when the archive call rejects', async () => {
@@ -1846,5 +1955,71 @@ describe('Workspace tree grouping', () => {
     fireEvent.dragEnd(alpha)
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledOnce()
     expect(b.props.insertWorkspaceBefore).toHaveBeenCalledWith(wid('alpha'), wid('gamma'))
+  })
+})
+
+describe('session delete dialog', () => {
+  it('says up front which sub-agent sessions go and which forks stay, and deletes the forks only when ticked', async () => {
+    const deleteSession = vi.fn(async () => ({ kind: 'deleted' as const }))
+    mount({
+      useSessions: hook(sessionState([
+        summary('gone-s', 1),
+        summary('helper', 2, { parentId: sid('gone-s'), origin: 'subagent' }),
+        summary('fork-a', 3, { parentId: sid('gone-s') }),
+        summary('fork-b', 4, { parentId: sid('fork-a') }),
+      ])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['gone-s', 'fork-a', 'fork-b'])])),
+      deleteSession,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“gone-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    const dialog = screen.getByRole('dialog', { name: '删除会话' })
+    expect(dialog.textContent).toContain('gone-s')
+    expect(dialog.textContent).toContain('同时删除它启动的 1 个子代理会话。')
+    expect(dialog.textContent).toContain('它的 2 个分叉会话会保留为独立会话。')
+    const cascade = screen.getByRole<HTMLInputElement>('checkbox', { name: '同时删除 2 个分叉会话' })
+    expect(cascade.checked).toBe(false)
+    fireEvent.click(cascade)
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    expect(deleteSession).toHaveBeenCalledWith(sid('gone-s'), { cascade: true })
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: '删除会话' })).toBeNull() })
+
+    // Reopening resets the choice: the forks are kept by default.
+    fireEvent.click(screen.getByRole('button', { name: '会话“gone-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    expect(screen.getByRole<HTMLInputElement>('checkbox', { name: '同时删除 2 个分叉会话' }).checked).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    expect(deleteSession).toHaveBeenLastCalledWith(sid('gone-s'), { cascade: false })
+  })
+
+  it('shows no notice or choice for a session without descendants', () => {
+    mount({
+      useSessions: hook(sessionState([summary('alone-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['alone-s'])])),
+      deleteSession: vi.fn(),
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“alone-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    expect(screen.getByRole('dialog', { name: '删除会话' }).textContent).not.toContain('子代理')
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  it('keeps the dialog open with the failure and allows cancelling', async () => {
+    const deleteSession = vi.fn(async () => ({ kind: 'failed' as const, message: 'session is live' }))
+    mount({
+      useSessions: hook(sessionState([summary('busy-s', 1)])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['busy-s'])])),
+      deleteSession,
+    })
+    fireEvent.click(screen.getByText('alpha'))
+    fireEvent.click(screen.getByRole('button', { name: '会话“busy-s”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '删除会话' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除会话' }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('session is live') })
+    expect(screen.getByRole('dialog', { name: '删除会话' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '删除会话' })).toBeNull()
   })
 })

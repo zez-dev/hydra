@@ -43,6 +43,14 @@ export interface ContextPressureProjection {
    * of its own. Absent until a provider reports usage.
    */
   projectedTokens?: number
+  /**
+   * Provider tokens per heuristic token the backend priced the last request
+   * at (`compaction/pressure`); the surface delta since the newest anchor is
+   * priced at it. Absent until a request was priced.
+   */
+  density?: number
+  /** Priced size at which the next step-boundary check condenses (`compaction/pressure`). Absent until a request was priced. */
+  thresholdTokens?: number
   /** Newest recorded route capacity; absent when no adapter advertised one. */
   contextWindow?: number
 }

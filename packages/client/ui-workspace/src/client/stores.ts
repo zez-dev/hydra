@@ -12,13 +12,23 @@ export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
 
 /** Session-list grouping mode: sibling Workspace sections, a Workspace tree, or one flat list. */
 export type SessionGroupBy = 'workspace' | 'workspace-tree' | 'flat'
-/** Session order: saved manual positions or current recency. */
-export type SessionOrderBy = 'manual' | 'updated'
+/** Session order: saved manual positions, current recency, or forks nested under their parent. */
+export type SessionOrderBy = 'manual' | 'updated' | 'lineage'
 
-/** Workspace browser viewing state persisted across surface remounts and reloads. */
+/**
+ * Workspace browser viewing state persisted across surface remounts and
+ * reloads. Rehydration replaces the whole value, so a record written before a
+ * field existed leaves that field absent; readers of a field newer than the
+ * persist key normalize it.
+ */
 type WorkspaceViewState = {
   groupBy: SessionGroupBy
   orderBy: SessionOrderBy
+  /**
+   * Archived Sessions join the browsing surfaces as dimmed rows. Absent in
+   * records written before the reveal existed, which read as hidden.
+   */
+  showArchived?: boolean
   /** Explicit group expansion keyed by Workspace identity, including descendants in tree mode. */
   groupExpansion: Record<string, boolean>
   /** Saved manual order per Workspace group plus the browser-local flat-list account. */
@@ -36,6 +46,7 @@ type WorkspaceViewActions = {
     mode: SessionOrderBy,
     initialOrders: Readonly<Record<string, readonly string[]>>,
   ) => void
+  setShowArchived: (draft: WorkspaceViewState, showArchived: boolean) => void
   setGroupExpanded: (draft: WorkspaceViewState, key: string, expanded: boolean) => void
   retainAccountKeys: (draft: WorkspaceViewState, workspaceKeys: readonly string[]) => void
   syncSessionOrders: (
@@ -66,6 +77,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
     init: (): WorkspaceViewState => ({
       groupBy: 'workspace',
       orderBy: 'updated',
+      showArchived: false,
       groupExpansion: {},
       sessionOrderByAccount: {},
     }),
@@ -77,6 +89,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
         d.sessionOrderByAccount = mode === 'manual' ? copySessionOrders(initialOrders) : {}
         d.orderBy = mode
       },
+      setShowArchived: (d, showArchived: boolean) => { d.showArchived = showArchived },
       setGroupExpanded: (d, key: string, expanded: boolean) => { d.groupExpansion[key] = expanded },
       retainAccountKeys: (d, workspaceKeys: readonly string[]) => {
         const retained = new Set(workspaceKeys)
@@ -93,7 +106,7 @@ export function createWorkspaceViewStore(): EngineStoreHandle<WorkspaceViewState
         Object.assign(d.sessionOrderByAccount, copySessionOrders(orders))
       },
       setSessionOrder: (d, accountKey, order, initialOrders) => {
-        if (d.orderBy === 'updated') d.sessionOrderByAccount = copySessionOrders(initialOrders)
+        if (d.orderBy !== 'manual') d.sessionOrderByAccount = copySessionOrders(initialOrders)
         d.orderBy = 'manual'
         d.sessionOrderByAccount[accountKey] = [...order]
       },

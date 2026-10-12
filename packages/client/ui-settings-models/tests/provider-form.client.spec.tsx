@@ -879,6 +879,20 @@ describe('hand-declared providers', () => {
     expect(set).toHaveBeenCalledWith('ACME_GATEWAY_API_KEY', 'gw-key')
   })
 
+  it('records a custom route created with reasoning levels off, and nothing when left on', async () => {
+    const { mutate } = mountCard()
+    fireEvent.change(screen.getByLabelText(en.customRoute), { target: { value: 'acme-gateway' } })
+    fireEvent.change(screen.getByLabelText(en.baseUrl), { target: { value: 'https://gateway.acme.example/v1' } })
+    fireEvent.click(screen.getByRole('button', { name: en.addModel }))
+    fireEvent.change(screen.getByLabelText(`${en.modelId} 1`), { target: { value: 'acme-large' } })
+    const toggle = screen.getByRole('switch', { name: en.reasoningLevels })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByText(en.create))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(firstMutate(mutate).ops[0]).toMatchObject({ value: { reasoningLevels: false } })
+  })
+
   it('scopes each card to fields a provider can actually own', async () => {
     // Reasoning effort is a per-MODEL capability and the
     // models under one provider disagree about it, so a provider-scoped
@@ -909,6 +923,44 @@ describe('hand-declared providers', () => {
     })
     openEditor('acme-gateway')
     expect(fields()).toEqual([en.keyInput, en.customDisplayName, en.baseUrl, en.customApi])
+  })
+
+  it('turns a declared route\'s reasoning levels off and back on, storing only a difference', async () => {
+    const { mutate } = await mountSection({
+      providers: { 'acme-gateway': { api: 'openai-completions', baseURL: 'https://acme.test/v1' } },
+      declaredRoutes: ['acme-gateway'],
+    })
+    openEditor('acme-gateway')
+    const toggle = screen.getByRole('switch', { name: en.reasoningLevels })
+    // On is the adapter's default for a declared route.
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(firstMutate(mutate).ops)
+      .toEqual([{ op: 'set', path: ['providers', 'acme-gateway', 'reasoningLevels'], value: false }])
+  })
+
+  it('clears a stored false when a declared route\'s reasoning levels are turned back on', async () => {
+    const { mutate } = await mountSection({
+      providers: { 'acme-gateway': { api: 'openai-completions', baseURL: 'https://acme.test/v1', reasoningLevels: false } },
+      declaredRoutes: ['acme-gateway'],
+    })
+    openEditor('acme-gateway')
+    const toggle = screen.getByRole('switch', { name: en.reasoningLevels })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByText(en.apply))
+    await waitFor(() => { expect(mutate).toHaveBeenCalledTimes(1) })
+    expect(firstMutate(mutate).ops).toEqual([{ op: 'unset', path: ['providers', 'acme-gateway', 'reasoningLevels'] }])
+  })
+
+  it('offers no reasoning-levels switch on a shipped route', async () => {
+    await mountSection({ providers: { openai: { apiKeyEnv: 'OPENAI_API_KEY' } } })
+    openEditor('openai')
+    fireEvent.click(screen.getByText(en.customized))
+    expect(screen.queryByRole('switch', { name: en.reasoningLevels })).toBeNull()
   })
 
   it('renames a declared route and falls back to its id when the name is cleared', async () => {

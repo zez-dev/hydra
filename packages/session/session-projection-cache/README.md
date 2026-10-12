@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package keeps durable per-session projection checkpoints so history lists, statistics, and goal snapshots can read cached values without loading each session log. Cold projection folds can resume after the checkpointed prefix, reducing restart work. The session log remains authoritative: a crash can leave a checkpoint stale, but never ahead of committed events, and incompatible records are ignored or backed up. Choose it for restarted sessions with frequent projection reads; skip it when projections are live-only or extra storage writes and unbounded checkpoint retention outweigh the saved work.
+This package keeps durable per-session projection checkpoints so history lists, statistics, and goal snapshots read cached values without loading each session log; cold projection folds resume after the checkpointed prefix. The session log remains authoritative: a crash can leave a checkpoint stale, never ahead of committed events, and incompatible records are ignored or backed up. `forget(id)` drops one session's row after that session was deleted; a missing row resolves without writing. Choose it for restarted sessions with frequent projection reads; skip it when projections are live-only or extra storage writes and unbounded checkpoint retention outweigh the saved work.
 
 ## Table of Contents
 

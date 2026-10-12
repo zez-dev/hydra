@@ -14,6 +14,16 @@ const t = makeTranslate(zh, commonZh)
 const renderMessageImages: AssistantMarkdownProps['renderMessageImages'] = () => null
 
 describe('ReasoningRow', () => {
+  it('leads with the dragon face, marked running while its reasoning streams', () => {
+    const reasoning = { kind: 'reasoning' as const, text: 'Weigh the options' }
+    const view = render(<AssistantMarkdown t={t} blocks={[reasoning]} streaming renderMessageImages={renderMessageImages} />)
+    const row = view.container.querySelector('[data-variant="think"]') as HTMLElement
+    expect(row.dataset['state']).toBe('running')
+    expect(row.querySelectorAll('svg [data-part="pupil"]')).toHaveLength(2)
+    view.rerender(<AssistantMarkdown t={t} blocks={[reasoning]} streaming={false} renderMessageImages={renderMessageImages} />)
+    expect(row.dataset['state']).toBe('ok')
+  })
+
   it.each([
     { kind: 'text' as const, text: 'Answer' },
     { kind: 'tool-call' as const, callId: 'call-1', name: 'read', argsRaw: '{}' },

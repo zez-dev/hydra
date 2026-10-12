@@ -76,6 +76,19 @@
   --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
+/* Focus: the hairline turns ember and a soft ring surrounds the card; both
+   ease in unless reduced motion is requested. */
+.card:focus-within {
+  --dsw-elevation-stroke-color: var(--dsh-ember-stroke);
+  box-shadow: var(--dsw-elevation-soft), 0 0 0 4px var(--dsh-ember-ring);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card {
+    transition: box-shadow 160ms var(--ds-ease-in-out);
+  }
+}
+
 /* No-workspace trigger state: dashed l4 stroke marks the card as a pick-a-
    workspace affordance rather than a live composer; hover answers in the
    business blue to invite the click. Native `dashed` has a fixed browser
@@ -372,7 +385,7 @@
      fill in both themes (design 34:10465). */
   color: #fff;
   cursor: pointer;
-  transition: background-color 100ms ease;
+  transition: background-color 100ms ease, box-shadow 160ms ease;
   /* Opts out of the row's 2px downward shift (.row top pad): the send circle
      keeps its original seat while the smaller chips sit lower. Transform, not
      margin, so flex centering math is untouched. */
@@ -381,10 +394,13 @@
 
 .primary:hover:not(:disabled) {
   background: var(--dsw-alias-button-info-hover);
+  box-shadow: 0 0 0 4px var(--dsh-ember-ring);
 }
 
+/* Nothing to send: a neutral fill rather than a faded brand red. */
 .primary:disabled {
-  opacity: 0.4;
+  background: var(--dsw-alias-button-primary-dimmed);
+  color: var(--dsw-alias-label-tertiary);
   cursor: default;
 }
 

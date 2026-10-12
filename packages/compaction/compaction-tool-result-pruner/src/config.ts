@@ -25,7 +25,19 @@ const CONFIG_KEYS: ReadonlySet<string> = new Set([
  * @returns the Unicode code-point count.
  */
 export function codePointLength(text: string): number {
-  return Array.from(text).length
+  return hasSurrogates(text) ? Array.from(text).length : text.length
+}
+
+/**
+ * Whether `text` holds any surrogate code unit, so its UTF-16 length and
+ * code-point count differ; text without one is measured and sliced by code
+ * unit, which is the same result without materializing every code point.
+ * @param text - the text to inspect.
+ * @returns `true` when a code point takes two code units somewhere in `text`.
+ */
+export function hasSurrogates(text: string): boolean {
+  // No `u` flag: the class must see code units, where a pair shows as two surrogates.
+  return /[\uD800-\uDFFF]/.test(text)
 }
 
 /**

@@ -198,6 +198,42 @@ describe('deadline — nested deadlines', () => {
 })
 
 describe('idleWatchdog', () => {
+  it('gives the first read its own longer budget and the idle interval to every later read', async () => {
+    using watchdog = idleWatchdog(undefined, 60, 'LLM_STREAM_IDLE_TIMEOUT', 400)
+    const delays = [200, 200]
+    const iterator: AsyncIterator<number> = {
+      async next() {
+        const delay = delays.shift()
+        if (delay === undefined) return { done: true, value: undefined }
+        await new Promise(resolve => setTimeout(resolve, delay))
+        return { done: false, value: delay }
+      },
+    }
+    await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 200 })
+    expect(watchdog.signal.aborted).toBe(false)
+    // The signal only notifies; an iterator that ignores it still returns, but the deadline that elapsed is the idle one.
+    await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 200 })
+    expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')?.timeoutMs).toBe(60)
+  })
+
+  it('gives the first read after a restart the first-read budget again', async () => {
+    using watchdog = idleWatchdog(undefined, 60, 'LLM_STREAM_IDLE_TIMEOUT', 400)
+    const delays = [10, 200]
+    const iterator: AsyncIterator<number> = {
+      async next() {
+        const delay = delays.shift()
+        if (delay === undefined) return { done: true, value: undefined }
+        await new Promise(resolve => setTimeout(resolve, delay))
+        return { done: false, value: delay }
+      },
+    }
+    await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 10 })
+    // The producer reopened its source, so its next read is a first read.
+    watchdog.restart()
+    await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 200 })
+    expect(watchdog.signal.aborted).toBe(false)
+  })
+
   afterEach(() => { vi.useRealTimers() })
 
   it('arms only while next is outstanding and rearms the same signal for later demand', async () => {

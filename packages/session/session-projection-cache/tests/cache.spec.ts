@@ -741,3 +741,17 @@ describe('SessionProjectionCache cold-read seeding', () => {
     }, { timeout: 5_000 })
   })
 })
+
+describe('SessionProjectionCache forget', () => {
+  it('drops a deleted session’s checkpoint row, and a missing row resolves', async () => {
+    const { ctx, root, cache } = await harness()
+    const id = SessionId('deleted')
+    const created = whenWritten(ctx, id)
+    ctx.sessions.create(id)
+    await created
+    expect(await storedRows(root, id)).toBeDefined()
+    await cache.forget(id)
+    expect(await storedRows(root, id)).toBeUndefined()
+    await expect(cache.forget(SessionId('never-cached'))).resolves.toBeUndefined()
+  })
+})

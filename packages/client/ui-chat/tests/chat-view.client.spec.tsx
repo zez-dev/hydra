@@ -9,7 +9,7 @@ import type {
   AssistantMessageNode, ChatNode, ChatNodeOwnerProps, ChatNodeViewProps, ChatSnapshot,
   ChatViewSlotProps, CommandNode, CompactionSummaryNode, ContextMessageNode, ConversationNode,
   LegacyConversationSlice, ModelRetryNode, RunningToolCall, SteeringMessageNode,
-  ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode, UseChatNodeTurnData,
+  LearningReviewNode, ToolCallBlock, ToolResultNode, TurnErrorNode, TurnMaxTokensNode, UseChatNodeTurnData,
   TranscriptViewMode, UserMessageNode,
 } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
@@ -36,7 +36,7 @@ import { AssistantNodeView } from '../src/client/chat/AssistantNodeView.tsx'
 import { CommandNodeView, ManualCompactionNodeView } from '../src/client/chat/CommandNodeView.tsx'
 import {
   CompactionNodeView, ContextMessageNodeView, RetryNodeView, TurnErrorNodeView,
-  TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
+  LearningReviewNodeView, TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
 } from '../src/client/chat/MessageItem.tsx'
 import { TurnTailNodeView } from '../src/client/chat/TurnTailNodeView.tsx'
 import { TurnProcessNodeView } from '../src/client/chat/TurnProcessNodeView.tsx'
@@ -176,6 +176,15 @@ const turnError = (seq: number, code?: string): TurnErrorNode => ({
 })
 const turnMaxTokens = (seq: number): TurnMaxTokensNode => ({
   kind: 'turn-max-tokens', seq, time: seq * 1_000, turn: 1, step: 0,
+})
+const learningReview = (seq: number, count: number): LearningReviewNode => ({
+  kind: 'learning-review', seq, time: seq * 1_000, turn: 1, outcome: { kind: 'candidates', count },
+})
+const learningReviewFindings = (seq: number, count: number): LearningReviewNode => ({
+  kind: 'learning-review', seq, time: seq * 1_000, turn: 1, outcome: { kind: 'findings', slug: 'scaling', count },
+})
+const learningReviewFailed = (seq: number, message = 'deadline exceeded'): LearningReviewNode => ({
+  kind: 'learning-review', seq, time: seq * 1_000, turn: 1, outcome: { kind: 'failed', code: 'LEARNING_TIMEOUT', message },
 })
 const toolResult = (seq: number, callId: string, name = 'bash'): ToolResultNode => ({
   kind: 'tool-result', seq, time: seq * 1_000, callId,
@@ -324,6 +333,8 @@ function makeHarness(
         return <TurnErrorNodeView {...nodeProps<'turn-error'>()} />
       case 'turn-max-tokens':
         return <TurnMaxTokensNodeView {...nodeProps<'turn-max-tokens'>()} />
+      case 'learning-review':
+        return <LearningReviewNodeView {...nodeProps<'learning-review'>()} />
       case 'turn-process':
         return <TurnProcessNodeView {...nodeProps<'turn-process'>()} />
       case 'system-prompt':
@@ -368,6 +379,7 @@ function makeHarness(
   // ChatView never invokes it (pass-through stub).
   const SessionProviderStub: ChatViewSlotProps['SessionProvider'] = ({ children }) => <>{children}</>
   const props: ChatViewSlotProps = {
+    rewindTo: () => {},
     usePanelInfo: selector => selector({ activePanelId: null }),
     sessionId: SID,
     useSession: bindSnapshotSelector(session.source),
@@ -1320,6 +1332,28 @@ describe('ChatView', () => {
     expect(view.queryByText('本轮运行失败')).toBeNull()
   })
 
+  it('renders the learning review outcome with the review hint only when something was filed', () => {
+    const h = makeHarness({ nodes: [
+      user(1, 'try'), assistant(2, 'done'), learningReview(3, 2), learningReview(4, 0), learningReviewFailed(5),
+      learningReviewFailed(6, 'LEARNING_TIMEOUT after 20ms'), learningReviewFindings(7, 2), learningReviewFindings(8, 0),
+    ] })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getAllByRole('status').map(status => status.textContent)).toEqual([
+      '学习回顾提交了 2 条候选用 /learn 审核',
+      '学习回顾没有新内容',
+      '学习回顾失败：deadline exceeded（LEARNING_TIMEOUT）',
+      '学习回顾失败：LEARNING_TIMEOUT after 20ms',
+      '学习回顾向 scaling 记录了 2 条发现',
+      '学习回顾没有为 scaling 找到新发现',
+    ])
+  })
+
+  it('leads each learning review row with its state dot, the row grid\'s narrow first column', () => {
+    const h = makeHarness({ nodes: [user(1, 'try'), assistant(2, 'done'), learningReview(3, 2), learningReview(4, 0), learningReviewFailed(5)] })
+    const view = render(<h.ChatView {...h.props} />)
+    expect(view.getAllByRole('status').map(status => status.firstElementChild?.getAttribute('data-state'))).toEqual(['done', 'done', 'error'])
+  })
+
   it('hands the trajectory callback to the Tool seat', () => {
     const h = makeHarness({
       nodes: [toolResult(3, 'a')],
@@ -2129,7 +2163,9 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     expect(view.getByTestId('tool-seat-r1')).toBeTruthy()
     expect(h.toolOwners[0]?.block).toMatchObject({ callId: 'r1', argsRaw: '{"command":"cmd-r1"}' })
-    expect(view.getByRole('status').textContent).toBe('深度求索中...')
+    expect(view.getByRole('status').textContent).toBe('巨龙思考中…')
+    // The status leads with the dragon's face, whose two eyes glow while the turn runs.
+    expect(view.getByRole('status').querySelectorAll('svg [data-part="pupil"]')).toHaveLength(2)
   })
 
   it('keeps the Tool renderer mounted when a running call settles into log order', () => {
@@ -2189,7 +2225,7 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     // Freshly mounted (as after a reload) yet already past the 15s gate.
     const status = view.getByRole('status')
-    expect(status.textContent).toMatch(/^深度求索中\.\.\.2分0\d秒$/)
+    expect(status.textContent).toMatch(/^巨龙思考中…2分0\d秒$/)
     expect(status.querySelector('[aria-hidden="true"]')).not.toBeNull()
     act(() => {
       h.setSession({ testInbox: { 'next-turn': [], 'next-step': [{
@@ -2199,7 +2235,7 @@ describe('ChatView', () => {
         role: 'user', source: { kind: 'user' },
       }] } })
     })
-    expect(status.textContent).toMatch(/^深度求索中\.\.\.2分0\d秒$/)
+    expect(status.textContent).toMatch(/^巨龙思考中…2分0\d秒$/)
   })
 
   it('the running clock reads hours once the turn passes an hour', () => {
@@ -2210,7 +2246,7 @@ describe('ChatView', () => {
       { running: true },
     )
     const view = render(<h.ChatView {...h.props} />)
-    expect(view.getByRole('status').textContent).toMatch(/^深度求索中\.\.\.1小时05分0\d秒$/)
+    expect(view.getByRole('status').textContent).toMatch(/^巨龙思考中…1小时05分0\d秒$/)
   })
 
   it('hands each ordered root call to the keyed business-node slot', () => {

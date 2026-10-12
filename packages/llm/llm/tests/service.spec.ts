@@ -115,7 +115,22 @@ describe('LlmRuntime', () => {
     expect(isContextWindowExceededError('input exceeds the model context window limit')).toBe(true)
   })
 
+  it('recognizes GLM, Qwen, and OpenAI-compatible gateway overflow wording', () => {
+    for (const detail of [
+      'Prompt tokens exceed the maximum context length of the model',
+      'zai error 1261: the input tokens exceed the maximum context length',
+      'Range of input length should be [1, 30720]',
+      'input length exceeds the maximum length allowed by the model',
+      'Error code: 400 - {"error":{"code":"context_length_exceeded","message":"This model\'s maximum context length is 131072 tokens"}}',
+      'The input or output tokens must be reduced in order to run successfully',
+      'prompt is too long: 140000 tokens > 128000 maximum',
+    ]) {
+      expect(isContextWindowExceededError(detail), detail).toBe(true)
+    }
+  })
+
   it('does not mistake unrelated input validation for context-window overflow', () => {
+    expect(isContextWindowExceededError('ThrottlingException: Too many tokens, rate limit reached')).toBe(false)
     expect(isContextWindowExceededError('invalid request: malformed tool arguments')).toBe(false)
     expect(isContextWindowExceededError('invalid input: temperature exceeds maximum allowed value')).toBe(false)
     expect(isContextWindowExceededError('input exceeds maximum allowed value')).toBe(false)
@@ -291,7 +306,7 @@ describe('LlmRuntime', () => {
     expect(ctx.llm.providerRetryPolicy('configured')).toBe(configured)
     expect(ctx.llm.providerRetryPolicy('defaulted')).toMatchObject({
       mode: 'normal',
-      maxRetries: 5,
+      maxRetries: 12,
     })
     expect(() => ctx.llm.providerRetryPolicy('missing')).toThrow(
       expect.objectContaining({ code: 'NO_ADAPTER' }),
@@ -328,6 +343,43 @@ describe('LlmRuntime', () => {
     })
     expect(prepared.retryPolicy).toBe(oldPolicy)
     expect(ctx.llm.providerRetryPolicy('route')).toBe(newPolicy)
+  })
+
+  it('classifies a throw after chunks arrived as a transport failure, and one before them as unknown', async () => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    ctx.llm.registerAdapter(['dying'], new class extends LlmAdapter {
+      override async * stream(): AsyncIterable<StreamChunk> {
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'partial' }
+        throw new Error('socket hang up')
+      }
+    }())
+    ctx.llm.registerAdapter(['dead'], new class extends LlmAdapter {
+      override async * stream(): AsyncIterable<StreamChunk> {
+        await Promise.resolve()
+        throw new Error('connect ECONNREFUSED')
+      }
+    }())
+    const dying = await collect(ctx.llm.stream({ provider: 'dying', model: 'model', messages: [] }))
+    expect(dying.at(-1)).toEqual({
+      type: 'finish',
+      reason: { kind: 'error', failure: { message: 'socket hang up', code: 'TRANSPORT' } },
+    })
+    const dead = await collect(ctx.llm.stream({ provider: 'dead', model: 'model', messages: [] }))
+    expect(dead.at(-1)).toEqual({
+      type: 'finish',
+      reason: { kind: 'error', failure: { message: 'connect ECONNREFUSED', code: 'UNKNOWN' } },
+    })
+    // An adapter that classified its own mid-stream failure keeps its code.
+    ctx.llm.registerAdapter(['classified'], new class extends LlmAdapter {
+      override async * stream(): AsyncIterable<StreamChunk> {
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        throw new LlmError('quota reached', 'QUOTA')
+      }
+    }())
+    const classified = await collect(ctx.llm.stream({ provider: 'classified', model: 'model', messages: [] }))
+    expect(classified.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: 'QUOTA' } } })
   })
 
   it('normalizes an unregistered provider to a terminal failure', async () => {

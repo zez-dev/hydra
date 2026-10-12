@@ -45,7 +45,7 @@ Host 组合可通过 `registerRemoteEvents()` 注册唯一的应用事件 source
 
 每次一元调用都会检查位置参数数量，构造与描述符完全匹配的具名 `args`，再把带类型的值原样交给 `ctx.connection.rpc.call('/api', endpoint, ...)`，而不执行 Client 侧 schema；Host 会在业务调用前校验收到的 wire 字段。生成的流方法返回 `AsyncIterable`，并在进程内 Connection 载体可用时通过它打开逻辑流，否则通过共享的 Gateway WebSocket 打开。生成的支持取消的方法接受最后一个可选 `AbortSignal`；Client 会在调用载体前将它与贡献项的挂载生命周期合并。成功的一元结果与流项不经 Client 侧类型解析直接传递。撤回贡献项会同时移除其描述符和方法、中止正在进行的调用与流，并使外部仍持有的方法句柄在调用时返回拒绝。
 
-每次一元调用都解析为 `RemoteResult<T>`——`{ ok: true, value }` 或 `{ ok: false, error }`——且绝不因载体问题 reject：本面把断线载体折入错误分支，调用方 signal 中止时答以 `gateway/cancelled`，因此没有消费方需要包一层来兜载体失败。只有装配故障仍会 reject：参数个数不符、方法未挂载、贡献已撤下、缺少 Context 适配器。`error` 是活的 `RemoteError` 实例，所以 `throw result.error` 保持 throw 语义；而 `isRemoteFailure(value)` 是消费方唯一需要的谓词——它认下的捕获值带着 Host 码，它拒绝的一律是本地故障，调用方应当让其崩掉。`carrierFailure(endpoint, error)` 与 `cancelledFailure(endpoint, cause)` 构造这两种折叠结果，测试里的替代实现据此采用相同的折叠方式。
+每次一元调用都解析为 `RemoteResult<T>`——`{ ok: true, value }` 或 `{ ok: false, error }`——且绝不因载体问题 reject：本面把断线载体折入错误分支，调用方 signal 中止时答以 `gateway/cancelled`，因此没有消费方需要包一层来兜载体失败。只有装配故障仍会 reject：参数个数不符、方法未挂载、贡献已撤下、缺少 Context 适配器。`error` 是活的 `RemoteError` 实例，所以 `throw result.error` 保持 throw 语义；而 `isRemoteFailure(value)` 是消费方唯一需要的谓词——它认下的捕获值带着 Host 码，它拒绝的一律是本地故障，调用方应当让其崩掉。`carrierFailure(endpoint, error)` 与 `cancelledFailure(endpoint, cause)` 构造这两种折叠结果，测试里的替代实现据此采用相同的折叠方式。带有 `connection/unreachable` 标记的载体抛出（请求根本未到达服务器）会折叠为一条说明未应用任何更改并给出补救办法的消息：Host 每次启动都会签发新的访问令牌，已打开的页面无法重连；其他抛出保留各自的消息，因此 Host 已应答但信封格式错误的情况绝不会被报告为不可达。
 
 `ctx.remote.$host` 以普通值读取固定的 Host 事实：`home`（首个 ready 帧之前为 undefined）与 `isLoopback`。它不是存储——没有订阅、没有代次计数——所以需要响应重连的消费方去监听 `connection/reset`，而不是轮询它。
 

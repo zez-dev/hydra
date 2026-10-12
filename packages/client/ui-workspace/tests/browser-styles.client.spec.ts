@@ -104,8 +104,11 @@ describe('WorkspaceBrowser.module.css list', () => {
     expect(rowDeclarations('.sessionRow')?.get('height')).toBe('32px')
     expect(rowDeclarations('.flatSessionRowWithoutStatus .title')?.get('margin-left')).toBe('0')
     expect(rowDeclarations('.searchResultRow')?.get('min-height')).toBe('48px')
+    // The open session carries the ember tint and bar, not the hover tint.
     expect(rowDeclarations('.sessionRow.selected')?.get('background'))
-      .toBe('var(--dsw-alias-interactive-bg-hover)')
+      .toBe('var(--dsw-alias-interactive-bg-active)')
+    expect(rowDeclarations('.sessionRow.selected')?.get('box-shadow'))
+      .toBe('inset 2px 0 0 var(--dsw-alias-brand-primary)')
   })
 
   it('reveals a clipped session title by scrolling it on row hover', () => {

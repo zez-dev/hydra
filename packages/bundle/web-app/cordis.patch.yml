@@ -98,6 +98,14 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Learning Remote: memory candidates and recalled entries for the Web card.
+    - id: learning-controller
+      name: '@deepseek-ai/dsh-api-learning-controller'
+
+    # Usage Remote: the cross-session token-usage report for the sidebar dashboard.
+    - id: usage-controller
+      name: '@deepseek-ai/dsh-api-usage-controller'
+
     # Session commands, cold reads, and live control over Typert Remote.
     - id: session-controller
       name: '@deepseek-ai/dsh-api-session-controller'
@@ -263,6 +271,16 @@
     - id: ui-settings-plugin-inventory
       name: '@deepseek-ai/dsh-client-ui-settings-plugin-inventory'
 
+    # Learning tab in the Settings Plugins section: review memory candidates,
+    # forget recalled entries, promote one to a skill.
+    - id: ui-learning
+      name: '@deepseek-ai/dsh-client-ui-learning'
+
+    # Token-usage dashboard tab in the right sidebar: totals, a 12-month day
+    # heatmap, and a per-model table.
+    - id: ui-usage
+      name: '@deepseek-ai/dsh-client-ui-usage'
+
     - id: ui-settings-unarchive-sessions
       name: '@deepseek-ai/dsh-client-ui-settings-unarchive-sessions'
 
@@ -276,8 +294,8 @@
       name: '@deepseek-ai/dsh-client-ui-chat'
 
     # Official occupants for the generic sidebar and conversation brand slots.
-    - id: ui-brand-official
-      name: '@deepseek-ai/dsh-client-ui-brand-official'
+    - id: ui-brand-hydra
+      name: '@deepseek-ai/dsh-client-ui-brand-hydra'
 
     - id: ui-attachment
       name: '@deepseek-ai/dsh-client-ui-attachment'
@@ -500,6 +518,27 @@
   disabled: true
 
 - id: tool-web
+  disabled: true
+
+# Hydra's own model-facing tools. Their services stay on the host plane, where
+# the learning controller injects them; only these tool rows move,
+# so a Web agent sees them through its preset rather than through every agent.
+- id: tool-doctor
+  disabled: true
+
+- id: tool-session-usage
+  disabled: true
+
+- id: tool-research
+  disabled: true
+
+- id: tool-memory
+  disabled: true
+
+- id: tool-off-peak
+  disabled: true
+
+- id: tool-knowledge
   disabled: true
 
 # The preset roster. The shipped presets are bundled inside

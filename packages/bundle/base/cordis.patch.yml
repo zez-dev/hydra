@@ -139,6 +139,13 @@
         path: ':memory:'
         openAt: never
 
+    # Cross-session token usage. Derived on demand from the session logs
+    # themselves — no counter runs in the loop — so `/usage` covers history
+    # written before this row existed. A per-session fold cache in
+    # `session_usage_cache` keeps a repeat report from re-reading every log.
+    - id: session-usage
+      name: '@deepseek-ai/dsh-session-usage'
+
     # Shared projection registry: subagent catalog identity (mode/label) folds
     # through its registered units, so the `list_agents` surface below fails
     # loud without it; web layers reuse this same mount for list rows.
@@ -253,10 +260,14 @@
     - id: tool-bash
       name: '@deepseek-ai/dsh-tool-bash'
       disabled: !!js process.platform === 'win32'
+      config:
+        requireDescription: false
 
     - id: tool-pwsh
       name: '@deepseek-ai/dsh-tool-pwsh'
       disabled: !!js process.platform !== 'win32'
+      config:
+        requireDescription: false
 
     - id: tool-jobs
       name: '@deepseek-ai/dsh-tool-jobs'
@@ -290,17 +301,36 @@
     - id: tool-skill
       name: '@deepseek-ai/dsh-tool-skill'
 
+    # Records what each skill's files looked like when they were trusted, so an
+    # edited or replaced skill is visible. `warnOnDrift` stays off: a goal loop
+    # calling status every round would repeat the same warning forever.
+    - id: skill-lock
+      name: '@deepseek-ai/dsh-skill-lock'
+      config:
+        path: .dsh/skills.lock.json
+        warnOnDrift: false
+
     - id: commands
       name: '@deepseek-ai/dsh-commands'
 
     - id: command-feedback
       name: '@deepseek-ai/dsh-command-feedback'
 
+    # Goals run for days: no round cap, and a round that ends in a request
+    # error, provider failure, or max-tokens cut re-arms with backoff (30s
+    # doubling, capped) for up to 48 consecutive failures before it blocks;
+    # `/goal resume` continues after that or after any hard interruption.
     - id: goal
       name: '@deepseek-ai/dsh-goal'
+      config:
+        defaultMaxGoalRounds: 0
 
     - id: goal-round-driver
       name: '@deepseek-ai/dsh-goal-round-driver'
+      config:
+        transientRetry:
+          delayMs: 30000
+          maxConsecutive: 48
 
     - id: command-goal
       name: '@deepseek-ai/dsh-command-goal'
@@ -324,8 +354,13 @@
     - id: token-meter
       name: '@deepseek-ai/dsh-token-meter'
 
+    # Overflow recovery retries up to three compactions before the request
+    # error surfaces; each retry prunes tool results and condenses the whole
+    # compactable range again.
     - id: compaction-basic
       name: '@deepseek-ai/dsh-compaction-basic'
+      config:
+        maxOverflowRetries: 3
 
     # Human `/compact`: one useful reduction below the automatic threshold. Backend
     # independent, so it follows whichever compaction service this leaf mounts.
@@ -376,6 +411,13 @@
     - id: ptc-runtime
       name: '@deepseek-ai/dsh-ptc-runtime-node'
 
+    # Records every workflow run and the agent() calls that completed, so a run
+    # cut off by a lost connection or a spent budget is resumed with
+    # `resumeRunId` instead of re-running work that already answered.
+    # `/workflows` lists the runs and what resuming one would replay.
+    - id: workflow-journal
+      name: '@deepseek-ai/dsh-workflow-journal'
+
     - id: workflow-ptc
       name: '@deepseek-ai/dsh-workflow-ptc'
       config:
@@ -386,6 +428,20 @@
 
     - id: timeout-policy
       name: '@deepseek-ai/dsh-tool-call-timeout-policy'
+
+    # Refuses shell commands that destroy what no checkpoint holds: discarding
+    # uncommitted work, rewriting history, writing outside the workspace, or
+    # reprogramming the machine. `confirm` asks a human about the first kind
+    # and denies the rest; with nobody to ask, an unattended round denies
+    # instead of hanging. Name a rule id under `allow` to accept one risk.
+    - id: command-gate
+      name: '@deepseek-ai/dsh-command-gate'
+      config:
+        mode: confirm
+        unattendedMode: deny
+        allow: []
+        denyExtra: []
+        temporaryRoots: []
 
     - id: spill-local
       name: '@deepseek-ai/dsh-spill-local'
@@ -418,10 +474,249 @@
       config:
         allowParallelInProgress: true
 
+    # Hydra's model-facing tools ship as their own rows, separate from the
+    # services above that publish them. A service a host row injects belongs to
+    # the host plane, so only the tool half can move behind an agent preset;
+    # the Web overlay disables these six and each preset mounts them again.
+    - id: tool-doctor
+      name: '@deepseek-ai/dsh-doctor/tools'
+
+    - id: tool-session-usage
+      name: '@deepseek-ai/dsh-session-usage/tools'
+
+    - id: tool-research
+      name: '@deepseek-ai/dsh-research/tools'
+
+    - id: tool-memory
+      name: '@deepseek-ai/dsh-memory/tools'
+
+    # knowledge_add attaches a folder the user names to the session's workspace
+    # after the user approves it; search, read, and browse reach the configured
+    # collections and the session's workspace collections.
+    - id: tool-knowledge
+      name: '@deepseek-ai/dsh-knowledge/tools'
+
+    - id: tool-off-peak
+      name: '@deepseek-ai/dsh-off-peak/tools'
+
     # Persisted same-session goals reach the model and the slash menu here; the
     # domain, driver, and `/goal` command are above.
     - id: tool-goal
       name: '@deepseek-ai/dsh-tool-goal'
+
+    # Durable goals: opening or resuming a session never re-arms its goal;
+    # the human types `/goal resume`. The transient-retry policy on the round
+    # driver keeps an armed goal running through request errors and cuts.
+    # These two rows re-arm goals automatically (on session open, and for
+    # stored sessions at boot); enable them in a profile patch to opt in.
+    - id: goal-resume-on-open
+      name: '@deepseek-ai/dsh-goal-resume-on-open'
+      disabled: true
+      config:
+        policy: always
+
+    - id: goal-supervisor
+      name: '@deepseek-ai/dsh-goal-supervisor'
+      disabled: true
+      config:
+        maxConcurrent: 4
+
+    - id: goal-evaluator
+      name: '@deepseek-ai/dsh-goal-evaluator'
+      config:
+        evidenceEvents: 12
+        maxWorkspaceChangeEntries: 12
+        maxOutputTokens: 512
+        timeoutMs: 60000
+
+    # Research goals: `/research <objective>` keeps a discovery journal under
+    # `.dsh/research/<slug>/journal.md` in the workspace, records breakthroughs
+    # the moment they happen, and re-injects the journal digest into every
+    # request, so a compacted context or a new session continues from the
+    # current state instead of a re-pasted prompt.
+    - id: research
+      name: '@deepseek-ai/dsh-research'
+      config:
+        dir: .dsh/research
+        maxRecallBytes: 8000
+        recentExperiments: 10
+        relatedBreakthroughs: 5
+        # `run_experiment` runs a budgeted command and records exit code, metrics,
+        # deltas, and an output excerpt; after each experiment one auxiliary
+        # request re-scores the open hypotheses so the next round takes the
+        # best-supported one first. The scoring route defaults to the session's.
+        scoring:
+          enabled: true
+          maxOutputTokens: 512
+          timeoutMs: 60000
+        maxExperimentMs: 600000
+        maxOutputBytes: 20000
+
+    # Market and investment research from keyless public sources: daily price
+    # series from Stooq and issuer profiles and filings from SEC EDGAR. Both
+    # rows ship disabled because EDGAR refuses a request that does not declare
+    # who is making it, so there is no usable default; enable them in a profile
+    # patch that names a real contact:
+    #   - id: market-data
+    #     disabled: false
+    #     config:
+    #       secUserAgent: Jane Roe jane@example.com
+    #   - id: tool-market
+    #     disabled: false
+    - id: market-data
+      name: '@deepseek-ai/dsh-market-data'
+      disabled: true
+      config:
+        # Sent as User-Agent to sec.gov; an empty value fails at activation.
+        secUserAgent: ''
+        timeoutMs: 15000
+        cacheTtlMs: 300000
+        # SEC asks for at most ten requests a second; this paces each host.
+        minRequestGapMs: 120
+        maxBodyBytes: 8388608
+        builtinProvider: true
+
+    # Model tools `market_quote`, `market_history`, `market_profile` and
+    # `market_filings`, plus the `/market <symbol>` summary. The caps bound
+    # what one call can put into the request.
+    - id: tool-market
+      name: '@deepseek-ai/dsh-tool-market'
+      disabled: true
+      config:
+        maxSymbols: 10
+        maxBars: 60
+        maxFilings: 10
+        summaryBars: 30
+
+    # `/digest` writes today's report to `<workspace>/.dsh/reports/<date>.md`;
+    # `dailyAt: "HH:MM"` (local time) also writes it on a timer for every live
+    # workspace and notifies through dsh-notify when mounted.
+    # `/digest` writes the day's report, `/digest week` the weekly review with
+    # trends; the timers are opt-in (`dailyAt: "HH:MM"`, `weeklyOn: "mon 07:00"`).
+    - id: digest
+      name: '@deepseek-ai/dsh-digest'
+      config: {}
+
+    - id: doctor
+      name: '@deepseek-ai/dsh-doctor'
+      config:
+        probeTimeoutMs: 20000
+
+    # Cron-started sessions: `/cron add <name> "<expr>" <prompt>` runs the
+    # prompt in a fresh session on the schedule; ticks every 30s so no minute
+    # is skipped, one run at a time, no catch-up after downtime.
+    - id: cron-sessions
+      name: '@deepseek-ai/dsh-cron-sessions'
+      config:
+        tickMs: 30000
+        maxConcurrent: 1
+        catchUp: false
+
+    # Off-peak deferral: while enabled and the clock sits outside every window,
+    # a goal round is queued instead of run, and the window resumes the queued
+    # sessions. Off by default because discount hours are deployment-specific;
+    # `/offpeak drain` runs the queue by hand at any hour. A profile patch
+    # enables it, for example DeepSeek's own discount window:
+    #   - id: off-peak
+    #     config:
+    #       enabled: true
+    #       windows:
+    #         - { start: '00:30', end: '08:30' }
+    #       maxConcurrent: 2
+    #       finishRoundInFlight: false
+    - id: off-peak
+      name: '@deepseek-ai/dsh-off-peak'
+      config:
+        enabled: false
+        windows: []
+        maxConcurrent: 2
+        finishRoundInFlight: false
+
+    # Token budgets: unlimited until a profile patch sets `perSessionTokens`
+    # or `perDayTokens`; crossing one pauses the session's goal and asks the
+    # model to finish the step.
+    - id: spend-guard
+      name: '@deepseek-ai/dsh-spend-guard'
+      config:
+        action: pause-goal
+
+    # Outbound notifications need destinations, so the row ships disabled.
+    # Enable it in a profile patch with your channels, for example:
+    #   - id: notify
+    #     disabled: false
+    #     config:
+    #       channels:
+    #         - { name: phone, kind: telegram, botTokenEnv: TELEGRAM_BOT_TOKEN, chatId: '123456' }
+    #         - { name: team, kind: discord, url: https://discord.com/api/webhooks/... }
+    #         - { name: hook, kind: webhook, url: https://example.test/hydra, headers: { x-token: abc } }
+    #       events: { goalBlocked: true, goalCompleted: true, transientRetriesExhausted: true, sessionError: false, cronRun: true, spendBudgetReached: true, dailyDigest: true, weeklyDigest: true, offPeakDrained: true }
+    #       minIntervalMs: 5000
+    #       timeoutMs: 10000
+    # Put TELEGRAM_BOT_TOKEN in $DSH_HOME/.env; config carries only its name.
+    - id: notify
+      name: '@deepseek-ai/dsh-notify'
+      disabled: true
+      config:
+        channels: []
+        events:
+          goalBlocked: true
+          goalCompleted: true
+          transientRetriesExhausted: true
+          sessionError: false
+          cronRun: true
+          spendBudgetReached: true
+          researchBreakthrough: true
+          dailyDigest: true
+          weeklyDigest: true
+          offPeakDrained: true
+        minIntervalMs: 5000
+        timeoutMs: 10000
+
+    # Learning: durable memory recalled into each session once approved, plus a
+    # turn-end extractor that proposes candidates; `/learn` approves or promotes
+    # them to skills. The extraction reuses the session's own model route.
+    - id: memory
+      name: '@deepseek-ai/dsh-memory'
+      config:
+        maxRecallBytes: 6000
+        staleAfterDays: 30
+        archiveAfterDays: 90
+        # A note this similar to a stored one updates it instead of adding a copy,
+        # and curation merges such groups into their newest wording.
+        duplicateThreshold: 0.7
+        # Clusters of remembered entries that share a topic tag or read alike
+        # become skill suggestions for /memory suggestions and the Learning card.
+        skillSuggestThreshold: 0.6
+        skillSuggestMinEntries: 3
+
+    # Document knowledge base: a full-text index over folders a profile patch
+    # names under `collections` (none by default), kept up to date in the
+    # background at start and by `/kb reindex`.
+    - id: knowledge
+      name: '@deepseek-ai/dsh-knowledge'
+      config:
+        path: !!js dshHomePath('knowledge/index.sqlite')
+        collections: []
+
+    - id: learning
+      name: '@deepseek-ai/dsh-learning'
+      config:
+        # One extraction request after each turn with enough tool calls. Set
+        # false on a slow local route, where that request queues ahead of the
+        # next turn; /learn from and /research-ingest keep working.
+        reviewTurns: true
+        # Everything learned is recalled at once; `candidate` would hold it for /learn approve.
+        fileAs: approved
+        minToolCalls: 3
+        maxCandidatesPerTurn: 5
+        maxTranscriptBytes: 24000
+        maxOutputTokens: 512
+        timeoutMs: 60000
+        # Second pass over tool failures followed by a working retry: one
+        # "when X fails with Y, do Z" shortcut candidate per pair.
+        errorPatterns:
+          enabled: true
+          maxPairsPerTurn: 5
 
     # Fresh-agent Ralph iteration over a build-time-fixed script. Off by
     # default: the tool description restricts `ralph` to runs the human
@@ -436,6 +731,13 @@
       config:
         subagentProvider: spawn
         maxRounds: 64
+
+    # A step that stops at the output-token limit continues by itself, up to
+    # eight continuations per turn.
+    - id: auto-continue
+      name: '@deepseek-ai/dsh-auto-continue'
+      config:
+        maxContinuationsPerTurn: 8
 
     # Consecutive-repeat reminders on the tool chain.
     - id: repeat-tool-reminder
@@ -484,6 +786,17 @@
     # keeps the schema default (native).
     - id: tools
       name: '@deepseek-ai/dsh-tools'
+      config:
+        # Repair model arguments before validation: exact numeric spellings,
+        # the wider boolean words Z.ai's own GLM client accepts, JSON text for
+        # an object or array parameter, and a dropped null for an optional
+        # non-nullable parameter.
+        argumentCoercion: lenient
+        # `oneOf`, not `flat`: Z.ai's ZCode ships `oneOf: [X, {type: null}]` to
+        # GLM and even rewrites `anyOf` into `oneOf`, so flattening was an
+        # unfounded guess. Set `flat` only for a gateway proven to mishandle
+        # unions.
+        nullableParameters: oneOf
 
     # The deployment persona is a deployment choice; plan-mode and tool plugins own
     # their own prompt sections.

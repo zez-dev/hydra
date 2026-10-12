@@ -17,11 +17,12 @@
 - text: 只回复 MESSAGES_WEB_READY，不调用工具。 {{clock}}
 - button "复制":
   - img
+- button "回退到此处：在新对话中重来这一轮":
+  - img
 - button "已思考":
   - text: 已思考
   - img
 - button "思考":
-  - img
   - img
   - text: 思考
 - paragraph: MESSAGES_WEB_READY

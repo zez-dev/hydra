@@ -168,9 +168,25 @@ export const goalProjectionDefinition = {
   stateVersion: 6,
 } satisfies ProjectionDefinition<'goal', GoalProjectionState>
 
+/**
+ * The stored round cap of a goal with no limit. A durable snapshot keeps the
+ * cap as a positive safe integer, so "unlimited" is the largest one; callers
+ * write `0` to request it and read it back through {@link isUnlimitedGoalRounds}.
+ */
+export const UNLIMITED_GOAL_ROUNDS: number = Number.MAX_SAFE_INTEGER
+
+/**
+ * Whether a stored round cap means "no limit".
+ * @param maxGoalRounds - a goal's stored cap.
+ * @returns true for the unlimited sentinel.
+ */
+export function isUnlimitedGoalRounds(maxGoalRounds: number): boolean {
+  return maxGoalRounds === UNLIMITED_GOAL_ROUNDS
+}
+
 /** Deployment defaults for goal creation. */
 export interface Config {
-  /** Total rounds used when a create request omits its own cap. */
+  /** Total rounds used when a create request omits its own cap; `0` means unlimited. */
   defaultMaxGoalRounds?: number
 }
 
@@ -195,10 +211,11 @@ interface ResolvedCreateGoal {
   readonly maxGoalRounds: number
 }
 
-/** Validate a caller-visible positive safe-integer round cap. */
+/** Validate a caller-visible round cap: a positive safe integer, or `0` for unlimited. */
 function resolveMaxGoalRounds(value: number): number {
+  if (value === 0) return UNLIMITED_GOAL_ROUNDS
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new GoalError('maxGoalRounds must be a positive safe integer', 'GOAL_INVALID_MAX_ROUNDS')
+    throw new GoalError('maxGoalRounds must be a positive safe integer, or 0 for unlimited', 'GOAL_INVALID_MAX_ROUNDS')
   }
   return value
 }

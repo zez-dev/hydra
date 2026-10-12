@@ -325,6 +325,62 @@ export class SubagentContinuationManager {
   }
 
   /**
+   * Run one operation the parent's reader asks of a continuable direct child
+   * itself (a slash command) on the child's Agent, under the child's delivery
+   * lock so no message is admitted mid-operation. A resident child runs it in
+   * place. A cold child is materialized for it and released again afterward
+   * unless the operation left it with work, so an operation never leaves an
+   * idle child resident.
+   * @param parent - exact live direct parent authorizing the operation.
+   * @param childId - durable direct-child session id.
+   * @param signal - caller cancellation for the cold observation and materialization.
+   * @param run - the operation on the child's Agent.
+   * @returns what the operation returned.
+   * @throws {SubagentError} `UNAUTHORIZED` when the parent does not own the
+   *   child, `NOT_RESUMABLE` for a child that has no continuation state.
+   */
+  async withChildAgent<T>(
+    parent: Agent,
+    childId: SessionId,
+    signal: AbortSignal,
+    run: (agent: Agent) => Promise<T>,
+  ): Promise<T> {
+    this.activations.assertAdmitting(parent)
+    while (true) {
+      const settled = await this.activations.locks.run(childId, async (): Promise<{ readonly value: T } | undefined> => {
+        const resident = this.activations.get(childId)
+        if (resident !== undefined) {
+          this.activations.authorizeLineage(parent, childId, resident.parentSession)
+          const closing = resident.inbox.closing
+          /* v8 ignore next -- a command that lost the disposal cutoff waits it out and retries, as a delivery does. */
+          if (closing !== undefined) return closing.then(() => undefined, () => undefined)
+          return { value: await run(resident.handle.agent) }
+        }
+        const activation = await this.materializeCold(parent, childId, signal)
+        try {
+          return { value: await run(activation.handle.agent) }
+        } finally {
+          if (!activation.announced && activation.handle.agent.status === 'idle') {
+            await this.activations.dispose(activation).catch(
+              /* v8 ignore next 3 -- a release that fails after a command leaves only a warning; the command's result stands. */
+              (error: unknown) => {
+                this.ctx.logger.warn(`subagent "${childId}" could not be released after a command: ${String(error)}`)
+              },
+            )
+          }
+        }
+      })
+      /* v8 ignore next 4 -- only a command that lost the disposal cutoff retries. */
+      if (settled === undefined) {
+        this.activations.assertAdmitting(parent)
+        signal.throwIfAborted()
+        continue
+      }
+      return settled.value
+    }
+  }
+
+  /**
    * Interrupt one live continuable child's current turn. Admission is
    * synchronous and the cancellation effect is asynchronous. An absent or
    * already-closing target is an accepted no-op after authority checks.
@@ -409,14 +465,20 @@ export class SubagentContinuationManager {
     content: ContentBlock[],
     options: ChildDeliveryOptions,
   ): Promise<MessageId> {
+    const activation = await this.materializeCold(parent, childId, options.signal)
+    return await this.submitMaterialized(activation, content, options, parent)
+  }
+
+  /** Observe, authorize, and materialize one cold continuable child without admitting input. */
+  private async materializeCold(parent: Agent, childId: SessionId, signal: AbortSignal): Promise<Activation> {
     const query = this.requireSessionQuery()
     let observation: SessionObservation
     try {
       observation = await query.observeSession(childId, {
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
     using source = observation
@@ -431,9 +493,8 @@ export class SubagentContinuationManager {
         'NOT_RESUMABLE',
       )
     }
-    let activation: Activation
     try {
-      activation = await this.activations.materialize({
+      return await this.activations.materialize({
         childId,
         provider: descriptor.provider,
         parent,
@@ -445,14 +506,13 @@ export class SubagentContinuationManager {
             : {},
         },
         composition: { persona: descriptor.persona, toolFilter: descriptor.toolFilter },
-        signal: options.signal,
+        signal,
       })
     } catch (error: unknown) {
-      options.signal.throwIfAborted()
+      signal.throwIfAborted()
       if (error instanceof SubagentError) throw error
       throw new SubagentError(`subagent "${childId}" is unavailable`, 'NOT_RESUMABLE', { cause: error })
     }
-    return await this.submitMaterialized(activation, content, options, parent)
   }
 
   /** Admit a materialized child, commit its creation fact, and release it on failure. */

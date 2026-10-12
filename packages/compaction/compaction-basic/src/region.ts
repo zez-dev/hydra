@@ -17,12 +17,29 @@ import {
 import type { CompactionResult } from '@deepseek-ai/dsh-compaction'
 import type { CommandId } from '@deepseek-ai/dsh-commands/brand'
 import { createUserMessage, errorChain } from '@deepseek-ai/dsh-llm'
-import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { TokenMeasurement, TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import { SessionSeq, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { frameSummary } from './summarizer.ts'
 import type { SummarizationInput, SummaryResult } from './summarizer.ts'
+
+/**
+ * A checkpoint no smaller than the range it would replace. Carries the
+ * checkpoint's size so a caller can grow the range past it.
+ */
+export class SummaryNotSmallerError extends Error {
+  /** Machine code of this failure. */
+  readonly code = 'SUMMARY_NOT_SMALLER'
+
+  /**
+   * @param message - the failure detail naming both sizes.
+   * @param checkpointTokens - heuristic tokens of the framed checkpoint.
+   */
+  constructor(message: string, readonly checkpointTokens: number) {
+    super(message)
+  }
+}
 
 interface RegionDependencies {
   readonly meter: TokenMeter
@@ -384,6 +401,25 @@ function prepareCompaction(
   }
 }
 
+/**
+ * The replacement user message a summary lands as: the summary framed as a
+ * checkpoint and attributed to its compaction.
+ * @param summary - safe text-only summary blocks.
+ * @param compactionId - the compaction the checkpoint belongs to.
+ * @param sourceCommandId - the manual command that initiated it, when present.
+ * @returns the checkpoint message.
+ */
+export function createCheckpointMessage(
+  summary: readonly ContentBlock[],
+  compactionId: CompactionResult['compactionId'],
+  sourceCommandId: CommandId | undefined,
+): UserMessage {
+  return createUserMessage({
+    content: frameSummary(summary),
+    source: compactCheckpointSource(compactionId, sourceCommandId),
+  })
+}
+
 /** Run the summarizer and frame its replacement checkpoint. */
 async function summarizeCompaction(
   dependencies: RegionDependencies,
@@ -408,17 +444,15 @@ async function summarizeCompaction(
         validateSurfaceRegion(agent.session, prepared.start, prepared.end))
     }
   }
-  const checkpointMessage = createUserMessage({
-    content: frameSummary(summaryResult.summary),
-    source: compactCheckpointSource(compactionId, sourceCommandId),
-  })
+  const checkpointMessage = createCheckpointMessage(summaryResult.summary, compactionId, sourceCommandId)
   // The checkpoint is text-only, so its fixed-heuristic price IS its route
   // price; comparing it against the span's route price asks the real
   // question — does the replacement lower the next request's pressure.
   const framedSummaryTokenCount = dependencies.meter.estimateMessage(checkpointMessage)
   if (framedSummaryTokenCount >= prepared.shadowedRouteTokenCount) {
-    throw new Error(
+    throw new SummaryNotSmallerError(
       `summary is not smaller than the shadowed content (${framedSummaryTokenCount} estimated framed tokens >= ${prepared.shadowedRouteTokenCount})`,
+      framedSummaryTokenCount,
     )
   }
   return {
@@ -483,6 +517,7 @@ function commitCompactionBody(
     provider,
     model,
     maxTokens,
+    reasoningEffort,
     usage,
     checkpointMessage,
   } = summarized
@@ -502,6 +537,7 @@ function commitCompactionBody(
     provider,
     model,
     ...maxTokens === undefined ? {} : { maxTokens },
+    ...reasoningEffort === undefined ? {} : { reasoningEffort },
     ...usage === undefined ? {} : { usage },
   })
   session.append('user/message', checkpointMessage, {
@@ -563,20 +599,42 @@ function buildSummarizationInput(
   }
 }
 
+/**
+ * The latest constructor-seed boundary of each session, found by scanning
+ * only the events appended since the last look, so a compaction on a long
+ * log does not walk the whole log for a boundary that sits near its start.
+ */
+const seedBoundaries = new WeakMap<Session, { scanned: number; latestEndSeedSeq: SessionSeq | undefined }>()
+
+/**
+ * The seq of the newest `session/end-seed` event, or `undefined` when none exists.
+ * @param session - the session whose log is scanned incrementally.
+ * @returns the boundary seq, if any.
+ */
+function latestSeedBoundary(session: Session): SessionSeq | undefined {
+  const cached = seedBoundaries.get(session) ?? { scanned: 0, latestEndSeedSeq: undefined }
+  for (let seq = cached.scanned; seq < session.seq; seq += 1) {
+    // Existing Session history read; migration deferred.
+    // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
+    const event = session.eventAt(SessionSeq(seq))!
+    if (event.type === 'session/end-seed') cached.latestEndSeedSeq = event.seq
+  }
+  cached.scanned = session.seq
+  seedBoundaries.set(session, cached)
+  return cached.latestEndSeedSeq
+}
+
 /** Inspect open-turn, unmatched-compaction, and latest seed-boundary state independently. */
 function inspectCompactionEntryState(session: Session): CompactionEntryState {
   let openTurn: number | null = null
   let openTurnStateKnown = false
   let unmatchedCompactionStart: SessionEvent<'compaction/start'> | undefined
   let compactionEntryStateKnown = false
-  let latestEndSeedSeq: SessionSeq | undefined
+  const latestEndSeedSeq = latestSeedBoundary(session)
   for (let seq = session.seq - 1; seq >= 0; seq -= 1) {
     // Existing Session history read; migration deferred.
     // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
     const event = session.eventAt(SessionSeq(seq))!
-    if (latestEndSeedSeq === undefined && event.type === 'session/end-seed') {
-      latestEndSeedSeq = event.seq
-    }
     if (!compactionEntryStateKnown) {
       if (event.type === 'compaction/start') {
         unmatchedCompactionStart = event
@@ -593,9 +651,7 @@ function inspectCompactionEntryState(session: Session): CompactionEntryState {
         openTurnStateKnown = true
       }
     }
-    if (openTurnStateKnown
-      && compactionEntryStateKnown
-      && latestEndSeedSeq !== undefined) break
+    if (openTurnStateKnown && compactionEntryStateKnown) break
   }
   return { openTurn, unmatchedCompactionStart, latestEndSeedSeq }
 }

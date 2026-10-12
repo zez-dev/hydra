@@ -1,10 +1,12 @@
 {
   "id": "/",
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "Hydra",
+  "short_name": "Hydra",
   "start_url": "/",
   "scope": "/",
   "display": "fullscreen",
+  "theme_color": "#b91c1c",
+  "background_color": "#ffffff",
   "icons": [
     {
       "src": "/favicon.svg",

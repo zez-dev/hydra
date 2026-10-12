@@ -6,6 +6,12 @@
   min-width: 0;
 }
 
+/* The count trigger ("1 subagent") keeps its width; the session title beside
+   it is the part that ellipsizes when the header narrows. */
+.root:not(.switcherRoot) {
+  flex: none;
+}
+
 .switcherRoot {
   min-width: 0;
   margin-left: 6px;

@@ -10,7 +10,7 @@ Service Definition：[dsh-workflow](../../packages/workflow/workflow)（`ctx.wor
 
 ## 启动请求
 
-本节定义调用方启动一次运行时提交的请求。普通工作流工具会根据模型的 `{ script, meta, args }` 调用和发起调用的 agent 构建该请求；专用消费方还可以为本次运行选择引擎级 `subagentProvider`，并将 `maxTotalAgents` 调低，但脚本无法观察或替换这两项策略。`meta` 与 `args` 是普通 JSON 数据；引擎会用 schema 校验 `meta`，并在任何工作开始前明确报错并拒绝无效数据。引擎绝不会通过对脚本文本求值来获取它们。`parent` 是必填字段——脚本启动的每个子 agent 都归属于它，cwd、谱系与深度通过 [subagent seam](subagent.zh.md) 传递。
+本节定义调用方启动一次运行时提交的请求。普通工作流工具会根据模型的 `{ script, meta, args, resumeRunId }` 调用和发起调用的 agent 构建该请求；专用消费方还可以为本次运行选择引擎级 `subagentProvider`，并将 `maxTotalAgents` 调低，但脚本无法观察或替换这两项策略。`meta` 与 `args` 是普通 JSON 数据；引擎会用 schema 校验 `meta`，并在任何工作开始前明确报错并拒绝无效数据。引擎绝不会通过对脚本文本求值来获取它们。`parent` 是必填字段——脚本启动的每个子 agent 都归属于它，cwd、谱系与深度通过 [subagent seam](subagent.zh.md) 传递。
 
 ```ts type-equiv
 /**
@@ -29,6 +29,15 @@ interface WorkflowStartRequest {
   subagentProvider?: string
   /** Optional per-run total-child ceiling. */
   maxTotalAgents?: number
+  /**
+   * Resume a journaled run: `agent()` calls whose position and input hash
+   * still match a completed call of that run return its recorded result
+   * instead of spawning a child, and everything else runs for real. This is a
+   * NEW run that records `resumedFrom`; the resumed run is never rewritten.
+   * Requires a mounted journal Service Provider, and names a run the journal
+   * knows — an engine rejects the request otherwise.
+   */
+  resumeRunId?: WorkflowRunId
   /** The agent on whose behalf the run executes (parent of every child). */
   parent: Agent
   /** Cancels the run when aborted. */
@@ -115,6 +124,14 @@ interface WorkflowRun {
 
 脚本内部的钩子误用：错误参数、未知或延迟的 `agent()` 选项、超出[结构化输出子集](../../packages/core/tools/README.zh.md)的 schema、超出上限、seam 启动失败、取消，都会抛出 `fatal: true` 的 `WorkflowError`。`parallel()`/`pipeline()` 组合器对 fatal 错误直接重新抛出，而非将该项映射为 `null`：一个拼写错误的选项必须明确报错并终止脚本，绝不能消融为看似普通子 agent 失败的结果。逐项的 `null` 保留给子运行失败（非 `completed` 的 stop reason）和阶段内的普通脚本错误。
 
+## 运行日志与续跑：`ctx.workflowJournal`
+
+第二个**可选** seam 记录一次运行做过什么，使因连接中断或预算耗尽而被切断的运行得以继续，而不是从头开始。Service Definition：[`journal-types.ts`](../../packages/workflow/workflow/src/journal-types.ts) 中的 `WorkflowJournalService`。Service Provider：[dsh-workflow-journal](../../packages/workflow/workflow-journal)，它在 `workflow_runs` 存储域中为每次运行保存一条记录，并提供 `/workflows`。消费方是引擎，它通过 `ctx.get('workflowJournal')` 读取；没有任何提供方时，引擎行为不变。
+
+运行开始时引擎 `open` 一条记录，每个 `agent()` 调用结算时 `record`，并以终态结果 `close`。运行结果在该关闭写入落盘之前不会 resolve，因此已结算的运行绝不会回读为 `running`。日志下次打开时仍标记为 `running` 的记录属于已消失的进程，会被调整为 `interrupted`——这是任何观察者能够发现它的最早时刻。
+
+只有子 agent 达到 `stopReason: 'completed'` 的调用才被记录为**可重放**；遇到限流或连接中断的子 agent 记录为不可重放，续跑时会重新运行，而不是复现失败。两个哈希决定续跑复用什么：对脚本正文逐字计算的 `scriptHash(body)`，由 `plan()` 以 `scriptChanged` 报告；以及每个调用的 `callKeyHash({prompt, provider, model, schema})`。`resumeRunId` 运行按**序号与键哈希两者同时匹配**来对应每个调用：匹配则直接返回已记录的结果，不启动子 agent；其余情况——提示词被改、路由变化、此前未完成的调用——都会真实运行。被续跑的那次运行绝不会被改写；续跑是一次记录了 `resumedFrom` 的新运行。
+
 ## 事件
 
 `workflow/*` 事件（`workflow/start`、`workflow/phase`、`workflow/log`、`workflow/agent-start`、`workflow/agent-end`、`workflow/end`，见[事件目录](#cordis-surface)）是**仅供观察**的 emit，携带数据快照：每个 payload 以 `WorkflowRunInfo`（id + meta）开头，而非活跃的 `WorkflowRun`，因此订阅者无法获得 `cancel`/`dispose`；`workflow/end` 刻意省略 result value（观察结果的监听器不得收到调用方 result 的可变别名）。每次 emit 对每个监听器隔离：订阅者抛出的异常会被记录到日志中而不会传播，也不会阻止后续注册的监听器收到事件；每个监听器收到自己的 payload 克隆，因此修改它既不会损坏引擎也不会影响其他监听器。这种隔离方式与 `subagent/start`/`subagent/end` 一致。
@@ -152,6 +169,61 @@ abstract start(request: WorkflowStartRequest): WorkflowRun
 ```
 
 Source: [`packages/workflow/workflow/src/index.ts`](../../packages/workflow/workflow/src/index.ts)
+
+<a id="ctxworkflowjournal--workflowjournalservice"></a>
+
+### `ctx.workflowJournal` — `WorkflowJournalService`
+
+Durable record of workflow runs. A Service Provider orders writes per run id, so a caller may start `open`, `record` and `close` without awaiting the previous one and still have them applied in call order; a `record` that names a run the journal never opened is dropped rather than inventing one.
+
+```ts cordis-catalog
+/**
+ * Record a run as it starts.
+ * @param open - the run's identity, session, script hash and meta.
+ * @returns once the opening record is durable.
+ */
+open(open: WorkflowRunOpen): Promise<void>
+
+/**
+ * Append one settled `agent()` call to a run.
+ * @param id - the run the call belongs to.
+ * @param call - the settled call.
+ * @returns once the call is durable.
+ */
+record(id: WorkflowRunId, call: JournalCall): Promise<void>
+
+/**
+ * Close a run with its terminal result.
+ * @param id - the run that settled.
+ * @param result - the run's terminal result.
+ * @returns once the closing record is durable.
+ */
+close(id: WorkflowRunId, result: WorkflowResult): Promise<void>
+
+/**
+ * Read one run.
+ * @param id - the run to read.
+ * @returns the record, or `undefined` when the journal has never seen it.
+ */
+get(id: WorkflowRunId): WorkflowRunRecord | undefined
+
+/**
+ * Read recent runs, newest first.
+ * @param limit - maximum records to return; the Service Provider's configured page size by default.
+ * @returns the records, newest first.
+ */
+list(limit?: number): readonly WorkflowRunRecord[]
+
+/**
+ * Describe what resuming a run with a given script would replay.
+ * @param id - the run to resume.
+ * @param scriptHash - hash of the script body the resume would run.
+ * @returns the plan, or `undefined` when the journal has never seen the run.
+ */
+plan(id: WorkflowRunId, scriptHash: string): ResumePlan | undefined
+```
+
+Source: [`packages/workflow/workflow/src/journal-types.ts`](../../packages/workflow/workflow/src/journal-types.ts)
 
 <a id="workflow-events"></a>
 

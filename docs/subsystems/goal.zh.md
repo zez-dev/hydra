@@ -171,6 +171,48 @@ interface GoalChanged {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxdigest--digestservice"></a>
+
+### `ctx.digest` — `DigestService`
+
+Service published as `ctx.digest`.
+
+```ts cordis-catalog
+/**
+ * Gather the day's facts for one workspace from every mounted seam.
+ * @param cwd - the workspace directory.
+ * @param at - the moment that defines the day; defaults to now.
+ * @returns the report input.
+ */
+collect(cwd: string, at?: Date): Promise<DigestInput>
+
+/**
+ * Render and write the day's report to `<cwd>/.dsh/reports/<date>.md`.
+ * @param cwd - the workspace directory.
+ * @param at - the moment that defines the day; defaults to now.
+ * @returns the written report.
+ */
+write(cwd: string, at?: Date): Promise<DigestReport>
+
+/**
+ * Gather the last seven days for one workspace from the daily report footers and live seams.
+ * @param cwd - the workspace directory.
+ * @param at - the moment that defines the last day; defaults to now.
+ * @returns the weekly review input.
+ */
+collectWeek(cwd: string, at?: Date): Promise<WeeklyInput>
+
+/**
+ * Render and write the weekly review to `<cwd>/.dsh/reports/week-<YYYY-Www>.md`.
+ * @param cwd - the workspace directory.
+ * @param at - the moment that defines the last day; defaults to now.
+ * @returns the written review.
+ */
+writeWeek(cwd: string, at?: Date): Promise<WeeklyReport>
+```
+
+Source: [`packages/goal/digest/src/types.ts`](../../packages/goal/digest/src/types.ts)
+
 <a id="ctxgoals--goalservice"></a>
 
 ### `ctx.goals` — `GoalService`
@@ -268,6 +310,59 @@ Types: [Agent](core.zh.md)
 
 Source: [`packages/goal/goal/src/index.ts`](../../packages/goal/goal/src/index.ts)
 
+<a id="ctxresearch--researchservice"></a>
+
+### `ctx.research` — `ResearchService`
+
+Service published as `ctx.research`.
+
+```ts cordis-catalog
+/**
+ * The journal store of one workspace, opened on first use.
+ * @param cwd - the workspace directory.
+ * @returns the store; await `whenReady()` before reading.
+ */
+storeFor(cwd: string): JournalStore
+
+/**
+ * The research a live session's goal works on.
+ * @param sessionId - the session.
+ * @returns the slug and workspace, or `undefined` when the session has no research goal.
+ */
+activeFor(sessionId: SessionId): ActiveResearch | undefined
+
+/**
+ * Record a finding from an automated source.
+ * @param finding - the finding and its journal.
+ * @param source - who recorded it.
+ * @returns resolves once the journal file is written.
+ */
+record(finding: ResearchFinding, source: JournalEntrySource): Promise<void>
+
+/**
+ * Announce one breakthrough, when `notify` is mounted.
+ * @param journal - the journal the breakthrough belongs to.
+ * @param text - the breakthrough text.
+ */
+announceBreakthrough(journal: Journal, text: string): void
+
+/**
+ * Re-rank a journal's open hypotheses with one logged scoring request. A
+ * disabled scoring config, an absent route, a failed request, and an
+ * unreadable answer are each logged and leave the recorded scores unchanged.
+ * @param store - the store holding the journal.
+ * @param slug - the journal slug.
+ * @param session - session the request is logged against and whose route is reused by default.
+ * @param signal - cancellation of the caller's tool call or round.
+ * @returns resolves once the scores are written or the attempt is abandoned.
+ */
+scoreHypotheses(store: JournalStore, slug: string, session: Session, signal: AbortSignal): Promise<void>
+```
+
+Types: [Session](session.zh.md) · [SessionId](core.zh.md)
+
+Source: [`packages/goal/research/src/types.ts`](../../packages/goal/research/src/types.ts)
+
 <a id="goal-events"></a>
 
 ### `goal/*` events
@@ -310,4 +405,26 @@ Goal mutation accepted by one live agent. The matching `goal/change` session eve
 Types: [Agent](core.zh.md) · [Scoped](scope.zh.md)
 
 Source: [`packages/goal/goal/src/domain.ts`](../../packages/goal/goal/src/domain.ts)
+
+<a id="research-events"></a>
+
+### `research/*` events
+
+<a id="researchchange--emit"></a>
+
+#### `research/change` — emit
+
+One journal file was written by this process or changed on disk.
+
+```ts cordis-catalog
+/**
+ * One journal file was written by this process or changed on disk.
+ * @param payload.dir - absolute research directory.
+ * @param payload.slug - the journal slug.
+ * @mode emit
+ */
+'research/change'(payload: { dir: string; slug: string }): void
+```
+
+Source: [`packages/goal/research/src/index.ts`](../../packages/goal/research/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -15,10 +15,18 @@ interface TokenMeasurement {
   readonly logRevision: SessionLogOffset
   /** Provider or heuristic anchor used for this measurement. */
   readonly baseline: TokenMeasurementBaseline
-  /** Signed repricing of current surface content relative to the baseline anchor. */
+  /** Signed heuristic repricing of current surface content relative to the baseline anchor, before density. */
   readonly surfaceDeltaTokens: number
+  /**
+   * Provider tokens per heuristic token on a route without image pricing:
+   * the densest of the newest usage anchors on this route (the current one
+   * included), applied to `surfaceDeltaTokens`; `1` otherwise.
+   */
+  readonly density: number
   /** Non-negative current request-and-response pressure. */
   readonly totalTokens: number
+  /** The whole current request (tool schemas and surface) priced by the fixed heuristic alone, whatever the anchor. */
+  readonly estimatedTokens: number
   /** Total route-priced request tokens across the current surface; equals the sum of the node prices. */
   readonly surfaceTokens: number
   /** Current surface nodes in positional head-to-tail order. */
@@ -61,6 +69,41 @@ interface TokenSurfaceNode {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxspendguard--spendguardservice"></a>
+
+### `ctx.spendGuard` — `SpendGuardService`
+
+The `ctx.spendGuard` service.
+
+```ts cordis-catalog
+/**
+ * Tokens a session consumed in this process.
+ * @param sessionId - the session to total.
+ * @returns input plus output tokens observed for that session.
+ */
+sessionTokens(sessionId: SessionId): number
+
+/**
+ * Tokens consumed today across sessions.
+ * @returns the local-day total, including totals restored from storage.
+ */
+dayTokens(): number
+
+/**
+ * Status of a session against both budgets.
+ * @param sessionId - the session to report.
+ * @returns totals and whether each budget is exceeded.
+ */
+status(sessionId: SessionId): SpendStatus
+
+/** Resolves once every day total recorded so far has been written durably. */
+settled(): Promise<void>
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/guard/spend-guard/src/types.ts`](../../packages/guard/spend-guard/src/types.ts)
+
 <a id="ctxtokenmeter--tokenmeter"></a>
 
 ### `ctx.tokenMeter` — `TokenMeter`
@@ -75,15 +118,22 @@ Replay owner for one service-wide estimator and isolated per-session folds.
  * pricing every node is priced under: a route whose adapter declares image
  * pricing charges each retained image its visual tokens plus its
  * model-visible text, while other routes keep the fixed heuristic. Provider
- * usage is reused only when the latest successful call's canonical request
- * envelope matches `requestHeader` and its total is no lower than that
- * call's full route-priced anchor; otherwise the complete envelope and
- * surface are repriced. The anchor includes all surface nodes immediately
- * before the assistant message, including inputs admitted after step/start.
+ * usage is reused only when the latest successful call's route and tool
+ * schemas match `requestHeader` (its output cap and sampling scalars may
+ * differ) and its total is no lower than that call's full route-priced
+ * anchor; otherwise the complete envelope and surface are repriced. On a
+ * route without image pricing, the surface delta since a usage anchor is
+ * priced at the route's density, the provider's count over the heuristic's
+ * for the same request, taken as the densest of the newest usage anchors on
+ * that route so one lighter request does not relax the guess. The anchor
+ * includes all surface nodes immediately before the assistant message,
+ * including inputs admitted after step/start.
  *
  * `requestHeader` replaces the latest logged envelope for pressure and node
  * pricing; the node set always describes the current session surface. Every
- * call clones those positional nodes, so measurement is O(surface).
+ * call at a new log revision clones those positional nodes, so measurement
+ * is O(surface); a headerless call at an unchanged revision returns the same
+ * frozen snapshot.
  *
  * @param session - session to replay through its current durable tail.
  * @param requestHeader - optional effective request envelope replacing the latest logged header.
@@ -98,9 +148,17 @@ measure(session: Session, requestHeader?: EpochHeader): TokenMeasurement
  * @returns content and role-framing tokens under the fixed service heuristic.
  */
 estimateMessage(message: Message): number
+
+/**
+ * Heuristically price tool schemas the way a logged request header's are
+ * priced (instance face of the pure `estimateToolSchemas` export).
+ * @param tools - tool schemas in canonical order.
+ * @returns heuristic tool-schema tokens; 0 when empty.
+ */
+estimateTools(tools: readonly ToolSchema[]): number
 ```
 
-Types: [EpochHeader](session.zh.md) · [Message](llm-streaming.zh.md) · [Session](session.zh.md)
+Types: [EpochHeader](session.zh.md) · [Message](llm-streaming.zh.md) · [Session](session.zh.md) · [ToolSchema](tools.zh.md)
 
 Source: [`packages/llm/token-meter/src/index.ts`](../../packages/llm/token-meter/src/index.ts)
 <!-- END GENERATED cordis-surface -->

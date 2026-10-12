@@ -202,6 +202,12 @@ describe('/goal human command', () => {
     expect(test.ctx.goals.get(test.agent)).toBeUndefined()
   })
 
+  it('shows an unlimited round budget as unlimited', async () => {
+    const test = await harness()
+    test.ctx.goals.create(test.agent, { objective: 'open ended', maxGoalRounds: 0 })
+    expect((await run(test)).text).toContain('Rounds: 0/unlimited')
+  })
+
   it('shows every durable phase and distinguishes disarmed active state', async () => {
     const test = await harness()
     test.ctx.goals.create(test.agent, { objective: 'state matrix', maxGoalRounds: 1 })

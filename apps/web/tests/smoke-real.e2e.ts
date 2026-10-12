@@ -356,7 +356,10 @@ describe('dsh web keyless CLI smoke', () => {
       await page.goto(readyUrl)
       await page.getByRole('button', { name: 'New session', exact: true }).first().waitFor({ timeout: 30_000 })
       const batchPaths = [...new Set(pluginScripts)].sort()
-      expect(batchPaths).toHaveLength(2)
+      // The kernel batch plus the application plugins, which split into
+      // more than one immutable batch once their combined URL passes the
+      // combo limit, as this fork's added client plugins make it.
+      expect(batchPaths.length).toBeGreaterThanOrEqual(2)
       expect(batchPaths).toContainEqual(expect.stringMatching(
         /^\/plugins\/\?\?.+\/client\.js,.+\/client\.js&rev=[a-f\d]{12}$/,
       ))
@@ -364,10 +367,7 @@ describe('dsh web keyless CLI smoke', () => {
         /^\/plugins\/\?\?@deepseek-ai\/dsh-client-modules\/client\.js&rev=[a-f\d]{12}$/,
       ))
       const readyOrigin = new URL(readyUrl).origin
-      expect([...cacheHeaders.values()]).toEqual([
-        'public, max-age=31536000, immutable',
-        'public, max-age=31536000, immutable',
-      ])
+      expect([...cacheHeaders.values()]).toEqual(batchPaths.map(() => 'public, max-age=31536000, immutable'))
       for (const path of batchPaths) {
         const [scriptResponse, mapResponse] = await Promise.all([
           fetch(`${readyOrigin}${path}`),
@@ -574,7 +574,7 @@ describe('dsh web keyless CLI smoke', () => {
         turn: 1,
         step: 1,
         retry: 1,
-        maxRetries: 5,
+        maxRetries: 12,
         failure: { code: 'TRANSPORT' },
       })
       expect(JSON.stringify(page.records)).toContain('WEB_RETRY_DISCARDED')

@@ -80,7 +80,7 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   const skillTool = defineTool({
     name: 'skill',
-    description: 'Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.',
+    description: 'Load the full guidance of an available skill. Call this with the exact skill name from the session skill catalog when the user names that skill or the task clearly needs what it offers; adapt its steps to the task instead of following them as fixed rules.',
     parameters: {
       name: { type: 'string', required: true, description: 'The exact skill name from the available skills list.' },
     },
@@ -263,7 +263,7 @@ function renderCatalogMessage(entries: SkillCatalogSource['entries']): UserMessa
         ...renderCatalogEntries(entries),
         '</available_skills>',
         '',
-        "If the user names a skill, or the task clearly matches a skill's description, call the `skill` tool with the exact skill name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.",
+        "Skills are optional references, not rules. If the user names a skill, load it with the `skill` tool. Otherwise load one only when the task clearly needs what its description offers, treat its steps as guidance to adapt to the task at hand, and set it aside where it does not fit. This catalog contains summaries only; do not infer a skill's instructions until it has been loaded.",
         'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
         '</system-reminder>',
       ].join('\n'),
@@ -283,7 +283,7 @@ function renderCatalogUpdate(entries: SkillCatalogSource['entries']): UserMessag
       'A user may still invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool for it.',
     ]
     : [
-      'Use only names in this replacement catalog. If the user names a listed skill, or the task clearly matches its description, call the `skill` tool with the exact name before acting.',
+      'Use only names in this replacement catalog. Skills are optional references: load a listed skill when the user names it or the task clearly needs what it offers, and adapt its steps to the task.',
       'A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the `skill` tool again for that skill.',
     ]
   return createUserMessage({

@@ -489,7 +489,8 @@ function unwrapExpr(expr: ts.Expression): ts.Expression {
  * Statically walk a schemastery schema expression to its key paths plus the
  * packages whose schemas an intersect composes. A key path is the top-level
  * key or a nested path through object/array compositions (`agents[].id`).
- * Handles object/union calls, chained refinements, named const schema imports
+ * Handles object/union calls, an object's spread of a same-file `const` object
+ * literal of field schemas, chained refinements, named const schema imports
  * through public workspace source paths, and `z.intersect([X.Config, …])`; errors on
  * anything else, so a schema the walk cannot see fails the gate instead of
  * silently thinning it. Nested values that are neither `object` nor `array`
@@ -551,14 +552,28 @@ function walkSchemaExpr(
     }
     const method = call.expression.name.text
     if (method === 'object' && call.arguments[0] && ts.isObjectLiteralExpression(call.arguments[0])) {
+      const collectKey = (prop: ts.PropertyAssignment | ts.ShorthandPropertyAssignment): void => {
+        const key = ts.isStringLiteral(prop.name) ? prop.name.text : prop.name.getText(ctx.sf)
+        keys.push(key)
+        if (ts.isPropertyAssignment(prop)) collectValuePaths(prop.initializer, key)
+      }
       for (const prop of call.arguments[0].properties) {
         if (ts.isPropertyAssignment(prop) || ts.isShorthandPropertyAssignment(prop)) {
-          const key = ts.isStringLiteral(prop.name) ? prop.name.text : prop.name.getText(ctx.sf)
-          keys.push(key)
-          if (ts.isPropertyAssignment(prop)) collectValuePaths(prop.initializer, key)
-        } else {
-          violations.push(`${where}: schema object property '${prop.getText(ctx.sf)}' is not a plain key.`)
+          collectKey(prop)
+          continue
         }
+        const spread = ts.isSpreadAssignment(prop) && ts.isIdentifier(prop.expression)
+          ? schemaConst(ctx, prop.expression.text, false)
+          : null
+        const fields = spread === null ? null : unwrapExpr(spread)
+        if (fields !== null && ts.isObjectLiteralExpression(fields)) {
+          for (const field of fields.properties) {
+            if (ts.isPropertyAssignment(field) || ts.isShorthandPropertyAssignment(field)) collectKey(field)
+            else violations.push(`${where}: spread schema field '${field.getText(ctx.sf)}' is not a plain key.`)
+          }
+          continue
+        }
+        violations.push(`${where}: schema object property '${prop.getText(ctx.sf)}' is not a plain key.`)
       }
       return
     }

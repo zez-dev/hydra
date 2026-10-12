@@ -73,7 +73,7 @@ describe('session-reference real Loader composition', () => {
       source: { kind: 'user' },
     })
     const decision = await agentEvents(ctx, agent).waterfall('agent/pre-step', {
-      messages: [direct], turn: 1, step: 1, signal: new AbortController().signal,
+      messages: [direct], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal: new AbortController().signal,
     }, () => Promise.resolve({ kind: 'enter' as const, messages: [direct] }))
     expect(decision.kind).toBe('enter')
     if (decision.kind !== 'enter') throw new Error('Expected admitted reference')

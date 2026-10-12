@@ -21,6 +21,8 @@
 - text: and confirm the fixture wiring {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Thought for a while":
   - text: Thought for a while
   - img

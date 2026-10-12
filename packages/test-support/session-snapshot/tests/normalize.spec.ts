@@ -433,6 +433,43 @@ describe('normalizeSessionLog', () => {
     expect(out).toContain('{{sessionId}}')
   })
 
+  it('zeroes the measured counts of a compaction/pressure event and keeps its declared budgets', () => {
+    // The measured counts price the rendered prompt, which carries the
+    // workspace and checkout paths, so they move with the machine replaying.
+    const pressure = event({
+      type: 'compaction/pressure',
+      ignorable: true,
+      data: {
+        estimatedTokens: 9837, pendingTokens: 1700, pricedTokens: 9841, density: 1.002,
+        contextWindow: 1_000_000, outputCap: 256_000, thresholdTokens: 700_000,
+      },
+    })
+    const out = normalizeSessionLog(`${header({})}
+${pressure}
+`, ctx)
+    expect(JSON.parse(out.trimEnd().split('\n')[1] ?? '{}')).toMatchObject({
+      ignorable: true,
+      data: {
+        estimatedTokens: 0, pendingTokens: 0, pricedTokens: 0, density: 0,
+        contextWindow: 1_000_000, outputCap: 256_000, thresholdTokens: 700_000,
+      },
+    })
+  })
+
+  it('zeroes only the measured counts a compaction/pressure record carries and adds none', () => {
+    const pressure = event({
+      type: 'compaction/pressure',
+      ignorable: true,
+      data: { estimatedTokens: 9837, contextWindow: 1_000_000, outputCap: 256_000, thresholdTokens: 700_000 },
+    })
+    const out = normalizeSessionLog(`${header({})}
+${pressure}
+`, ctx)
+    expect((JSON.parse(out.trimEnd().split('\n')[1] ?? '{}') as { data: unknown }).data).toEqual({
+      estimatedTokens: 0, contextWindow: 1_000_000, outputCap: 256_000, thresholdTokens: 700_000,
+    })
+  })
+
   it('zeroes a hook/result durationMs (run-to-run noise) but keeps its decision', () => {
     const ev = JSON.stringify({
       type: 'hook/result', seq: 2, time: 5,

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-goal-round-driver` automatically continues an active goal in the same session while the agent is idle, continuation is armed, and the configured round allowance remains. Each round gives the model another turn toward the objective; only goal rounds that reach model history consume the allowance, and exhaustion records a blocker. The driver has no configuration: the goal defines the round limit, and `dsh-tool-goal` defines when repeated blocking stops continuation. Mount it with `dsh-goal` and `dsh-tool-goal` for unattended multi-round progress; omit it when each step requires human steering.
+`dsh-goal-round-driver` continues an active goal in the same session while the agent is idle, continuation is armed, and the round allowance remains. Each round gives the model another turn toward the objective; only rounds that reach model history consume the allowance, and exhaustion records a blocker. The goal defines the round limit and `dsh-tool-goal` defines when repeated blocking stops continuation; the driver's own `transientRetry` decides whether a round ending in a request error, provider failure, or max-tokens cut re-arms with backoff or disarms. Mount it with `dsh-goal` and `dsh-tool-goal` for unattended progress; omit it when each step needs human steering.
 
 ## Table of Contents
 
@@ -29,7 +29,21 @@ Mount `dsh-goal-round-driver` when an active goal should keep making progress wi
 
 ### Compose it
 
-Mount the driver beside the goal service and the goal tools; the driver itself takes no configuration.
+Mount the driver beside the goal service and the goal tools.
+
+```yaml
+- name: '@deepseek-ai/dsh-goal-round-driver'
+  config:
+    transientRetry:
+      delayMs: 30000
+      maxConsecutive: 48
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `transientRetry` | absent | Absent: a round that ends in a request error, provider failure, or max-tokens cut disarms the goal. Present: the driver re-arms after `delayMs`, doubling per consecutive failure (capped at 2^8), and after `maxConsecutive` consecutive failures blocks the goal with reason `transient-retries-exhausted`; a successful round resets the count |
+
+Both fields are required when `transientRetry` is present. A user cancellation or explicit pause is never retried. `/goal resume` re-arms a goal blocked by exhausted retries, by `round-limit`, or paused, including after a process restart. The shipped `dsh-base` bundle sets 30 seconds and 48 consecutive failures.
 
 ```yaml
 - id: goal
@@ -117,6 +131,8 @@ One fixed instruction block plus the objective is added per admitted round. Late
 Append-only within an epoch: each admitted round extends the existing conversation after its reusable prefix. Compaction may replace the derived-history suffix and move the reusable boundary.
 
 ## Known Limitations and Deferred Work
+
+- **Retry state is process-local** — the consecutive-failure count and the pending re-arm delay live in memory; a restart resets the count to zero, and a goal left armed at restart is re-armed only by `dsh-goal-resume-on-open` or the supervisor, never by the driver.
 
 <a id="known-limitations-and-deferred-work"></a>
 

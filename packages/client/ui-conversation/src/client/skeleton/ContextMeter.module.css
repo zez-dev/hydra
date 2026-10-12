@@ -151,3 +151,10 @@
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-primary);
 }
+
+/* Where the next step condenses, under the composition rows. */
+.threshold {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--dsw-alias-fg-muted, inherit);
+}

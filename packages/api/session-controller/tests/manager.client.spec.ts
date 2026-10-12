@@ -759,6 +759,19 @@ describe('remaining branches', () => {
     })])
   })
 
+  it('rewinds through the session remote and lists the child under its source', async ({ mock, remote }) => {
+    remote.session.rewind.mockResolvedValue(ok({ sessionId: S2, prompt: 'again' }))
+    const manager = makeManager(mock, remote)
+    const result = await manager.rewind({ sessionId: S1, atSeq: SessionSeq(4) })
+    expect(result).toMatchObject({ ok: true, value: { sessionId: S2, prompt: 'again' } })
+    expect(remote.session.rewind).toHaveBeenCalledExactlyOnceWith({ sessionId: S1, atSeq: 4 })
+    expect(manager.getListSnapshot().items).toEqual([expect.objectContaining({
+      sessionId: S2,
+      parentSessionId: S1,
+      blank: false,
+    })])
+  })
+
   it('reconciles a preallocated id after an ordinary transport failure', async ({ mock, remote }) => {
     remote.session.create.mockRejectedValue(new Error('response lost'))
     const manager = makeManager(mock, remote)

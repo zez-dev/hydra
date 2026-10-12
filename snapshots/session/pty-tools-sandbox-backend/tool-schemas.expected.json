@@ -40,8 +40,7 @@
           }
         },
         "required": [
-          "command",
-          "description"
+          "command"
         ]
       }
     },
@@ -63,6 +62,19 @@
         "required": [
           "objective"
         ]
+      }
+    },
+    {
+      "name": "doctor",
+      "description": "Read-only environment self-check of this Hydra installation: home, workspace folders, sandbox, native addon, git, mounted plugins, tool-calling compat rows, and credential references (never key values). Set probe to also send one tiny model request to the default route and report its latency or failure class.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "probe": {
+            "type": "boolean",
+            "description": "Also probe the default model route with one tiny request."
+          }
+        }
       }
     },
     {
@@ -244,6 +256,86 @@
       }
     },
     {
+      "name": "journal",
+      "description": "The research journal of this workspace: the durable memory of a research goal across sessions. `breakthrough` records a confirmed step toward the objective; `hypothesis` adds one (text) or sets its status (id + status); `experiment` records what was tried and the result; `dead_end` records what must not be retried and why; `next` replaces the next steps; `read` returns the journal. Entries are written to the journal file at once and recalled into every later request, so record findings the moment they happen. `slug` defaults to the research this session runs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The operation.",
+            "enum": [
+              "breakthrough",
+              "hypothesis",
+              "experiment",
+              "dead_end",
+              "next",
+              "read"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "Journal slug; defaults to the active research of this session."
+          },
+          "text": {
+            "type": "string",
+            "description": "breakthrough/hypothesis/dead_end: one or two sentences."
+          },
+          "id": {
+            "type": "string",
+            "description": "hypothesis: the hypothesis id to update."
+          },
+          "status": {
+            "type": "string",
+            "description": "hypothesis: the new status when `id` is given.",
+            "enum": [
+              "open",
+              "supported",
+              "refuted"
+            ]
+          },
+          "what": {
+            "type": "string",
+            "description": "experiment: what was tried."
+          },
+          "result": {
+            "type": "string",
+            "description": "experiment: what happened."
+          },
+          "steps": {
+            "type": "array",
+            "description": "next: the next steps in order.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_add",
+      "description": "Index a folder of documents the user named, so this workspace can search it with the knowledge tools. Call it only when the user asks you to use, read, or learn from a folder of documents; the user approves the folder first and is asked separately before its files are summarized.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The folder the user named: absolute, relative to the workspace, or starting with ~."
+          },
+          "name": {
+            "type": "string",
+            "description": "A short collection name of letters, digits, - and _; the folder's name when omitted."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
       "name": "list_agents",
       "description": "List your continuable background subagents by durable id and label. Use it to recall which ones you started, not to poll for completion — you are told when one finishes. Status comes from the live registry: running means the agent is working right now, idle means it is loaded but between turns (it may be waiting on agents it started), and ready means it exists only in storage — resumable, not terminal, and not a result waiting to be collected; a `send_message` steers a running child at its nearest step boundary or starts a turn for an idle or ready child, and a direct child remains a `send_message` candidate in every status. The snapshot is not a delivery promise — `send_message` performs the authoritative check and may still fail. Children that could not be read are reported as diagnostics instead of being silently dropped. Scope `descendants` walks the whole tree below you in stable pre-order, annotating each entry with its durable direct-parent session id and depth. You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only.",
       "parameters": {
@@ -258,6 +350,79 @@
             ]
           }
         }
+      }
+    },
+    {
+      "name": "memory",
+      "description": "Long-term memory across sessions. `remember` stores a durable fact, shortcut, or preference, or a lesson (a root cause found, an approach that failed and why, a corrected assumption) the user would want later work to know; `search` finds stored entries; `forget` deletes one by id. Entries related to the current work appear in <retrieved_memory>; use one only when its situation matches. Write each entry so it names its situation (the file, command, or component). Never remember plans or progress reports.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The operation.",
+            "enum": [
+              "remember",
+              "search",
+              "forget"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "remember: the knowledge to store, one or two sentences."
+          },
+          "kind": {
+            "type": "string",
+            "description": "remember: fact (default), shortcut, or preference.",
+            "enum": [
+              "fact",
+              "shortcut",
+              "preference"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "description": "remember: short lowercase topic tags.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "search: words matched against entry text and tags, best match first; omit to list everything."
+          },
+          "id": {
+            "type": "string",
+            "description": "forget: the entry id."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "off_peak",
+      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "queue (park a task) | list (what is queued)",
+            "enum": [
+              "queue",
+              "list"
+            ]
+          },
+          "task": {
+            "type": "string",
+            "description": "What to do when the window opens; required for `queue`."
+          }
+        },
+        "required": [
+          "action"
+        ]
       }
     },
     {
@@ -301,6 +466,57 @@
       }
     },
     {
+      "name": "run_experiment",
+      "description": "Run one research experiment as a shell command in the workspace and record it in the research journal: the command, exit code, metrics read from the output with your regular expressions, deltas against the previous run with the same `title`, and an output excerpt. Use it instead of `bash` for experiments so results are never lost. Requires an active research goal in this session (start one with /research).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short stable name of the experiment; repeating a title yields per-metric deltas."
+          },
+          "command": {
+            "type": "string",
+            "description": "The shell command to run in the workspace directory."
+          },
+          "hypothesisId": {
+            "type": "string",
+            "description": "The journal hypothesis this experiment tests."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "Time budget in milliseconds; capped by the deployment maximum."
+          },
+          "metrics": {
+            "type": "array",
+            "description": "Metrics to read from stdout and stderr; the first capture group (else the whole match) must be a number.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Metric name."
+                },
+                "regex": {
+                  "type": "string",
+                  "description": "JavaScript regular expression."
+                }
+              },
+              "required": [
+                "name",
+                "regex"
+              ]
+            }
+          }
+        },
+        "required": [
+          "title",
+          "command"
+        ]
+      }
+    },
+    {
       "name": "send_message",
       "description": "Send a message to a direct continuable child by its agent id. If you are a resident continuable child, you may also target your direct parent. If the target is still working, the message steers its nearest step; if it is idle, the message starts a turn. This call returns no answer from the agent — only confirmation that the message was delivered. A failure means the message was NOT delivered.",
       "parameters": {
@@ -323,7 +539,7 @@
     },
     {
       "name": "skill",
-      "description": "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.",
+      "description": "Load the full guidance of an available skill. Call this with the exact skill name from the session skill catalog when the user names that skill or the task clearly needs what it offers; adapt its steps to the task instead of following them as fixed rules.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -597,6 +813,23 @@
       }
     },
     {
+      "name": "usage",
+      "description": "Read-only token usage across every recorded session: overall totals, a table by provider and model, and a per-day series. Counts what providers reported for assistant messages, bucketed by the local day each message happened. Use since and until to look at one stretch of days.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Inclusive first local day as YYYY-MM-DD. Omit for all recorded history."
+          },
+          "until": {
+            "type": "string",
+            "description": "Inclusive last local day as YYYY-MM-DD. Omit to run to the most recent day."
+          }
+        }
+      }
+    },
+    {
       "name": "web_fetch",
       "description": "Fetch the content of a specific HTTP(S) URL and return it decoded to text.",
       "parameters": {
@@ -633,7 +866,7 @@
     },
     {
       "name": "workflow",
-      "description": "Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.\n\nThe workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.\n\nScript-body hooks:\n- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.\n- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.\n- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.\n- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.\n\nMisused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.\n\nConstraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.",
+      "description": "Run a JavaScript workflow script that orchestrates subagents at scale. Use this for work that fans out across many independent pieces — an audit over many files, a migration, multi-angle research, adversarial verification of findings — where you write the orchestration as a script instead of delegating turn by turn.\n\nThe workflow's identity rides the `meta` parameter as JSON: required `name` (short kebab-case) and `description` strings, optional `whenToUse` string and `phases` array (`{title, detail?, provider?, model?}`). The `script` parameter is the plain JavaScript body ONLY (NOT TypeScript, and NO `export const meta` statement — meta is a parameter, not code), running with top-level await; end with `return <value>` — the value must be JSON-serializable and is this tool's result.\n\nScript-body hooks:\n- `agent(prompt, opts?): Promise<any>` — run one subagent to completion. Without `opts.schema` it resolves to the child's final text; with `opts.schema` (an object-rooted JSON Schema using ONLY type/properties/required/additionalProperties/items/enum/const/oneOf — no pattern/format/numeric bounds) it resolves to the validated object. Resolves `null` when the child fails (filter with `.filter(Boolean)`). Other opts: `label` (display), `phase` (progress group), and independent `provider`/`model` LLM target overrides (either may be provided alone). Anything else (`effort`/`isolation`/`agentType`) is rejected loudly.\n- `pipeline(items, ...stages): Promise<any[]>` — run each item through the stages independently with NO barrier between stages (prefer this for multi-stage work). Each stage receives `(prev, item, index)`. An ordinary stage throw drops that ITEM to `null` and skips its remaining stages.\n- `parallel(thunks): Promise<any[]>` — run zero-argument functions concurrently and await ALL of them (a barrier; use only when a stage genuinely needs every prior result together). A throwing thunk resolves to `null`.\n- `phase(title)` — start a progress phase; `log(message)` — narrate progress; `args` — the tool call's `args` input, verbatim.\n\nMisused hooks (bad arguments, unknown options, unsupported schemas, tripped caps) throw errors that ALWAYS kill the script — they never dissolve into a per-item `null`.\n\nConstraints: concurrency and total-agent caps apply; no filesystem, network, timers, or Node.js APIs are provided — the agents do the work, the script only coordinates them. The run executes in the foreground: this call returns when the whole script finishes.\n\nIf a run was cut off partway, call again with the same script and args plus `resumeRunId` set to the earlier run's id: every agent() call that already completed with the same prompt and route returns its recorded answer immediately, and only the remaining work runs.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -697,6 +930,10 @@
             "type": "object",
             "description": "Optional JSON input exposed to the script as the `args` global (wrap a bare list as a field, e.g. {\"files\": [...]}).",
             "additionalProperties": true
+          },
+          "resumeRunId": {
+            "type": "string",
+            "description": "Optional id of an earlier run to resume: agent() calls at the same position with the same prompt and route reuse that run's recorded results instead of running again, and everything else runs for real. Pass the same script and args you ran before."
           }
         },
         "required": [

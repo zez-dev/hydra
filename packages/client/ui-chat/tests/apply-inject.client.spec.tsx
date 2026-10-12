@@ -133,6 +133,35 @@ describe('Chat inject API', () => {
     await b.runtime.dispose()
   })
 
+  it('rewinds through the Session Controller, seeding the child\'s draft with the rewound prompt', async () => {
+    const b = await bench()
+    const { injected } = b.chatViewApi(b.rootReference)
+    const seedDraft = vi.spyOn(b.runtime.ctx.uiConversation, 'seedDraft')
+    injected.rewindTo(20)
+    await vi.waitFor(() => {
+      expect(b.openSession).toHaveBeenCalledWith(`${ROOT}-rewind`)
+    })
+    expect(b.runtime.sessions.calls).toContainEqual({
+      method: 'rewind', args: [{ sessionId: ROOT, atSeq: 20, increaseTitle: true }],
+    })
+    expect(seedDraft).not.toHaveBeenCalled()
+
+    const child = 'rewound-child' as SessionId
+    vi.spyOn(b.runtime.sessions, 'rewind').mockResolvedValueOnce({ sessionId: child, prompt: 'try again' })
+    injected.rewindTo(21)
+    await vi.waitFor(() => {
+      expect(b.openSession).toHaveBeenCalledWith(child)
+    })
+    expect(seedDraft).toHaveBeenCalledWith(child, 'try again')
+
+    const rewind = vi.spyOn(b.runtime.sessions, 'rewind').mockRejectedValueOnce(new Error('rewind failed'))
+    injected.rewindTo(22)
+    await vi.waitFor(() => {
+      expect(rewind).toHaveBeenCalledWith({ sessionId: ROOT, atSeq: 22, increaseTitle: true })
+    })
+    await b.runtime.dispose()
+  })
+
   it('addresses file paths under the Session\'s scope and opens them in the right Sidebar', async () => {
     const b = await bench()
     const { injected } = b.chatViewApi(b.rootReference)

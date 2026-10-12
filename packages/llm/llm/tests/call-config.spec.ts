@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { deepFreeze } from '@deepseek-ai/dsh-util-values'
-import { callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from '../src/call-config.ts'
+import { auxiliaryRoute, callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from '../src/call-config.ts'
 import { ReasoningEffortId } from '../src/brand.ts'
 import type { GenerateOptions } from '../src/types.ts'
 
@@ -98,5 +98,15 @@ describe('agent-loop request identity', () => {
     expect(markAgentLoopRequest(request)).toBe(request)
     expect(isAgentLoopRequest(request)).toBe(true)
     expect(isAgentLoopRequest(copy)).toBe(false)
+  })
+})
+
+describe('auxiliaryRoute', () => {
+  it('takes the configured pair, else the logged provider and model, else no route', () => {
+    const logged = { provider: 'logged-provider', model: 'logged-model', maxTokens: 10 }
+    expect(auxiliaryRoute({ provider: 'p', model: 'm' }, logged)).toEqual({ provider: 'p', model: 'm' })
+    expect(auxiliaryRoute({ provider: 'p' }, logged)).toEqual({ provider: 'logged-provider', model: 'logged-model' })
+    expect(auxiliaryRoute({ model: 'm' }, undefined)).toBeUndefined()
+    expect(auxiliaryRoute({}, undefined)).toBeUndefined()
   })
 })

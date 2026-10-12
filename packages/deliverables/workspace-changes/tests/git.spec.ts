@@ -7,7 +7,7 @@ import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { GitRunner, blobText, diffTrees, ignoredPaths, locateGitWorkspace, snapshotTree, treeBlob } from '../src/git.ts'
 import { TurnRecorder } from '../src/recorder.ts'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import { git, scratchDir, startTurn, toolCall } from './support.ts'
+import { SCOPED_SPAWN_TIMEOUT_MS, git, scratchDir, startTurn, toolCall } from './support.ts'
 
 /** An object directory factory under a scratch root. */
 const objectsIn = (root: string) => () => Promise.resolve(join(root, 'objects'))
@@ -28,7 +28,7 @@ async function runner(limits = { timeoutMs: 30_000, outputMaxBytes: 1024 * 1024 
 
 const signal = new AbortController().signal
 
-describe('GitRunner', () => {
+describe('GitRunner', { timeout: SCOPED_SPAWN_TIMEOUT_MS }, () => {
   it('ignores ambient indexed Git configuration after the credential scrub', async () => {
     const cwd = await scratchDir('dsh-git-env-', cleanups)
     git(cwd, 'init', '-q', '-b', 'main')
@@ -59,7 +59,7 @@ describe('GitRunner', () => {
   })
 })
 
-describe('snapshots and diffs', () => {
+describe('snapshots and diffs', { timeout: SCOPED_SPAWN_TIMEOUT_MS }, () => {
   it('snapshots a repository whose index holds unmerged entries without touching that index', async () => {
     const cwd = await scratchDir('dsh-git-conflict-', cleanups)
     git(cwd, 'init', '-q', '-b', 'main')
@@ -105,7 +105,7 @@ describe('snapshots and diffs', () => {
 
 })
 
-describe('repository edge cases', () => {
+describe('repository edge cases', { timeout: SCOPED_SPAWN_TIMEOUT_MS }, () => {
   it.skipIf(process.platform === 'win32')('snapshots past an unreadable file', async () => {
     const cwd = await scratchDir('dsh-git-unreadable-', cleanups)
     git(cwd, 'init', '-q', '-b', 'main')
@@ -145,7 +145,7 @@ describe('repository edge cases', () => {
   })
 })
 
-describe('treeBlob and blobText', () => {
+describe('treeBlob and blobText', { timeout: SCOPED_SPAWN_TIMEOUT_MS }, () => {
   it('locates a blob by its literal path, sizes it, reads it, and reports trees and missing paths as null', async () => {
     const cwd = await scratchDir('dsh-git-blob-', cleanups)
     git(cwd, 'init', '-q', '-b', 'main')
@@ -166,7 +166,7 @@ describe('treeBlob and blobText', () => {
   })
 })
 
-describe('TurnRecorder', () => {
+describe('TurnRecorder', { timeout: SCOPED_SPAWN_TIMEOUT_MS }, () => {
   it('stays silent when disposed while git work is pending, and warns on failures otherwise', async () => {
     const cwd = await scratchDir('dsh-recorder-', cleanups)
     const { ctx, git: runnerGit } = await runner()

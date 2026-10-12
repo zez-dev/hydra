@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/persistence-changes/2026-09-22-hydra-plugin-events.md
+2026-09-22-hydra-plugin-events.md: ae3430232a92d81051e62afe9bd497d1c2939398
+2026-09-22-hydra-plugin-events.zh.md: d141801685dbff7a49c1cacd32f0f9db81f2d9ee

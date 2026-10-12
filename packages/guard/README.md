@@ -27,7 +27,10 @@ Two small plugins cover the two patterns; each README below explains when to kee
 | Package | What it provides |
 |---|---|
 | [`repeat-tool-reminder/`](repeat-tool-reminder/README.md) | Reminds the model when it repeats the same tool call, so it changes approach or finishes |
+| [`auto-continue/`](auto-continue/README.md) | Steers a continuation when a step stops at the output-token limit, so a truncated answer finishes without a human typing continue |
+| [`spend-guard/`](spend-guard/README.md) | Pauses the goal or stops the turn when a session or daily token budget is crossed, with `/spend` totals |
 | [`timeout-policy/`](timeout-policy/README.md) | Times out tool calls that declare a limit, so the model gets a clear error instead of waiting forever |
+| [`command-gate/`](command-gate/README.md) | Classifies shell argv and refuses commands that destroy what no checkpoint can restore, with `/commands-gate` history |
 
 -----
 
@@ -38,6 +41,7 @@ Start with the tools subsystem reference for the tool-call pipeline, then the re
 
 - [Tools subsystem reference](../../docs/subsystems/tools.md) — the tool-call pipeline and decisions both guards build on.
 - [Generated configuration catalog](../../docs/config-catalog.md#deepseek-aidsh-repeat-tool-reminder) — every accepted field of the repeat-call reminder.
+- [Generated configuration catalog](../../docs/config-catalog.md#deepseek-aidsh-auto-continue) — every accepted field of the auto-continue guard.
 - [Timeout deadline library Agent Note](../../.agents/notes/implemented/architecture/2026-07-06-timeout-deadline-library.md) — the timing/termination split `timeout-policy` enforces.
 
 <a id="dev-note"></a>

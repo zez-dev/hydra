@@ -313,9 +313,13 @@ export function PendingSubmissionBubble({ submission, renderMessageImages, t }: 
 
 /** User and admitted-steering keyed Chat renderer. */
 export const UserMessageNodeView = memo(function UserMessageNodeView({
-  node, renderMessageImages, openFile, openSkill, t,
+  node, renderMessageImages, openFile, openSkill, rewindTo, t,
 }: ChatNodeViewProps<'user' | 'steering'>) {
   const data = node.data
+  const anchorSeq = node.anchorSeq
+  // The Host cuts before the turn holding this message, so a steering message
+  // rewinds to the same boundary as the user message that opened its turn.
+  const onRewind = rewindTo === undefined ? undefined : () => { rewindTo(anchorSeq) }
   return (
     <UserStyleBubble
       content={data.content}
@@ -330,6 +334,7 @@ export const UserMessageNodeView = memo(function UserMessageNodeView({
           time={data.time}
           clock="start"
           className={css.actions}
+          onRewind={onRewind}
           t={t}
         />
       )}
@@ -370,6 +375,33 @@ export const TurnErrorNodeView = memo(function TurnErrorNodeView({ node, t }: Ch
 /** Max-tokens turn-end notice keyed Chat renderer. */
 export const TurnMaxTokensNodeView = memo(function TurnMaxTokensNodeView({ t }: ChatNodeViewProps<'turn-max-tokens'>) {
   return <TurnMaxTokensItem t={t} />
+})
+
+/** Outcome of one automatic learning review: what it filed, and where to review it. */
+export const LearningReviewNodeView = memo(function LearningReviewNodeView({ node, t }: ChatNodeViewProps<'learning-review'>) {
+  const { outcome } = node.data
+  const title = outcome.kind === 'failed'
+    ? outcome.message.startsWith(outcome.code)
+      ? t('message.learningReview.failed.plain', { message: outcome.message })
+      : t('message.learningReview.failed', { message: outcome.message, code: outcome.code })
+    : outcome.kind === 'findings'
+      ? outcome.count === 0
+        ? t('message.learningReview.findings.none', { slug: outcome.slug })
+        : t(outcome.count === 1 ? 'message.learningReview.findings.one' : 'message.learningReview.findings.other', { count: outcome.count, slug: outcome.slug })
+      : outcome.count === 0
+        ? t('message.learningReview.none')
+        : t(outcome.count === 1 ? 'message.learningReview.candidates.one' : 'message.learningReview.candidates.other', { count: outcome.count })
+  return (
+    <div className={css.turnErrorRow} role="status">
+      <StateDot state={outcome.kind === 'failed' ? 'error' : 'done'} className={css.turnErrorDot} />
+      <div className={css.turnErrorCopy}>
+        <span className={outcome.kind === 'failed' ? css.turnErrorTitle : css.maxTokensTitle}>{title}</span>
+        {outcome.kind === 'candidates' && outcome.count > 0 && (
+          <span className={css.turnErrorMessage}>{t('message.learningReview.hint')}</span>
+        )}
+      </div>
+    </div>
+  )
 })
 
 /** Explicit unknown-surface keyed Chat renderer. */

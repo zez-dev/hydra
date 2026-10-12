@@ -31,6 +31,8 @@ export async function mockServer(script: {
   events?: string[]
   body?: string
   delayMs?: number
+  /** Delay before the first event is written, the way a server that is still processing the prompt stays silent. */
+  firstByteDelayMs?: number
   headers?: Record<string, string>
 }[]): Promise<MockServer> {
   const paths: string[] = []
@@ -69,7 +71,8 @@ export async function mockServer(script: {
         if (behavior.delayMs === undefined) writeNext()
         else setTimeout(writeNext, behavior.delayMs)
       }
-      writeNext()
+      if (behavior.firstByteDelayMs === undefined) writeNext()
+      else setTimeout(writeNext, behavior.firstByteDelayMs)
     })
   })
   servers.push(server)

@@ -44,6 +44,8 @@ Choose it when one agent session should own the task list and whole-list updates
 | Field | Default | Meaning |
 |---|---|---|
 | `allowParallelInProgress` | required | Whether several todos may be `in_progress` at once; also selects the active-status clause of the model description |
+| `remindOpenTodos` | `true` | Whether open tasks come back as a task-state message when the model can no longer see its latest list (after a checkpoint) or the previous turn ended in an error, a cancel, or the output limit |
+| `maxOpenTodoContinuationsPerTurn` | `0` | How many times a turn that wrote the list and stops with open tasks is asked to continue or update it; off by default because a turn often stops with a plan on purpose |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-todo) is the exhaustive source for the accepted field.
 
@@ -91,7 +93,7 @@ The plugin is a function/namespace plugin: it exports `name` / `inject` / `apply
 
 ### Session projection
 
-When the composition mounts `ctx.sessionProjections` ([`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.md)), this package registers the `todos` unit on an injected child: the projection is the standing plan — the latest whole `todo/write` list, `null` before the first write, cleared when the next turn starts while `turn/end` keeps the finished checklist visible. The key merges into `SessionProjectionMap` here; carriers serve the value on the history tail page and the `session/projection` push frame. Compositions without the registry are unaffected; see [src/index.ts](src/index.ts) for the unit registration.
+When the composition mounts `ctx.sessionProjections` ([`@deepseek-ai/dsh-session-projection`](../../session/session-projection/README.md)), this package registers the `todos` unit on an injected child: the projection is the standing plan — the latest whole `todo/write` list, `null` before the first write, cleared when the next turn starts once every task is completed, and kept across turns while any task is open, while `turn/end` keeps the finished checklist visible. The key merges into `SessionProjectionMap` here; carriers serve the value on the history tail page and the `session/projection` push frame. Compositions without the registry are unaffected; see [src/index.ts](src/index.ts) for the unit registration.
 
 ### Durable-log invariant
 
@@ -149,6 +151,20 @@ Token growth scales with every full list the model submits, and those call argum
 #### KV Cache effect
 
 Append-only; newly visible content follows the reusable request prefix and does not invalidate existing KV-cache entries.
+
+### Open-task messages
+
+#### What the model sees
+
+Two `notice` user messages, each listing only the open tasks as `- [status] content`. A `<task_list>` block arrives before a request when the model can no longer see its latest list or the previous turn did not complete; it says to continue the in-progress task, or to update the list with `todo_write` when the request has moved on. When `maxOpenTodoContinuationsPerTurn` is above zero and a turn that wrote the list stops with tasks open, a continuation request asks it to continue, or to update the list and end its reply when it is waiting on the user.
+
+#### Token effect
+
+Conditional and small: one line per open task, only in the cases above, never while the latest list is visible after a completed turn.
+
+#### KV Cache effect
+
+Append-only; each message follows the existing history.
 
 ## Known Limitations and Deferred Work
 

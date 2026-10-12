@@ -35,8 +35,12 @@ import type {
   SessionCreateValue,
   SessionFollowFrame,
   SessionFollowRequest,
+  SessionDeleteRequest,
+  SessionDeleteValue,
   SessionForkRequest,
   SessionForkValue,
+  SessionRewindRequest,
+  SessionRewindValue,
   SessionListRequest,
   SessionListValue,
   SessionOpenWorkspacePathRequest,
@@ -92,6 +96,7 @@ export class SessionController extends TypertRemoteService {
     'fileUploads',
     'llm',
     'sessions',
+    'sessionPersistence',
     'sessionProjections',
     'sessionQuery',
     'typert',
@@ -335,6 +340,28 @@ export class SessionController extends TypertRemoteService {
   @Remote('fork')
   fork(request: SessionForkRequest): Promise<SessionForkValue> {
     return this.commands.fork(request)
+  }
+
+  /**
+   * Rewind: fork at the completed boundary before the turn holding `atSeq`,
+   * so the new Session ends right where that turn began.
+   * @param request - source Session and an event seq inside the turn to rewind to.
+   * @returns the new Session identity and the rewound turn's user prompt.
+   */
+  @Remote('rewind')
+  rewind(request: SessionRewindRequest): Promise<SessionRewindValue> {
+    return this.commands.rewind(request)
+  }
+
+  /**
+   * Delete one stored Session with the sub-agent Sessions it started; its forks
+   * are kept unless `cascade` deletes every descendant.
+   * @param request - Session identity and cascade choice.
+   * @returns every identity removed, descendants before their parents.
+   */
+  @Remote('delete')
+  delete(request: SessionDeleteRequest): Promise<SessionDeleteValue> {
+    return this.commands.delete(request)
   }
 
   /**

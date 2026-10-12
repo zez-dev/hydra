@@ -46,8 +46,16 @@ describe('web e2e: startup auto-selection', () => {
     // hitbox precedes the group, not the text span.
     const fishHitbox = headline.locator('xpath=../preceding-sibling::span[1]')
     const fish = fishHitbox.locator('svg')
-    expect(await fish.evaluate(node => getComputedStyle(node).color))
-      .toBe(await headline.evaluate(node => getComputedStyle(node).color))
+    // The mark carries the brand color, not the headline's ink.
+    const brand = await page.evaluate(() => {
+      const probe = document.createElement('span')
+      probe.style.color = 'var(--dsw-alias-brand-primary)'
+      document.body.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      return color
+    })
+    expect(await fish.evaluate(node => getComputedStyle(node).color)).toBe(brand)
     await fishHitbox.hover()
     expect(await fish.evaluate(node => getComputedStyle(node).animationName)).not.toBe('none')
     await page.evaluate(() => {

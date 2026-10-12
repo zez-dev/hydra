@@ -27,6 +27,15 @@ export interface WorkflowStartRequest {
   subagentProvider?: string
   /** Optional per-run total-child ceiling. */
   maxTotalAgents?: number
+  /**
+   * Resume a journaled run: `agent()` calls whose position and input hash
+   * still match a completed call of that run return its recorded result
+   * instead of spawning a child, and everything else runs for real. This is a
+   * NEW run that records `resumedFrom`; the resumed run is never rewritten.
+   * Requires a mounted journal Service Provider, and names a run the journal
+   * knows — an engine rejects the request otherwise.
+   */
+  resumeRunId?: WorkflowRunId
   /** The agent on whose behalf the run executes (parent of every child). */
   parent: Agent
   /** Cancels the run when aborted. */

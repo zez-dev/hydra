@@ -92,3 +92,8 @@
 - id: session-log-deepseek
   config:
     enabled: false
+
+# A replay holds no goal-evaluator verdict: the completion gate's own model
+# request would read past the recorded script and deny the completion.
+- id: goal-evaluator
+  disabled: true

@@ -29,15 +29,52 @@ function turnDataOf(node: ChatNode | undefined): ConversationLocationDataStore<C
   return location?.kind === 'turn' || location?.kind === 'step' ? location.turn.data : undefined
 }
 
-function turnOf(node: ChatNode | undefined): number | undefined {
+function turnOf(node: { readonly location?: ChatNode['location'] } | undefined): number | undefined {
   const location = node?.location
   return location?.kind === 'turn' || location?.kind === 'step' ? location.turn.turn : undefined
 }
 
+interface ChatNodePlaceholderProps {
+  readonly nodeKey: string
+  readonly useChatNode: ChatViewSlotProps['useChatNode']
+  /** The row's last measured height, or the estimate before it was ever measured. */
+  readonly height: number
+}
+
+/**
+ * A row outside the mounted window: it keeps the flow item's identity
+ * attributes (anchor, key, kind, turn) and its last measured height, so
+ * scroll anchoring, turn navigation, and paging see the same column while
+ * nothing of the node renders.
+ * @param props - the node key, its store hook, and the height to hold.
+ * @returns the placeholder element.
+ */
+export const ChatNodePlaceholder = memo(function ChatNodePlaceholder({ nodeKey, useChatNode, height }: ChatNodePlaceholderProps) {
+  const node = useChatNode(nodeKey)
+  return (
+    <div
+      className={css.flowItem}
+      data-chat-anchor-key={nodeKey}
+      data-chat-flow-key={nodeKey}
+      data-chat-flow-kind={node?.kind}
+      data-chat-turn={turnOf(node)}
+      data-chat-placeholder=""
+      // A row measured at no height was hidden (a folded process row): its
+      // placeholder hides too, so it takes neither height nor the column gap.
+      hidden={height === 0 || undefined}
+      style={{ height }}
+      aria-hidden="true"
+    >
+      {/* A child keeps the row out of the `:empty` gap rule, so it spaces like the row it stands for. */}
+      <span />
+    </div>
+  )
+})
+
 /** Subscribe, apply Turn-process visibility, and dispatch one stable Context key. */
 export const ChatNodeSeat = memo(function ChatNodeSeat({
   nodeKey, useChatNode, useChatNodeProcess, historyIncomplete, compactTranscript,
-  cwd, openFile, openSkill, inspectCall, forkAt,
+  cwd, openFile, openSkill, inspectCall, forkAt, rewindTo,
   loadImage, renderMessageImages, fileMentions, useStore, actions, renderSlot, t,
 }: ChatNodeSeatProps) {
   const node = useChatNode(nodeKey)
@@ -108,12 +145,13 @@ export const ChatNodeSeat = memo(function ChatNodeSeat({
       openSkill,
       inspectCall,
       forkAt,
+      rewindTo,
       loadImage,
       renderMessageImages,
       fileMentions,
       turnProcess,
     }, [
-    node, cwd, openFile, openSkill, inspectCall, forkAt,
+    node, cwd, openFile, openSkill, inspectCall, forkAt, rewindTo,
     loadImage, renderMessageImages, fileMentions, turnProcess,
   ])
   if (routedNode === undefined || owner === null) return null

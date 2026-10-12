@@ -75,7 +75,13 @@ describe('Sidebar chat registration', () => {
           },
         },
         phase: 'ready',
-        subagentsByParent: {},
+        subagentsByParent: {
+          [ADDRESS.parentSessionId]: {
+            state: 'ready',
+            parentAvailable: true,
+            entries: [{ kind: 'child', id: 'cold-child', mode: 'one-shot', label: 'Cold worker', activity: 'inactive', hasChildren: false }],
+          },
+        },
         jobsBySession: {},
       } as unknown as SessionListState),
       subscribe: () => () => {},
@@ -104,6 +110,7 @@ describe('Sidebar chat registration', () => {
     expect(definition?.canOpen?.(subagentChatAddress(ADDRESS))).toBe(true)
     expect(definition?.canOpen?.('dsh-resource://subagentchat/invalid')).toBe(false)
     expect(definition?.title(subagentChatAddress(ADDRESS))).toBe('Worker')
+    expect(definition?.title(subagentChatAddress({ ...ADDRESS, childSessionId: 'cold-child' as SessionId }))).toBe('Cold worker')
     expect(definition?.title(subagentChatAddress({ ...ADDRESS, childSessionId: 'unknown' as SessionId }))).toBe('unknown')
     expect(definition?.title('invalid')).toBe('Chat')
     expect(registrations.map(entry => entry.options.name)).toEqual([

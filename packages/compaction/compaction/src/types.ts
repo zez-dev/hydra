@@ -49,6 +49,8 @@ declare module '@deepseek-ai/dsh-session/types' {
       model: string
       /** The generation cap the summarize call sent, when one applied. */
       maxTokens?: number
+      /** The route's lowest reasoning effort the summarize call asked for, when the route offers one. */
+      reasoningEffort?: string
       /** Provider-reported token usage for the summarization request, when emitted. */
       usage?: TokenUsage
     } & (
@@ -70,6 +72,29 @@ declare module '@deepseek-ai/dsh-session/types' {
      * matches `compaction/start`; `error` records an unsuccessful attempt.
      */
     'compaction/end': { compactionId: CompactionId; sourceCommandId?: CommandId; turn: number | null; error?: string }
+    /**
+     * The request about to be sent as the backend priced it, and where the
+     * next step condenses — log-only, appended by the backend at request time,
+     * before that request's `request/header`, once per distinct measurement
+     * (a retried request repeats the facts and writes nothing). The occupancy
+     * meter reads it, so the figure a reader sees is the one the backend acts
+     * on. `pricedTokens` is the request priced at the route's density
+     * (`estimatedTokens × density`, never below the meter's anchored total)
+     * and includes `pendingTokens`, the heuristic size of the surface content
+     * the request admits before it is in the log (the user batch and any
+     * system prompt text not logged yet), plus tool schemas beyond the logged
+     * header's, which land in the header rather than the surface; `thresholdTokens` is the priced
+     * size at which the next step-boundary check condenses.
+     */
+    'compaction/pressure': {
+      estimatedTokens: number
+      pendingTokens: number
+      pricedTokens: number
+      density: number
+      contextWindow: number
+      outputCap: number
+      thresholdTokens: number
+    }
     /**
      * Shadow price of one model-free prune replacement — log-only, no
      * surfaceOp. The shared shadow-price protocol: a surface `replace` event

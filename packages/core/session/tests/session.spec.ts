@@ -1232,6 +1232,29 @@ describe('Session', () => {
     ])
     expect(marked.snapshotEvents()[0]?.ignorable).toBe(true)
   })
+
+  it('marks an appended log-only event ignorable only when the writer asks for it', () => {
+    const session = Session.create(SessionId('append-ignorable'))
+    const required = session.append('turn/start', { turn: 1 })
+    const skippable = session.append('turn/end', { turn: 1, reason: { kind: 'completed' } }, { ignorable: true })
+    expect(required.ignorable).toBeUndefined()
+    expect(skippable.ignorable).toBe(true)
+    // The marker reaches the log a reader restores from, not just the return value.
+    expect(session.snapshotEvents().map(event => event.ignorable)).toEqual([undefined, true])
+  })
+
+  it('refuses to mark a surface event ignorable, at the type and at the log', () => {
+    const session = Session.create(SessionId('surface-not-ignorable'))
+    // @ts-expect-error a surface event's options cannot carry `ignorable` as a literal
+    void (() => session.append('user/message', {} as never, { surfaceOp: 'append', ignorable: true }))
+    const wide: { surfaceOp: 'append'; ignorable: true } = { surfaceOp: 'append', ignorable: true }
+    // @ts-expect-error nor through a wider non-literal value, which excess-property checks alone would let through
+    void (() => session.append('user/message', {} as never, wide))
+    // A cast defeats the type; the log itself still refuses before anything is validated or stored.
+    expect(() => session.append('user/message', {} as never, { surfaceOp: 'append', ignorable: true } as never))
+      .toThrow(/cannot be marked ignorable/)
+    expect(session.snapshotEvents()).toHaveLength(0)
+  })
 })
 
 

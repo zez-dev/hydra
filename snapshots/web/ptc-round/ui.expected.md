@@ -17,6 +17,8 @@
 - text: "Using ONE run_code program: run bash `echo CODE_ROUND_OK`, then read the file missing.txt catching its error in the program. Return an object with both outcomes. Then reply DONE and stop. {{clock}}"
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "1 tool call" [expanded]:
   - text: 1 tool call
   - img
@@ -25,7 +27,6 @@
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - 'button "Think The user wants me to write a single `run_code` program that:"':
-  - img
   - img
   - text: "Think The user wants me to write a single `run_code` program that:"
 - button "Code Run bash echo and catch missing file read":
@@ -44,7 +45,6 @@
   - img
   - text: "Read Error: cannot read \"{{cwd}}/workspace/missing.txt\": not found"
 - button "Think The program ran successfully. Let me now reply DONE as instructed.":
-  - img
   - img
   - text: Think The program ran successfully. Let me now reply DONE as instructed.
 - paragraph: DONE

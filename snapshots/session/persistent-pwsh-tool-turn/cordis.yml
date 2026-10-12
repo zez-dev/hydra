@@ -65,6 +65,21 @@
 - id: tool-goal
   name: '@deepseek-ai/dsh-tool-goal'
   disabled: true
+- id: goal-evaluator
+  name: '@deepseek-ai/dsh-goal-evaluator'
+  disabled: true
+
+- id: research
+  name: '@deepseek-ai/dsh-research'
+  disabled: true
+
+- id: tool-research
+  name: '@deepseek-ai/dsh-research/tools'
+  disabled: true
+
+- id: digest
+  name: '@deepseek-ai/dsh-digest'
+  disabled: true
 
 - id: skill
   name: '@deepseek-ai/dsh-skill'
@@ -76,6 +91,9 @@
 
 - id: tool-skill
   name: '@deepseek-ai/dsh-tool-skill'
+  disabled: true
+- id: skill-lock
+  name: '@deepseek-ai/dsh-skill-lock'
   disabled: true
 
 - id: tool-bash

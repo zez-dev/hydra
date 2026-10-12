@@ -1,17 +1,18 @@
 // An enclosing `[data-conversation-scroll]` owns scrolling when present;
 // otherwise this view owns it. Each row subscribes to one stable node key.
 
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   ConversationTimelineSnapshot, RenderMessageImages,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionSeq } from '@deepseek-ai/dsh-session/types'
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
-import { Button, IconChevronDownOutline14, MarkdownDelegateProvider, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, HydraLogo, IconChevronDownOutline14, MarkdownDelegateProvider, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps, OpenFileOptions } from '../contract/slots.ts'
 import type { ChatSnapshot } from '../contract/snapshot.ts'
 import { PendingSteeringBubble, PendingSubmissionBubble } from './MessageItem.tsx'
-import { ChatNodeSeat } from './ChatNodeSeat.tsx'
+import { ChatNodeList } from './ChatNodeList.tsx'
+import { scrollerOf } from './flow-window.ts'
 import { TurnNavigator } from './TurnNavigator.tsx'
 import { mergeTurnRailItems, type TurnRailItem } from './turn-rail-items.ts'
 import { formatRunDuration } from './message-chrome.ts'
@@ -19,11 +20,6 @@ import css from './ChatView.module.css'
 
 const FOLLOW_THRESHOLD = 24
 const SCROLL_SAMPLE_INTERVAL_MS = 500
-
-/** Active column host when present; otherwise the view-local scroller. */
-function scrollerOf(from: HTMLElement): HTMLElement {
-  return (from.closest('[data-conversation-scroll]')) ?? from
-}
 
 /** Browser shrink clamps and recorded writes do not transfer scroll ownership. */
 function readerMovedScroll(top: number, floor: number, observedTop: number): boolean {
@@ -191,7 +187,8 @@ function TurnStatus({ startTime, t }: {
   const showClock = elapsedMs >= 15_000
   return (
     <div className={css.turnStatus} role="status" aria-live="polite">
-      {t('chat.deepDiving')}
+      <HydraLogo size={18} className={css.turnStatusMark} />
+      <span className={css.turnStatusText}>{t('chat.dragonThinking')}</span>
       {showClock && (
         <span className={css.turnStatusClock} aria-hidden>
           {formatRunDuration(elapsedMs, t)}
@@ -201,23 +198,13 @@ function TurnStatus({ startTime, t }: {
   )
 }
 
-type ChatNodeListProps = Omit<ComponentProps<typeof ChatNodeSeat>, 'nodeKey'> & {
-  readonly order: readonly string[]
-}
-
-const ChatNodeList = memo(function ChatNodeList({ order, ...seatProps }: ChatNodeListProps) {
-  return order.map(nodeKey => (
-    <ChatNodeSeat key={nodeKey} nodeKey={nodeKey} {...seatProps} />
-  ))
-})
-
 /**
  * The chat view slot entry: pure component over the composed props; each
  * ordered business Node crosses the keyed renderer seat.
  */
 export function ChatView({
   useSession, useChat, useChatNode, useChatNodeProcess, useSessions, useStore, actions, renderSlot,
-  sessionId, openFile, openSkill, openExternalLink, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, fileMentions,
+  sessionId, openFile, openSkill, openExternalLink, loadOlder, loadThrough, loadImage, openView, chatScroll, forkAt, rewindTo, fileMentions,
   useTranscriptView, useProjection, t,
 }: ChatViewSlotProps) {
   const order = useChat(s => s.order)
@@ -315,6 +302,8 @@ export function ChatView({
   )
   /** Last position delivered or written on the main thread. */
   const observedTopRef = useRef(0)
+  // The window's own scroll corrections record themselves here like every other programmatic write.
+  const flowLedger = useMemo(() => ({ observedTop: observedTopRef, atBottom: atBottomRef }), [])
   /** Paging anchor: semantic row/position at click, updated by reader scrolls
    * while the request is pending and restored after the prepend lands. */
   const anchorRef = useRef<PagingAnchor | null>(null)
@@ -785,6 +774,8 @@ export function ChatView({
           <MarkdownDelegateProvider openExternalLink={openExternalLink} openFile={requestOpenFile}>
             <ChatNodeList
               order={order}
+              listRef={columnRef}
+              ledger={flowLedger}
               useChatNode={useChatNode}
               useChatNodeProcess={useChatNodeProcess}
               historyIncomplete={hasMore}
@@ -796,6 +787,7 @@ export function ChatView({
               openSkill={openSkill}
               inspectCall={inspectCall}
               forkAt={forkAt}
+              rewindTo={rewindTo}
               loadImage={loadImage}
               renderMessageImages={renderMessageImages}
               fileMentions={fileMentions}

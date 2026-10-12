@@ -12,6 +12,7 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
+  type SessionDeleteResult,
 } from '@deepseek-ai/dsh-session-persistence'
 import type {
   SessionAccess,
@@ -122,6 +123,7 @@ class TestHandle implements SessionHandle {
 }
 
 class TestPersistence extends SessionPersistence {
+  delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
   static entries = new Map<SessionIdType, { meta: SessionHeader; events: SessionEvent[] }>()
   static revisions = new Map<SessionIdType, number>()
   static nextRevision = 0

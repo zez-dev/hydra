@@ -72,6 +72,7 @@ The seam is built on one split and three commitments:
 - **Session and LLM vocabulary are part of the contract.** The operations act on a `Session` and the summary uses `ContentBlock`, so the Service Definition depends on `dsh-session` and `dsh-llm` despite the general Cordis-only guidance — a deliberate deviation recorded in the [compaction capability-seam Agent Note](../../../.agents/notes/implemented/feature/2026-06-18-compaction-capability-seam.md).
 - **The log-recorded bracket is the lock.** `compaction/start` is appended before summarization yields and `compaction/end` releases; every failure makes exactly one close attempt, and a failed close leaves the unmatched start as the intentional busy signal.
 - **The surface is mutated exactly once.** The summary rides on a `user/message` replacement inside the bracket; all `compaction/*` events stay log-only.
+- **Every priced request is logged.** A backend appends `compaction/pressure` (log-only, ignorable) before the `request/header` of each request it priced: the heuristic size, the pending batch counted ahead, the priced total at the route's density, the window, the output cap the request asks for, and the priced size at which the next step condenses. The occupancy meter reads it, so the figure a reader sees is the one the backend acted on; a retried request repeats the facts and writes nothing.
 
 ### Service API
 

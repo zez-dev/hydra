@@ -6,8 +6,9 @@
  * `.agents/notes/archived/process/2026-07-02-tool-schema-catalog.md`.
  */
 
-import { globSync, readFileSync, writeFileSync } from 'node:fs'
-import { basename, resolve } from 'node:path'
+import { globSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
@@ -71,6 +72,16 @@ import McpResources from '@deepseek-ai/dsh-mcp-resources'
 import * as ToolSubagent from '@deepseek-ai/dsh-tool-subagent'
 import { registerListSubagentModels } from '../packages/subagent/tool-subagent/src/list-models.ts'
 import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
+import CommandRuntime from '@deepseek-ai/dsh-commands'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as StorageJson from '@deepseek-ai/dsh-storage-json'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
+import * as Memory from '@deepseek-ai/dsh-memory'
+import * as MemoryTools from '@deepseek-ai/dsh-memory/tools'
+import * as Knowledge from '@deepseek-ai/dsh-knowledge'
+import * as KnowledgeTools from '@deepseek-ai/dsh-knowledge/tools'
+import MarketDataRuntime from '@deepseek-ai/dsh-market-data'
+import * as ToolMarket from '@deepseek-ai/dsh-tool-market'
 import WorkflowEngine from '@deepseek-ai/dsh-workflow'
 import type { WorkflowRun, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
@@ -613,6 +624,39 @@ const TOOL_PACKAGES: ToolPackage[] = [
       'All nine tools are scoped to implicit Team Leads and durable teammates. The shipped dsh-base bundle keeps the package disabled; the documented Agent Teams profile patch enables it while disabling the legacy continuable-child control names.',
   },
   {
+    pkg: '@deepseek-ai/dsh-memory',
+    dir: 'memory',
+    source: 'packages/learning/memory/src/tools.ts',
+    requires: ['ctx.tools', 'ctx.memory (the store over dsh-storage-domain)', 'ctx.commands', 'ctx.agents'],
+    writes: ['tool/call', 'tool/result', 'memory store rows, which the recall user/message of later steps renders'],
+    async mount(ctx) {
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(CommandRuntime)
+      await ctx.plugin(Storage)
+      await ctx.plugin(StorageJson, { root: mkdtempSync(join(tmpdir(), 'dsh-tool-catalog-memory-')) })
+      await ctx.plugin(StorageDomain, { backend: 'json' })
+      await ctx.plugin(Memory, { maxRecallBytes: 6000 })
+      await ctx.plugin(MemoryTools)
+    },
+    note:
+      'The memory tool ships as the package\'s `./tools` entry, mounted apart from the `memory` service, so a composition can hide the tool and keep recall.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-knowledge',
+    dir: 'knowledge',
+    source: 'packages/learning/knowledge/src/tools.ts',
+    requires: ['ctx.tools', 'ctx.knowledge (the index over the configured collections)', 'ctx.systemPrompt', 'ctx.commands'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(CommandRuntime)
+      await ctx.plugin(Knowledge, { path: ':memory:', collections: [{ name: 'docs', root: mkdtempSync(join(tmpdir(), 'dsh-tool-catalog-knowledge-')) }], indexOnStart: false })
+      await ctx.plugin(KnowledgeTools)
+    },
+    note:
+      'The knowledge tools ship as the package\'s `./tools` entry and register nothing until a collection is configured; the `collection` enum lists the configured collection names.',
+  },
+  {
     pkg: '@deepseek-ai/dsh-tool-todo',
     dir: 'tool-todo',
     source: 'packages/todo/tool-todo/src/index.ts',
@@ -653,6 +697,23 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'web_search and web_fetch keep provider selection behind ctx.web so model-visible schemas stay stable across backend swaps.',
+  },
+  {
+    pkg: '@deepseek-ai/dsh-tool-market',
+    dir: 'tool-market',
+    source: 'packages/finance/tool-market/src/index.ts',
+    requires: ['ctx.tools', 'ctx.marketData', 'ctx.commands'],
+    writes: ['tool/call', 'tool/result'],
+    async mount(ctx) {
+      await ctx.plugin(AgentRegistry)
+      await ctx.plugin(CommandRuntime)
+      // The harvest registers no provider and makes no request, so the
+      // required SEC contact is a placeholder here.
+      await ctx.plugin(MarketDataRuntime, { secUserAgent: 'catalog-placeholder', builtinProvider: false })
+      await ctx.plugin(ToolMarket)
+    },
+    note:
+      'Every market tool description ends by telling the model the data is historical research material, not investment advice.',
   },
 ]
 

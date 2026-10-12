@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Run a plain-JavaScript orchestration script that fans work out to subagents and returns the script's final JSON value. Scripts can use `agent()`, `parallel()`, `pipeline()`, `phase()`, and `log()`; models normally access them through the `workflow` tool. Each run belongs to its caller, attributes every child to the invoking agent, resolves failures and cancellation without rejecting its result, and awaits script and child cleanup during disposal. The caller must supply an execution engine, allowing the isolation strategy to change without altering visible behavior.
+Run a plain-JavaScript orchestration script that fans work out to subagents and returns the script's final JSON value. Scripts can use `agent()`, `parallel()`, `pipeline()`, `phase()`, and `log()`; models normally access them through the `workflow` tool. Each run belongs to its caller, attributes every child to the invoking agent, resolves failures and cancellation without rejecting its result, and awaits script and child cleanup during disposal. The caller must supply an execution engine, allowing the isolation strategy to change without altering visible behavior. The seam also defines `ctx.workflowJournal`, the durable record a run is written to and `resumeRunId` reads back.
 
 ## Table of Contents
 
@@ -77,6 +77,8 @@ The package separates the script, run, result, and event contracts from executio
 | [`src/index.ts`](src/index.ts) | Service definition, `workflow/*` event declarations, `WorkflowError` and its fatal flag |
 | [`src/types.ts`](src/types.ts) | Browser-safe vocabulary: `WorkflowMeta`, `WorkflowResult`, run and agent event info |
 | [`src/runtime-types.ts`](src/runtime-types.ts) | Host-only `WorkflowStartRequest` and `WorkflowRun` handles |
+| [`src/journal-types.ts`](src/journal-types.ts) | Durable run vocabulary: `WorkflowRunRecord`, `JournalCall`, `ResumePlan`, `WorkflowJournalService` |
+| [`src/hash.ts`](src/hash.ts) | `callKeyHash` and `scriptHash`, which decide what a resumed run may replay |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: event pairing and identity checks |
 
 ### Lifecycle and ownership

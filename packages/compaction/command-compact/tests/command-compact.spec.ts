@@ -12,6 +12,7 @@ import {
   type CompactionTrigger,
   type ManualCompactAgentContext,
 } from '@deepseek-ai/dsh-compaction'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError } from '@deepseek-ai/dsh-llm'
 import { Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import * as commandCompact from '@deepseek-ai/dsh-command-compact'
 
@@ -209,7 +210,7 @@ describe('/compact human command', () => {
     ['busy', 'Compaction is unavailable because this process has an active compaction, or the agent is not idle.'],
     ['cancelled', 'Compaction cancelled.'],
     ['changed', 'The history selected for compaction changed before it could be replaced. The attempt is recorded in the session log.'],
-    ['summary', 'Compaction could not produce a useful summary. The attempt is recorded in the session log.'],
+    ['summary', 'Compaction could not produce a useful summary: backend detail. The attempt is recorded in the session log.'],
     ['commit', 'Compaction did not finish cleanly; some session history may have changed. Inspect the current session state before retrying.'],
     ['persistence', 'Compaction finished, but the session could not be saved.'],
   ] as const)('maps expected %s failures to direct errors', async (code, text) => {
@@ -218,6 +219,58 @@ describe('/compact human command', () => {
     const execution = await run(test)
     expect(execution.result).toEqual({ kind: 'error', text })
     expect(execution.commandId).toBe(expectLastLifecycle(test, '', execution.result))
+  })
+
+  it('names the reason a summary was refused, from the backend cause', async () => {
+    const tooBig = await harness()
+    tooBig.compact.failure = new ManualCompactionError('summary', 'manual compaction could not produce a smaller summary', {
+      cause: new Error('summary is not smaller than the shadowed content (507 estimated framed tokens >= 193)'),
+    })
+    expect((await run(tooBig)).result).toEqual({
+      kind: 'error',
+      text: 'Compaction could not produce a useful summary: the checkpoint (507 tokens) would not be smaller than the history it replaces (193 tokens); '
+        + 'condense again once there is more history. The attempt is recorded in the session log.',
+    })
+
+    const refused = await harness()
+    refused.compact.failure = new ManualCompactionError('summary', 'manual compaction could not produce a smaller summary', {
+      cause: new LlmError('maximum context length is 2000 tokens', CONTEXT_WINDOW_EXCEEDED_CODE),
+      facts: { contextWindow: 2000, requestCap: 100, estimatedTokens: 1500, density: 1.5 },
+    })
+    expect((await run(refused)).result).toEqual({
+      kind: 'error',
+      text: 'Compaction could not produce a useful summary: the provider refused the summarization request as over its window, '
+        + 'and three retries on smaller ranges were refused too, so the provider counts more tokens than the configured '
+        + 'contextWindow allows; lower contextWindow for this model in settings to what the provider accepts '
+        + '(contextWindow 2000, requestCap 100, estimatedTokens 1500, density 1.5). '
+        + 'The attempt is recorded in the session log.',
+    })
+
+    // A refusal wrapped by another failure is still a refusal, and empty facts add no parenthetical.
+    const wrapped = await harness()
+    wrapped.compact.failure = new ManualCompactionError('summary', 'manual compaction could not produce a smaller summary', {
+      cause: new LlmError('request failed', 'SERVER', { cause: new LlmError('maximum context length is 2000 tokens', CONTEXT_WINDOW_EXCEEDED_CODE) }),
+      facts: {},
+    })
+    expect((await run(wrapped)).result).toEqual({
+      kind: 'error',
+      text: 'Compaction could not produce a useful summary: the provider refused the summarization request as over its window, '
+        + 'and three retries on smaller ranges were refused too, so the provider counts more tokens than the configured '
+        + 'contextWindow allows; lower contextWindow for this model in settings to what the provider accepts. '
+        + 'The attempt is recorded in the session log.',
+    })
+
+    const cut = await harness()
+    cut.compact.failure = new ManualCompactionError('summary', 'manual compaction could not produce a smaller summary', {
+      cause: new Error('summarization truncated at the token cap (incomplete checkpoint)'),
+    })
+    expect((await run(cut)).result).toEqual({
+      kind: 'error',
+      text: 'Compaction could not produce a useful summary: the summary was cut at its output cap even after raising it to the '
+        + 'window share and condensing smaller ranges; a model that thinks before it answers spends part of the cap on that, '
+        + 'so raise summaryWindowRatio on dsh-compaction-basic or route summarization to a model that answers without thinking. '
+        + 'The attempt is recorded in the session log.',
+    })
   })
 
   it('preserves cancellation and unexpected implementation failures', async () => {

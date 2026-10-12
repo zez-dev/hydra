@@ -172,7 +172,9 @@ describe('TokenMeter pricing', () => {
       logRevision: 0,
       baseline: { kind: 'none', tokens: 0 },
       surfaceDeltaTokens: 0,
+      density: 1,
       totalTokens: 0,
+      estimatedTokens: 0,
       surfaceTokens: 0,
       nodes: [],
     })
@@ -310,7 +312,7 @@ describe('replay anchors and surface folds', () => {
     const result = service.measure(session)
     expect(result.baseline).toMatchObject({ kind: 'usage', tokens: 34, usage: USAGE })
     expect(result.surfaceDeltaTokens).toBeGreaterThan(0)
-    expect(result.totalTokens).toBe(34 + result.surfaceDeltaTokens)
+    expect(result.totalTokens).toBe(34 + Math.round(result.surfaceDeltaTokens * result.density))
     expect(() => {
       ;((result.baseline as { usage: { inputTokens: number } }).usage.inputTokens) = 1
     }).toThrow(TypeError)
@@ -384,7 +386,7 @@ describe('replay anchors and surface folds', () => {
     expect(switchedBack.surfaceDeltaTokens).toBe(0)
   })
 
-  it('invalidates usage for any canonical envelope change or explicit override', () => {
+  it('invalidates usage for a route or tool change and keeps it across cap and sampling changes', () => {
     const service = meter()
     const session = Session.create(SessionId('envelope'))
     const anchoredHeader = header('deepseek-v4-flash')
@@ -392,12 +394,68 @@ describe('replay anchors and surface folds', () => {
     expect(service.measure(session, { ...anchoredHeader, tools: [] }).baseline.kind).toBe('usage')
     expect(service.measure(session, header('deepseek-v4-pro')).baseline.kind)
       .toBe('estimated')
-    expect(service.measure(session, {
-      ...anchoredHeader,
-      config: { ...anchoredHeader.config, temperature: 0.2 },
-    }).baseline.kind).toBe('estimated')
     expect(service.measure(session, { ...anchoredHeader, tools: [READ_TOOL] }).baseline.kind)
       .toBe('estimated')
+    // The output cap and sampling settings do not change what the prompt costs,
+    // so a request that shrinks its cap or changes temperature keeps the anchor.
+    expect(service.measure(session, {
+      ...anchoredHeader,
+      config: { ...anchoredHeader.config, temperature: 0.2, maxTokens: 100 },
+    }).baseline.kind).toBe('usage')
+  })
+
+  it('scales heuristic additions by the density the anchor observed on this route', () => {
+    const service = meter()
+    const session = Session.create(SessionId('density'))
+    const anchoredHeader = header('deepseek-v4-flash')
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'before' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    appendSuccessfulCall(session, anchoredHeader, { providerText: 'short', usage: USAGE })
+    const anchored = service.measure(session)
+    // The provider counted more than the heuristic did for the same request.
+    const estimated = service.measure(session, header('deepseek-v4-pro')).baseline.tokens
+    expect(anchored.baseline.kind).toBe('usage')
+    expect(anchored.density).toBeCloseTo(34 / estimated, 6)
+    expect(anchored.density).toBeGreaterThan(1)
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'a later message whose heuristic price is scaled by the observed density' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const later = service.measure(session)
+    expect(later.surfaceDeltaTokens).toBeGreaterThan(0)
+    expect(later.totalTokens).toBe(34 + Math.round(later.surfaceDeltaTokens * later.density))
+    expect(later.totalTokens).toBeGreaterThan(34 + later.surfaceDeltaTokens)
+    // Without a usage anchor the density is one.
+    expect(service.measure(session, header('deepseek-v4-pro')).density).toBe(1)
+  })
+
+  it('keeps the densest of the recent anchors on one route so a lighter request does not relax the guess', () => {
+    const service = meter()
+    const session = Session.create(SessionId('density-peak'))
+    const anchoredHeader = header('deepseek-v4-flash')
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'before' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    appendSuccessfulCall(session, anchoredHeader, { providerText: 'short', usage: USAGE })
+    const dense = service.measure(session).density
+    expect(dense).toBeGreaterThan(1)
+    // A later call the provider counts exactly as the heuristic does.
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'a later message' }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    const counted = service.measure(session).estimatedTokens + 20
+    appendSuccessfulCall(session, anchoredHeader, { providerText: 'ok', usage: { inputTokens: counted, outputTokens: 3 } })
+    const later = service.measure(session)
+    expect(later.baseline.kind).toBe('usage')
+    expect(later.density).toBeCloseTo(dense, 6)
+    expect(later.estimatedTokens).toBeGreaterThan(0)
+    // Another route starts over from its own anchor.
+    appendSuccessfulCall(session, header('deepseek-v4-pro'), { providerText: 'ok', usage: { inputTokens: counted, outputTokens: 3 } })
+    expect(service.measure(session).density).toBeLessThan(dense)
   })
 
   it('folds the latest full header snapshot into the effective envelope', () => {

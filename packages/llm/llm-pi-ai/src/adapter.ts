@@ -56,7 +56,7 @@ import type {
   StreamChunk,
 } from '@deepseek-ai/dsh-llm'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { idleWatchdog, timeoutOf } from '@deepseek-ai/dsh-timeout'
+import { idleWatchdog, MAX_TIMER_DELAY_MS, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import type { ResolvedPiAiProviderProfile } from './config.ts'
 import { toPiContext } from './context.ts'
 import { createModels, getSupportedThinkingLevels } from './models.ts'
@@ -217,6 +217,13 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  * restart; model descriptors come from the collection those profiles built.
  */
 export class PiAiAdapter extends LlmAdapter {
+  /** Prompt tokens per second measured per `provider/model` from completed streams: the first-byte budget's rate. */
+  private readonly promptRates = new Map<string, number>()
+  /** Routes whose server refused the reasoning fields this adapter adds; they are not sent there again in this process. */
+  private readonly reasoningFieldsRefused = new Set<string>()
+  /** Routes whose server refused a level above `high`; such a level is sent there as `high` for the rest of the process. */
+  private readonly levelsAboveHighRefused = new Set<string>()
+
   private snapshot: PiAiSnapshot | undefined
 
   constructor(private readonly config: PiAiAdapterOptions) {
@@ -323,6 +330,22 @@ export class PiAiAdapter extends LlmAdapter {
     })
   }
 
+  /**
+   * Remember how fast a route processed a prompt: its reported input tokens
+   * over the time to its first chunk, averaged with the previous measurement.
+   * @param routeKey - `provider/model`.
+   * @param startedAt - when the request started.
+   * @param firstChunkAt - when the first chunk arrived, if one did.
+   * @param inputTokens - the input tokens the provider reported, if it did.
+   */
+  private learnPromptRate(routeKey: string, startedAt: number, firstChunkAt: number | undefined, inputTokens: number | undefined): void {
+    if (firstChunkAt === undefined || inputTokens === undefined || inputTokens <= 0) return
+    const seconds = Math.max(0.001, (firstChunkAt - startedAt) / 1000)
+    const rate = inputTokens / seconds
+    const previous = this.promptRates.get(routeKey)
+    this.promptRates.set(routeKey, previous === undefined ? rate : (previous + rate) / 2)
+  }
+
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     return this.streamWithSnapshot(options, this.current())
   }
@@ -345,6 +368,14 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
+    const routeKey = `${options.provider}/${options.model}`
+    // A model with automatic reasoning levels reaches pi-ai as a non-reasoning
+    // one, so pi-ai adds no reasoning field of its own; a chosen level is
+    // added below, and no chosen level adds nothing, leaving the server's default.
+    const auto = profile.autoReasoningModels.has(model.id)
+    const piModel = auto ? { ...model, reasoning: false } : model
+    let injected = auto && reasoning !== undefined && !this.reasoningFieldsRefused.has(routeKey) ? reasoning : undefined
+    if (injected !== undefined && isAboveHigh(injected) && this.levelsAboveHighRefused.has(routeKey)) injected = 'high'
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
     const consumer = new AbortController()
@@ -352,7 +383,18 @@ export class PiAiAdapter extends LlmAdapter {
       ? consumer.signal
       : AbortSignal.any([options.signal, consumer.signal])
     const streamIdleTimeoutMs = profile.streamIdleTimeoutMs
-    using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT')
+    // A server is silent while it processes the prompt, so the first byte
+    // gets its own budget from the prompt's size and the route's pace: the
+    // rate a completed stream on this route measured, else the configured
+    // floor. Later gaps are held to the idle interval.
+    const promptTokens = estimatePromptTokens(options)
+    const promptRate = this.promptRates.get(routeKey) ?? profile.minPromptTokensPerSecond
+    const firstByteBudgetMs = Math.ceil((promptTokens / promptRate) * 2 * 1000)
+    const firstByteTimeoutMs = Math.min(MAX_TIMER_DELAY_MS, Math.max(streamIdleTimeoutMs, firstByteBudgetMs))
+    using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT', firstByteTimeoutMs)
+    const startedAt = Date.now()
+    let firstChunkAt: number | undefined
+    let inputTokens: number | undefined
 
     try {
       const containsImage = options.messages.some(message => contentHasImage(message.content))
@@ -377,17 +419,25 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade)
-      const events = snapshot.models.streamSimple(model, context, {
-        ...profileOptions(profile, reasoning, apiKey),
-        ...options.temperature === undefined ? {} : { temperature: options.temperature },
-        ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
-        ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
-        signal: watchdog.signal,
-        // Profile headers are deployment-owned; attribution names are
-        // Harness-owned and therefore win collisions.
-        headers: requestHeaders(profile.headers),
-      })
-      const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
+      const open = (level: ModelThinkingLevel | undefined): AsyncIterator<StreamChunk> => toStreamChunks(
+        snapshot.models.streamSimple(piModel, context, {
+          ...profileOptions(profile, auto ? undefined : reasoning, apiKey),
+          ...options.temperature === undefined ? {} : { temperature: options.temperature },
+          ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
+          ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
+          signal: watchdog.signal,
+          // Profile headers are deployment-owned; attribution names are
+          // Harness-owned and therefore win collisions.
+          headers: requestHeaders(profile.headers),
+          ...level === undefined ? {} : { onPayload: (payload: unknown) => withReasoningFields(payload, level) },
+        }),
+        model.contextWindow,
+        options.signal,
+        model.id,
+      )[Symbol.asyncIterator]()
+      let iterator = open(injected)
+      /** Usage chunks held while a refusal of the added fields may still follow. */
+      const held: Extract<StreamChunk, { type: 'usage' }>[] = []
       let exhausted = false
       try {
         while (true) {
@@ -395,24 +445,72 @@ export class PiAiAdapter extends LlmAdapter {
           const timeout = timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')
           if (timeout !== undefined) throw timeout
           if (result.done) {
+            /* v8 ignore next 4 -- pi-ai closes every stream with a finish, so a usage chunk is never held at its end. */
+            for (const chunk of held.splice(0)) {
+              inputTokens = chunk.usage.inputTokens
+              yield chunk
+            }
             exhausted = true
+            this.learnPromptRate(routeKey, startedAt, firstChunkAt, inputTokens)
             return
           }
+          // A server that refuses the added reasoning fields answers with an
+          // error before any content (after a usage chunk, which is held back
+          // meanwhile): remember the route and reopen the same request without
+          // them. A refused level above `high` is first retried as `high`, since
+          // a server that validates the level names it in the same refusal.
+          if (injected !== undefined) {
+            if (result.value.type === 'usage') {
+              held.push(result.value)
+              continue
+            }
+            if (refusesReasoningFields(result.value)) {
+              if (isAboveHigh(injected)) {
+                this.levelsAboveHighRefused.add(routeKey)
+                injected = 'high'
+              } else {
+                this.reasoningFieldsRefused.add(routeKey)
+                injected = undefined
+              }
+              held.length = 0
+              try {
+                await iterator.return?.(undefined)
+              } catch (_refusedStreamTeardown) {
+                // The refused stream already ended; its teardown cannot change the retry.
+              }
+              iterator = open(injected)
+              // The reopened request is prepared from scratch, so its first byte gets the prompt's budget again.
+              watchdog.restart()
+              continue
+            }
+            injected = undefined
+            for (const chunk of held.splice(0)) {
+              firstChunkAt ??= Date.now()
+              inputTokens = chunk.usage.inputTokens
+              yield chunk
+            }
+          }
+          firstChunkAt ??= Date.now()
+          if (result.value.type === 'usage') inputTokens = result.value.usage.inputTokens
           yield result.value
         }
       } finally {
         if (!exhausted) {
           consumer.abort('pi-ai stream consumer stopped')
           try {
-            await iterator.return(undefined)
+            await iterator.return?.(undefined)
           } catch (_abortedSdkTeardown) {
             // The stable signal already owns SDK termination; return-time abort cannot add an outcome.
           }
         }
       }
     } catch (error: unknown) {
-      if (timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT') !== undefined) {
-        throw new LlmError(`pi-ai stream idle timeout after ${streamIdleTimeoutMs}ms`, 'TIMEOUT', { cause: error })
+      const expired = timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')
+      if (expired !== undefined) {
+        const message = firstChunkAt === undefined
+          ? `pi-ai first byte timeout after ${expired.timeoutMs}ms for a prompt of about ${promptTokens} tokens`
+          : `pi-ai stream idle timeout after ${expired.timeoutMs}ms`
+        throw new LlmError(message, 'TIMEOUT', { cause: error })
       }
       if (options.signal?.aborted) {
         throw new LlmError('pi-ai request aborted by caller', 'ABORTED', { cause: error })
@@ -422,4 +520,66 @@ export class PiAiAdapter extends LlmAdapter {
       consumer.abort('pi-ai stream consumer stopped')
     }
   }
+}
+
+/**
+ * Add a chosen reasoning level to an OpenAI-compatible request body in the
+ * spellings the common servers read: `chat_template_kwargs` for templates
+ * that switch thinking (`enable_thinking`, `thinking`) or take an effort
+ * (`reasoning_effort`), and the top-level `reasoning_effort`. `off` disables
+ * thinking where the template allows and asks for the lowest effort where it
+ * cannot.
+ * @param payload - the body pi-ai built.
+ * @param level - the chosen level.
+ * @returns the body with the fields added.
+ */
+function withReasoningFields(payload: unknown, level: ModelThinkingLevel): unknown {
+  // pi-ai hands the chat-completions body it built, an object, and adds no
+  // `chat_template_kwargs` of its own to a model it was told does not reason.
+  const body = payload as Record<string, unknown>
+  const enabled = level !== 'off'
+  const effort = enabled ? level : 'low'
+  return {
+    ...body,
+    reasoning_effort: effort,
+    chat_template_kwargs: { enable_thinking: enabled, thinking: enabled, reasoning_effort: effort },
+  }
+}
+
+/**
+ * Whether a level is one of the two above `high`, which older servers refuse.
+ * @param level - the level about to be sent.
+ * @returns `true` for `xhigh` and `max`.
+ */
+function isAboveHigh(level: ModelThinkingLevel): boolean {
+  return level === 'xhigh' || level === 'max'
+}
+
+/** Server wordings that name the added reasoning fields or reject unknown request fields. */
+const REASONING_FIELD_REFUSAL = new RegExp([
+  'chat_template_kwargs', 'reasoning_effort', 'enable_thinking',
+  'unrecognized request argument', 'extra inputs are not permitted', 'unknown (?:field|parameter)',
+].join('|'), 'iu')
+
+/**
+ * Whether a first chunk is the server refusing the added reasoning fields.
+ * @param chunk - the stream's first chunk.
+ * @returns `true` for an error finish whose message names them.
+ */
+function refusesReasoningFields(chunk: StreamChunk): boolean {
+  return chunk.type === 'finish' && chunk.reason.kind === 'error' && REASONING_FIELD_REFUSAL.test(chunk.reason.failure.message)
+}
+
+/**
+ * A rough size of the request's prompt, in tokens, for the first-byte budget:
+ * four characters per token over the messages, the system prompt, and the
+ * tool schemas.
+ * @param options - the request.
+ * @returns the estimated prompt tokens, at least one.
+ */
+function estimatePromptTokens(options: GenerateOptions): number {
+  const chars = JSON.stringify(options.messages).length
+    + (options.system?.length ?? 0)
+    + (options.tools === undefined ? 0 : JSON.stringify(options.tools).length)
+  return Math.max(1, Math.ceil(chars / 4))
 }

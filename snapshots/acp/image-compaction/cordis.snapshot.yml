@@ -48,7 +48,17 @@
                 # Route-priced request images at the provider cap; the small
                 # context window turns that visual pressure into an automatic
                 # compaction the text-only heuristic would not trigger.
-                contextWindow: 11600
+                #
+                # The window is calibrated against the whole request, so the
+                # model-facing tool schemas count toward it. Adding a tool
+                # anywhere raises the text-only baseline and fires a SECOND
+                # compaction, which exhausts the recorded script. Raise this
+                # number by the new schemas' size when that happens, and check
+                # the refreshed log still carries compaction/start,
+                # compaction/summary and image/offload: trimming the tools
+                # instead drops the baseline so far that nothing compacts and
+                # the scenario passes while proving nothing.
+                contextWindow: 12000
                 imageRequestTokens: 384
 
 - id: attachment-local

@@ -17,6 +17,8 @@
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Thought for a while" [expanded]:
   - text: Thought for a while
   - img

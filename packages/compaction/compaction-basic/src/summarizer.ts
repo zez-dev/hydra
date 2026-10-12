@@ -5,10 +5,9 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { contentHasImage, createUserMessage, BlockAssembler, LlmError } from '@deepseek-ai/dsh-llm'
+import { contentHasImage, createUserMessage, BlockAssembler, LlmError, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
 import type {
-  ContentBlock, FinishReason, GenerateOptions, Message, TokenUsage, ToolSchema,
-} from '@deepseek-ai/dsh-llm'
+  ContentBlock, FinishReason, GenerateOptions, Message, ReasoningEffortId, TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
 interface SummaryConfig {
@@ -28,7 +27,7 @@ const SUMMARY_CLOSE_TAG = '</compacted-summary>'
  * front of it makes the auxiliary call a genuine prefix of the last routed
  * request, so the provider's KV cache is reused instead of invalidated.
  */
-const COMPACTION_INSTRUCTION = [
+export const COMPACTION_INSTRUCTION = [
   'You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.',
   '',
   'Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.',
@@ -44,6 +43,10 @@ const COMPACTION_INSTRUCTION = [
   '',
   '## Errors and Fixes',
   '- [error: how it was resolved, plus any related user feedback]',
+  '',
+  '## Dead Ends and Settled Facts',
+  '- [approach that was tried and failed, where, and why: do not retry it without new evidence]',
+  '- [conclusion a test, a measurement, or the user confirmed, and its scope: do not re-investigate it]',
   '',
   '## Pending Jobs',
   '- [explicitly requested work not yet completed]',
@@ -62,7 +65,7 @@ const COMPACTION_INSTRUCTION = [
   '- Capture user feedback and explicit instructions faithfully, especially corrections.',
   '- Do NOT mention this summarization request or that the context was compacted.',
   '- Output only the checkpoint text: do not call any tool or take any other action.',
-  `- If the conversation already contains a ${SUMMARY_OPEN_TAG} block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.`,
+  `- If the conversation already contains a ${SUMMARY_OPEN_TAG} block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure. Carry every dead end and settled fact forward unless the conversation since disproved it.`,
 ].join('\n')
 
 /** Framing that makes the replacement user message established context. */
@@ -88,6 +91,8 @@ export type SummaryResult = {
   provider: string
   model: string
   maxTokens?: number
+  /** The route's lowest reasoning effort the request asked for, when the route offers one. */
+  reasoningEffort?: ReasoningEffortId
   /** Provider-reported usage for this summarization request. */
   usage?: TokenUsage
 } & (
@@ -108,13 +113,17 @@ export type SummaryResult = {
 /**
  * Run the default cache-reusing `ctx.llm.stream()` summarization call: replay
  * the conversation prefix, then append the compaction instruction as the final
- * user message so the provider's warm prefix cache is reused.
+ * user message so the provider's warm prefix cache is reused. An answer with
+ * no text is asked once more: without the tools when the model called one,
+ * at the route's default effort when the lowest effort was asked; a route
+ * whose default effort then answers is asked at its default from then on.
  * @param ctx - context providing the LLM service.
  * @param config - resolved backend configuration.
  * @param input - replayed conversation prefix (system, tools, and leading messages) to condense.
  * @param agent - supplies routed-model history, fallback model, and session id.
  * @param signal - optional cancellation forwarded to the adapter.
  * @returns safe text-only summary blocks and the exact call envelope and output.
+ * @throws an `Error` with code {@link SUMMARY_EMPTY_CODE}, naming what the answer held, when no answer has text.
  */
 export async function summarizeWithLlm(
   ctx: Context,
@@ -140,7 +149,6 @@ export async function summarizeWithLlm(
     )
   }
 
-  const assembler = new BlockAssembler()
   const messages: Message[] = [
     ...input.messages,
     createUserMessage({
@@ -148,34 +156,96 @@ export async function summarizeWithLlm(
       source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
     }),
   ]
-  const options: GenerateOptions = {
-    provider: target.provider,
-    model: target.model,
-    messages,
+  // A thinking model spends a summary's cap on reasoning first, and near a
+  // full window the cap cannot be raised far; its lowest effort leaves the
+  // cap to the summary. The effort is a preference: an unresolvable route
+  // fails loud in the stream call itself.
+  const routeKey = `${target.provider}/${target.model}`
+  const defaultEffortRoutes = defaultEffortRoutesOf(ctx)
+  const lowest = defaultEffortRoutes.has(routeKey)
+    ? undefined
+    : await ctx.llm.resolveModelInfo(target.provider, target.model, signal).then(info => lowestReasoningEffort(info), () => undefined)
+  let attempt: { readonly tools?: ToolSchema[]; readonly reasoningEffort?: ReasoningEffortId } = {
     ...input.tools === undefined ? {} : { tools: [...input.tools] },
-    maxTokens: config.maxTokens,
-    sessionId: agent.session.id,
-    purpose: 'compaction',
-    ...signal === undefined ? {} : { signal },
+    ...lowest === undefined ? {} : { reasoningEffort: lowest },
   }
-  for await (const chunk of ctx.llm.stream(options)) assembler.push(chunk)
-  const error = finishError(assembler.finish)
-  if (error !== undefined) throw error
+  for (let retried = false; ; retried = true) {
+    const options: GenerateOptions = {
+      provider: target.provider,
+      model: target.model,
+      messages,
+      ...attempt.tools === undefined ? {} : { tools: attempt.tools },
+      maxTokens: config.maxTokens,
+      ...attempt.reasoningEffort === undefined ? {} : { reasoningEffort: attempt.reasoningEffort },
+      sessionId: agent.session.id,
+      purpose: 'compaction',
+      ...signal === undefined ? {} : { signal },
+    }
+    const assembler = new BlockAssembler()
+    for await (const chunk of ctx.llm.stream(options)) assembler.push(chunk)
+    const error = finishError(assembler.finish)
+    if (error !== undefined) throw error
 
-  const rawOutput = assembler.blocks()
-  const summary = summaryText(rawOutput)
-  if (!summary.some(block => block.text.trim().length > 0)) {
-    throw new Error('summarization produced no text summary content')
+    const rawOutput = assembler.blocks()
+    const summary = summaryText(rawOutput)
+    if (summary.some(block => block.text.trim().length > 0)) {
+      // A text answer at the default effort after an empty one at the lowest: the route keeps its default from now on.
+      if (lowest !== undefined && attempt.reasoningEffort === undefined) defaultEffortRoutes.add(routeKey)
+      return {
+        summary,
+        rawOutput,
+        llmStreamCall: true,
+        provider: options.provider,
+        model: options.model,
+        maxTokens: config.maxTokens,
+        ...attempt.reasoningEffort === undefined ? {} : { reasoningEffort: attempt.reasoningEffort },
+        ...(assembler.usage === undefined ? {} : { usage: assembler.usage }),
+      }
+    }
+    // One more request drops what most likely kept the text out: the tools,
+    // which ride along for the prefix cache, when the model called one; the
+    // lowered effort, which some servers turn into an answer filed entirely
+    // as reasoning, otherwise.
+    const calledTool = rawOutput.some(block => block.type === 'tool-call')
+    let next: typeof attempt | undefined
+    if (calledTool && attempt.tools !== undefined) {
+      const { tools: _tools, ...kept } = attempt
+      next = kept
+    } else if (!calledTool && attempt.reasoningEffort !== undefined) {
+      const { reasoningEffort: _effort, ...kept } = attempt
+      next = kept
+    }
+    if (retried || next === undefined) {
+      throw Object.assign(new Error(`summarization produced no text summary content: ${emptyAnswer(rawOutput)}`), { code: SUMMARY_EMPTY_CODE })
+    }
+    attempt = next
   }
-  return {
-    summary,
-    rawOutput,
-    llmStreamCall: true,
-    provider: options.provider,
-    model: options.model,
-    maxTokens: config.maxTokens,
-    ...(assembler.usage === undefined ? {} : { usage: assembler.usage }),
+}
+
+/** Routes that answered a checkpoint with no text at their lowest effort and with text at their default, by plugin context. */
+const defaultEffortRoutesByContext = new WeakMap<Context, Set<string>>()
+
+function defaultEffortRoutesOf(ctx: Context): Set<string> {
+  let routes = defaultEffortRoutesByContext.get(ctx)
+  if (routes === undefined) {
+    routes = new Set()
+    defaultEffortRoutesByContext.set(ctx, routes)
   }
+  return routes
+}
+
+/** Code of the error a summarization answer without text throws. */
+export const SUMMARY_EMPTY_CODE = 'SUMMARY_EMPTY'
+
+/**
+ * What a summarization answer without text held instead.
+ * @param blocks - the answer's blocks.
+ * @returns a phrase naming the tool it called, its reasoning, or nothing.
+ */
+function emptyAnswer(blocks: readonly ContentBlock[]): string {
+  const call = blocks.find(block => block.type === 'tool-call')
+  if (call !== undefined) return `the model called ${call.name} instead`
+  return blocks.some(block => block.type === 'reasoning') ? 'the reply held only reasoning' : 'the reply was empty'
 }
 
 /**

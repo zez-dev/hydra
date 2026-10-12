@@ -8,6 +8,7 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
+  type SessionDeleteResult,
 } from '@deepseek-ai/dsh-session-persistence'
 import type {
   SessionAccess,
@@ -76,6 +77,7 @@ class TraceHandle implements SessionHandle {
 }
 
 class TracePersistence extends SessionPersistence {
+  delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
   static entries = new Map<SessionIdType, { meta: SessionHeader; events: SessionEvent[] }>()
   static listCalls = 0
   static readCalls = 0

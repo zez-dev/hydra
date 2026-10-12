@@ -248,7 +248,7 @@ export class ReactLoopAgent implements Agent {
     const sections = renderContextSections(assembly)
     const context = this.runtimeContext.project(joinContextSections(sections), sections)
     const decision = await this.dispatch.waterfall(
-      'agent/pre-step', { messages: claimed, ...position, signal },
+      'agent/pre-step', { messages: claimed, prompt: { systemPrompt: renderPrompt(assembly), tools: assembly.tools }, ...position, signal },
       (): Promise<PreStepDecision> => Promise.resolve<PreStepDecision>({
         kind: 'enter',
         messages: context === undefined ? claimed : [...claimed, context],
@@ -282,6 +282,9 @@ export class ReactLoopAgent implements Agent {
     }
     phase.turn = turn
     let turnEnds: TurnEndReason | null = null
+    // The outcome a cut step leaves on the turn, kept apart from whether the
+    // turn stops: a later tool call still owes another request.
+    let cut = false
     let target: InboxTarget = 'next-turn'
     try {
       while (true) {
@@ -303,12 +306,12 @@ export class ReactLoopAgent implements Agent {
         this.session.append('step/start', { turn, step })
         phase.step = step
         try {
-          // max-tokens is sticky: once any step hits the ceiling, later steps
-          // that complete normally must not downgrade the turn outcome.
+          // max-tokens is sticky: once any step hits the ceiling, a later step
+          // that completes normally must not downgrade the turn outcome, while
+          // a step that owes another request (tool calls) keeps the turn going.
           const stepEnd = await this.step(decision)
-          // max-tokens stays sticky: a later completed step must not
-          // downgrade the turn outcome.
-          if (turnEnds === null || turnEnds.kind !== 'max-tokens') turnEnds = stepEnd
+          if (stepEnd?.kind === 'max-tokens') cut = true
+          turnEnds = stepEnd === null ? null : cut ? { kind: 'max-tokens' } : stepEnd
         } finally {
           this.session.append('step/end', { turn, step })
         }

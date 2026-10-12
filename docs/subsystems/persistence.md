@@ -408,6 +408,25 @@ abstract stat(id: SessionId, options?: SessionPersistenceStatOptions): Promise<S
  * @returns one snapshot per stored session.
  */
 abstract list(options?: SessionPersistenceListOptions): Promise<readonly SessionPersistenceSnapshot[]>
+
+/**
+ * Remove one stored session entirely: every committed generation of its
+ * log and the session's own storage directory. This is whole-session
+ * removal, distinct from the append-only log (flushed events are never
+ * rewritten) and from generation immutability (a retained session's
+ * historical generations are never renamed, replaced, or deleted).
+ *
+ * The backend first takes the session's single-writer ownership, so an
+ * active write handle in this process or a live lease in another rejects
+ * and nothing is removed. A missing session resolves `deleted: false`.
+ * Derived state elsewhere (search indexes, projection caches, workspace
+ * membership) is the caller's responsibility.
+ * @param id - the stored session to remove.
+ * @param options - optional cancellation.
+ * @returns whether stored data was removed.
+ * @throws {SessionAlreadyOwnedError} when write ownership is taken.
+ */
+abstract delete(id: SessionId, options?: SessionPersistenceDeleteOptions): Promise<SessionDeleteResult>
 ```
 
 Types: [SessionId](core.md)

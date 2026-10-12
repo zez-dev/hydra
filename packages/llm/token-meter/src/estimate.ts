@@ -6,7 +6,7 @@
  * @module @deepseek-ai/dsh-token-meter/estimate
  */
 
-import type { ContentBlock, Message } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { EpochHeader } from '@deepseek-ai/dsh-session'
 
 /** Fixed text-density estimate used until exact tokenization is needed. */
@@ -100,6 +100,15 @@ export function estimateMessage(message: Message): number {
  * @returns heuristic tool-schema tokens; 0 when absent or empty.
  */
 export function estimateToolsTokens(header: EpochHeader | undefined): number {
-  if (header?.tools === undefined || header.tools.length === 0) return 0
-  return Math.ceil(JSON.stringify(header.tools).length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
+  return header?.tools === undefined ? 0 : estimateToolSchemas(header.tools)
+}
+
+/**
+ * Price tool schemas as a request envelope carries them.
+ * @param tools - tool schemas in canonical order.
+ * @returns heuristic tool-schema tokens; 0 when empty.
+ */
+export function estimateToolSchemas(tools: readonly ToolSchema[]): number {
+  if (tools.length === 0) return 0
+  return Math.ceil(JSON.stringify(tools).length / CHARS_PER_TOKEN) + BLOCK_OVERHEAD
 }

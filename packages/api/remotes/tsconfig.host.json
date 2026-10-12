@@ -79,6 +79,12 @@
     },
     {
       "path": "../../host/plugin-inventory"
+    },
+    {
+      "path": "../learning-controller"
+    },
+    {
+      "path": "../usage-controller"
     }
   ]
 }

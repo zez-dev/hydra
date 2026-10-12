@@ -67,6 +67,18 @@ describe('startInProcessRun', () => {
     expect(ctx.agents.get(run.id)).toBeUndefined()
   })
 
+  it('publishes a child whose descriptor is already in its log, before its first turn', async () => {
+    const { ctx, parent } = await setup([textResponse('driver answer')])
+    const run = await startInProcessRun(request(parent), {})
+    const events = ctx.agents.get(run.id)!.session.snapshotEvents()
+    const descriptorAt = events.findIndex(event => event.type === 'subagent/descriptor')
+    expect(descriptorAt).toBeGreaterThanOrEqual(0)
+    const firstTurn = events.findIndex(event => event.type === 'turn/start')
+    expect(firstTurn === -1 || descriptorAt < firstTurn).toBe(true)
+    await run.result
+    await run.dispose()
+  })
+
   it('uses explicit child model selectors when the parent has none and preserves its cwd', async () => {
     const { ctx } = await setup([textResponse('driver answer')])
     const parent = await ctx.agentLoop.create(SessionId('bare-parent'), {}, { cwd: '/workspace' })

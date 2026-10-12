@@ -266,7 +266,7 @@ async function agentInstructionsOf(agent: Agent): Promise<UserMessage> {
 
 async function syncAgentInstructions(ctx: Context, agent: Agent): Promise<void> {
   await agentEvents(ctx, agent).waterfall(
-    'agent/pre-step', { messages: [], turn: 1, step: 1, signal: testToolSignal },
+    'agent/pre-step', { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: testToolSignal },
     async () => ({ kind: 'enter' as const, messages: [] }),
   )
 }
@@ -301,13 +301,13 @@ async function composeBaselinePrefix(ctx: Context, agent: TestAgent): Promise<Me
   const signal = new AbortController().signal
   await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages: [], turn: 1, step: 1, signal },
+    { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
   )
   const claimed = claimInbox(agent, 'next-step')
   const decision = await agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages: claimed, turn: 1, step: 2, signal },
+    { prompt: { systemPrompt: '', tools: [] }, messages: claimed, turn: 1, step: 2, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages: claimed }),
   )
   const entered = decision.kind === 'enter' ? decision.messages : []
@@ -1407,7 +1407,7 @@ describe('workspace context request injection', () => {
       const original = await stubAgent(root)
       await agentEvents(ctx, original).waterfall(
         'agent/pre-step',
-        { messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
       )
       const inserted = original.inbox.nextStep[0]
@@ -1420,7 +1420,7 @@ describe('workspace context request injection', () => {
       const claimed = claimInbox(resumed, 'next-step')
       const decision = await agentEvents(ctx, resumed).waterfall(
         'agent/pre-step',
-        { messages: claimed, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: claimed, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: claimed }),
       )
       if (decision.kind !== 'enter') throw new Error('recovered baseline was rejected')
@@ -1452,7 +1452,7 @@ describe('workspace context request injection', () => {
       const original = await stubAgent(root)
       await agentEvents(ctx, original).waterfall(
         'agent/pre-step',
-        { messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
       )
       const stale = original.inbox.nextStep[0]
@@ -1466,7 +1466,7 @@ describe('workspace context request injection', () => {
       const staleClaim = claimInbox(resumed, 'next-step')
       const staleDecision = await agentEvents(ctx, resumed).waterfall(
         'agent/pre-step',
-        { messages: staleClaim, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: staleClaim, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: staleClaim }),
       )
 
@@ -1505,7 +1505,7 @@ describe('workspace context request injection', () => {
       const original = await stubAgent(root)
       await agentEvents(originalCtx, original).waterfall(
         'agent/pre-step',
-        { messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
       )
       const stale = original.inbox.nextStep[0]
@@ -1519,7 +1519,7 @@ describe('workspace context request injection', () => {
       const claimed = claimInbox(resumed, 'next-step')
       const decision = await agentEvents(resumedCtx, resumed).waterfall(
         'agent/pre-step',
-        { messages: claimed, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: claimed, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: claimed }),
       )
 
@@ -1623,7 +1623,7 @@ describe('workspace context request injection', () => {
 
       const decision = await agentEvents(ctx, agent).waterfall(
         'agent/pre-step',
-        { messages: [prompt], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { messages: [prompt], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve(downstream),
       )
 
@@ -1680,7 +1680,7 @@ describe('workspace context request injection', () => {
 
       const decision = await agentEvents(ctx, agent).waterfall(
         'agent/pre-step',
-        { messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve(downstream),
       )
 
@@ -1791,7 +1791,7 @@ describe('workspace context request injection', () => {
 
       const decision = await agentEvents(ctx, agent).waterfall(
         'agent/pre-step',
-        { messages: [prompt], turn: 2, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
+        { messages: [prompt], prompt: { systemPrompt: '', tools: [] }, turn: 2, step: 1, signal: AbortSignal.timeout(requestTimeoutMs) },
         () => Promise.resolve({ kind: 'enter' as const, messages: [prompt] }),
       )
 
@@ -2182,7 +2182,7 @@ describe('workspace context request injection', () => {
       const reason = new Error('cancel prefix')
       const pending = agentEvents(ctx, await stubAgent(root)).waterfall(
         'agent/pre-step',
-        { messages: [], turn: 1, step: 1, signal: controller.signal },
+        { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: controller.signal },
         () => Promise.resolve({ kind: 'enter' as const, messages: [] }),
       )
 
@@ -4627,7 +4627,7 @@ describe('workspace context inbox synchronization', () => {
       controller.abort(new Error('abort pre-step reconciliation'))
 
       await expect(agentEvents(ctx, agent).waterfall(
-        'agent/pre-step', { messages: [], turn: 1, step: 1, signal: controller.signal },
+        'agent/pre-step', { prompt: { systemPrompt: '', tools: [] }, messages: [], turn: 1, step: 1, signal: controller.signal },
         async () => ({ kind: 'enter' as const, messages: [] }),
       )).rejects.toThrow('abort pre-step reconciliation')
 
@@ -4737,7 +4737,7 @@ describe('workspace context inbox synchronization', () => {
       const downstream = { kind: 'enter' as const, messages: claimed }
 
       const decision = await agentEvents(ctx, agent).waterfall(
-        'agent/pre-step', { messages: claimed, turn: 1, step: 1, signal: testToolSignal },
+        'agent/pre-step', { prompt: { systemPrompt: '', tools: [] }, messages: claimed, turn: 1, step: 1, signal: testToolSignal },
         async () => downstream,
       )
 

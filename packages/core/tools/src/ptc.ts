@@ -98,6 +98,17 @@ const RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION
     + '5-10 words (shown in the UI). Examples: "Count TODO markers across packages"; '
     + '"Read failing test and its fixture"; "Rename config key in every cordis.yml".'
 
+/**
+ * The card title for a `run_code` call without a description: the program's
+ * first non-empty line, cut to one short line.
+ * @param code - the program.
+ * @returns the title.
+ */
+function runCodeTitle(code: string): string {
+  const line = code.split('\n').map(part => part.trim()).find(part => part.length > 0) ?? 'run_code'
+  return line.length > 80 ? `${line.slice(0, 77)}...` : line
+}
+
 const RUN_CODE_CONTROLS = {
   timeoutMs: { type: 'number', description: 'Positive elapsed-time budget in milliseconds, capped by the deployment maximum.' },
   sandbox_permissions: { type: 'string', enum: [...ESCALATION_TARGETS], description: 'Wider sandbox mode for this complete program execution; requires justification and approval.' },
@@ -338,7 +349,6 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
       code: { type: 'string', required: true, description: TYPESCRIPT_FLAVOR.codeDescription },
       description: {
         type: 'string',
-        required: true,
         description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION,
       },
       ...RUN_CODE_CONTROLS,
@@ -370,7 +380,7 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
       },
     },
     async execute(args, exec): Promise<RunCodeOutput> {
-      if (args.description.trim().length === 0) {
+      if (args.description !== undefined && args.description.trim().length === 0) {
         throw new Error('invalid description: expected a non-empty string')
       }
       const runtime = requireRuntime()
@@ -723,10 +733,11 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
       }
     },
     // The model-authored description is the call's always-visible UI label
-    // (the bash `description` precedent); the program itself rides rawInput.
+    // (the bash `description` precedent); a model that omits it, as some do,
+    // gets the program's first line instead. The program itself rides rawInput.
     presentCall: args => ({
       card: 'generic',
-      title: args.description,
+      title: args.description ?? runCodeTitle(args.code),
       kind: 'execute',
       rawInput: args.code,
     }),
@@ -755,7 +766,7 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
     // the emitted schema always matches the validated specification.
     get: () => parameterSchemaSpecToJsonSchema({
       code: { type: 'string', required: true, description: resolveFlavor(peekRuntime).codeDescription },
-      description: { type: 'string', required: true, description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION },
+      description: { type: 'string', description: RUN_CODE_DESCRIPTION_PARAM_DESCRIPTION },
       ...controlParameters(peekRuntime()),
     }) as unknown as Record<string, unknown>,
   })

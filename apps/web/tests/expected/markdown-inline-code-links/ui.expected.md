@@ -9,6 +9,8 @@
 - text: Show the local preview URL. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - heading "Inline code links" [level=2]
 - paragraph:
   - text: "Preview:"

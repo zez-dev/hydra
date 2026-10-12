@@ -22,6 +22,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type { ToolCallView, ToolResultView } from './presentation.ts'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode } from './json-schema.ts'
+import { coerceArguments, flattenNullableParameters } from './compat.ts'
 import { createRunCodeTool, RUN_CODE_NAME } from './ptc.ts'
 import type { PtcSdkLanguage } from './ptc.ts'
 import { renderToolsSdk } from './ts-types.ts'
@@ -91,6 +92,8 @@ export {
   type JsonSchemaType,
   type JsonSchemaScalar,
 } from './json-schema.ts'
+
+export { coerceArguments, flattenNullableParameters } from './compat.ts'
 
 export type { PtcDispatchEventData, PtcDispatchStartEventData } from './types.ts'
 
@@ -458,9 +461,18 @@ export interface ToolRuntimeScheduler {
 
 /**
  * Scheduler entry point omitted from the generated named service API.
+ *
+ * Registered in the global symbol registry on purpose. The source launch
+ * (`pnpm dsh`, tsx) resolves a bundle's plugins through the profile's
+ * `node_modules` to built `lib/`, while imports whose parent lies under
+ * `packages/` map to `src/`, so this module can load twice in one process. A
+ * plain `Symbol()` then differs between the copy that built the registry and
+ * the copy the agent loop reads, and every tool call dies with
+ * "Cannot read properties of undefined (reading 'prepare')". A registry
+ * symbol is the same value in both copies.
  * @internal
  */
-export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol('@deepseek-ai/dsh-tools.scheduler')
+export const TOOL_RUNTIME_SCHEDULER: unique symbol = Symbol.for('@deepseek-ai/dsh-tools.scheduler')
 
 /** Canonical error code for cancellation after a tool body was invoked. */
 export const TOOL_ABORTED = 'ABORTED'
@@ -673,6 +685,25 @@ export interface Config {
    * restores strictly serial dispatch. Must be a positive integer.
    */
   maxParallelSubCalls?: number
+  /**
+   * Repair of model-supplied argument values before validation. `none`
+   * (default) validates the parsed arguments as sent; `lenient` first applies
+   * {@link coerceArguments} against the tool's parameter schema, for models
+   * whose function calling emits numbers and booleans as strings or `null` for
+   * an omitted optional parameter. Pre-execute listeners, guards, and the tool
+   * body all see the coerced arguments; the logged `tool/call` keeps the
+   * model's original text.
+   */
+  argumentCoercion?: 'none' | 'lenient'
+  /**
+   * Model-visible form of nullable parameters. `oneOf` (default) sends each
+   * tool's parameter schema as declared; `flat` applies
+   * {@link flattenNullableParameters} so a `oneOf: [X, {type: 'null'}]` parameter
+   * is presented as `X`, for function-call parsers that mishandle `oneOf`.
+   * Execution still validates against the declared schema, so `null` stays
+   * accepted.
+   */
+  nullableParameters?: 'oneOf' | 'flat'
 }
 
 /**
@@ -792,6 +823,8 @@ export class ToolRuntime extends Service {
   static Config: z<Config> = z.object({
     mode: z.union(['native', 'ptc', 'both'] as const).default('native'),
     maxParallelSubCalls: z.natural().min(1).default(10),
+    argumentCoercion: z.union(['none', 'lenient'] as const).default('none'),
+    nullableParameters: z.union(['oneOf', 'flat'] as const).default('oneOf'),
   })
 
   /** Internal staged view consumed by `dsh-agent-loop`'s parallel scheduler. */
@@ -817,6 +850,8 @@ export class ToolRuntime extends Service {
   /** Presentation for scopes that declare none; {@link presentAs} shadows it per scope. */
   private readonly defaultMode: ToolPresentationMode
   private readonly maxParallelSubCalls: number
+  private readonly argumentCoercion: NonNullable<Config['argumentCoercion']>
+  private readonly nullableParameters: NonNullable<Config['nullableParameters']>
   /**
    * Reserved presentation transport, kept outside the filterable registration
    * layers. Built on first need rather than at construction: which agents run
@@ -831,6 +866,8 @@ export class ToolRuntime extends Service {
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
+    this.argumentCoercion = config.argumentCoercion ?? 'none'
+    this.nullableParameters = config.nullableParameters ?? 'oneOf'
     ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
     if (this.defaultMode !== 'native') {
       ctx.systemPrompt.section(this.collapseSection())
@@ -1268,7 +1305,9 @@ export class ToolRuntime extends Service {
     return {
       name,
       description,
-      parameters: detached,
+      parameters: this.nullableParameters === 'flat'
+        ? flattenNullableParameters(detached) as Record<string, unknown>
+        : detached,
     }
   }
 
@@ -1416,10 +1455,13 @@ export class ToolRuntime extends Service {
     const finalizerFor = (): ToolDefinition['finalizeContent'] | undefined =>
       collapsed && !signal.aborted ? undefined : capturedFinalizer
     try {
-      const detached = snapshotJsonValue(exec.arguments)
-      if (detached === undefined) {
+      const snapshot = snapshotJsonValue(exec.arguments)
+      if (snapshot === undefined) {
         throw new TypeError('tool execution arguments must be losslessly JSON-serializable')
       }
+      const detached = this.argumentCoercion === 'lenient' && visible !== undefined
+        ? coerceArguments(visible.parameters, snapshot)
+        : snapshot
       const execution: MutableToolRunContext = { ...base, arguments: deepFreeze(detached) }
       this.deferredContexts.set(execution, deferredContexts)
       this.contentFinalizers.set(execution, finalizerFor())

@@ -12,7 +12,7 @@
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
-  Button, IconCloseFill14, IconPersonalizationOutline16,
+  Button, Checkbox, IconCloseFill14, IconPersonalizationOutline16,
   IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
@@ -28,6 +28,7 @@ import {
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
+import { sessionDeleteScope, type SessionDeleteScope } from '../subagent-lineage.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
 
@@ -96,12 +97,16 @@ function useNativeDragAcceptance(active: boolean): void {
   }, [active])
 }
 
-/** Grouping and ordering menu; own open state so it resets with the wide chrome. */
-function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
+/** Grouping, ordering, and archived-reveal menu; own open state so it resets with the wide chrome. */
+function ViewOptionsMenu({ groupBy, orderBy, showArchived, onGroupPick, onOrderPick, onArchivedToggle, t }: {
   groupBy: SessionGroupBy
   orderBy: SessionOrderBy
+  /** Archived Sessions currently join the browsing surfaces. */
+  showArchived: boolean
   onGroupPick: (mode: SessionGroupBy) => void
   onOrderPick: (mode: SessionOrderBy) => void
+  /** Flip the archived reveal; the menu row carries the current state as its checkmark. */
+  onArchivedToggle: (showArchived: boolean) => void
   t: WorkspaceBrowserProps['t']
 }) {
   const [open, setOpen] = useState(false)
@@ -118,11 +123,16 @@ function ViewOptionsMenu({ groupBy, orderBy, onGroupPick, onOrderPick, t }: {
         { type: 'label' as const, id: 'order-by', text: t('orderBy.label') },
         { id: 'manual', label: t('orderBy.manual') },
         { id: 'updated', label: t('orderBy.updated') },
+        { id: 'lineage', label: t('orderBy.lineage') },
+        { type: 'separator' as const, id: 'archived-separator' },
+        { type: 'label' as const, id: 'archived', text: t('archived.label') },
+        { id: 'show-archived', label: t('archived.show') },
       ]}
-      selectedIds={[groupBy, orderBy]}
+      selectedIds={[groupBy, orderBy, ...showArchived ? ['show-archived'] : []]}
       onSelect={(id) => {
         if (id === 'workspace' || id === 'workspace-tree' || id === 'flat') onGroupPick(id)
-        else if (id === 'manual' || id === 'updated') onOrderPick(id)
+        else if (id === 'manual' || id === 'updated' || id === 'lineage') onOrderPick(id)
+        else if (id === 'show-archived') onArchivedToggle(!showArchived)
         setOpen(false)
       }}
       align="end"
@@ -172,6 +182,10 @@ type SessionTreeProps = Pick<
   'useSessionStatus' | 'startSession' | 'open' | 'forkSession'
   | 'insertWorkspaceBefore' | 't' | 'usePanelInfo'
 > & {
+  /** Archived Sessions join their accounting slots as dimmed rows. */
+  showArchived: boolean
+  /** Nest ordinary forks under the parent row they branched from. */
+  lineage: boolean
   /** Always-mounted Session list snapshot. */
   list: SessionListState
   /** Host account home for POSIX hover-path abbreviation. */
@@ -200,6 +214,10 @@ type SessionTreeProps = Pick<
   onSessionRename: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** Archive a session (row menu action; the row disappears on the state echo). */
   onSessionArchive: (sessionId: SessionNode['id']) => void
+  /** Restore an archived session (row menu action on a revealed archived row). */
+  onSessionUnarchive: (sessionId: SessionNode['id']) => void
+  /** Open the browser-owned session delete dialog. */
+  onSessionDelete: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** One Session chosen from search that must be exposed and scrolled into view. */
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
@@ -209,9 +227,9 @@ type SessionTreeProps = Pick<
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
 function SessionTree({
   list, useSessionStatus, startSession, open, forkSession, workspaces, ungroupedSessionIds,
-  archivedSessionIds,
+  archivedSessionIds, showArchived, lineage,
   workspaceReady, usePanelInfo,
-  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive,
+  onRenameRequest, onDeleteRequest, onSessionRename, onSessionArchive, onSessionUnarchive, onSessionDelete,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
   setSessionOrder, home, t,
@@ -265,8 +283,13 @@ function SessionTree({
     () => deriveGroups(list, workspaces, archivedSessionIds, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
+      showArchived,
+      lineage,
     }),
-    [list, workspaces, archivedSessionIds, statuses, expandedGroups, ungroupedSessionIds],
+    [
+      list, workspaces, archivedSessionIds, statuses, expandedGroups, ungroupedSessionIds,
+      showArchived, lineage,
+    ],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -522,6 +545,8 @@ function SessionTree({
               onRename={onSessionRename}
               onFork={forkSession}
               onArchive={onSessionArchive}
+              onUnarchive={onSessionUnarchive}
+              onDelete={onSessionDelete}
               onReveal={node.id === revealSessionId && group.key === revealGroup
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
@@ -567,6 +592,7 @@ function SessionTree({
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList({
   list, sessionIds, useSessionStatus, open, forkSession, onSessionRename, onSessionArchive,
+  onSessionUnarchive, onSessionDelete, archivedSessionIds, lineage,
   usePanelInfo, setSessionOrder,
   revealSessionId, onSessionRevealed, t,
 }: Pick<
@@ -576,6 +602,10 @@ function FlatList({
   | 'forkSession'
   | 'onSessionRename'
   | 'onSessionArchive'
+  | 'onSessionUnarchive'
+  | 'onSessionDelete'
+  | 'archivedSessionIds'
+  | 'lineage'
   | 'usePanelInfo'
   | 'setSessionOrder'
   | 'revealSessionId'
@@ -588,8 +618,8 @@ function FlatList({
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
   const rows = useMemo(
-    () => deriveFlat(list, sessionIds, statuses),
-    [list, sessionIds, statuses],
+    () => deriveFlat(list, sessionIds, statuses, { archivedSessionIds, lineage }),
+    [archivedSessionIds, lineage, list, sessionIds, statuses],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -635,6 +665,8 @@ function FlatList({
               onRename={onSessionRename}
               onFork={forkSession}
               onArchive={onSessionArchive}
+              onUnarchive={onSessionUnarchive}
+              onDelete={onSessionDelete}
               onReveal={node.id === revealSessionId
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
@@ -684,6 +716,7 @@ function SearchResults({
   open,
   workspaces,
   archivedSessionIds,
+  showArchived,
   query,
   remote,
   resultLimit,
@@ -692,6 +725,7 @@ function SearchResults({
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
+  showArchived: boolean
   query: string
   remote: RemoteSearchState
   resultLimit: number
@@ -711,8 +745,12 @@ function SearchResults({
       statuses,
       currentRemote,
       resultLimit,
+      showArchived,
     ),
-    [list, workspaces, query, archivedSessionIds, statuses, currentRemote, resultLimit],
+    [
+      list, workspaces, query, archivedSessionIds, statuses, currentRemote, resultLimit,
+      showArchived,
+    ],
   )
   const pending = currentRemote.status === 'loading'
   const failed = currentRemote.status === 'error'
@@ -778,6 +816,8 @@ export function WorkspaceBrowser({
   deleteWorkspace,
   insertWorkspaceBefore,
   archiveSession,
+  unarchiveSession,
+  deleteSession,
   createWorkspace,
   searchSessions,
   searchResultLimit,
@@ -798,6 +838,10 @@ export function WorkspaceBrowser({
   const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
+  // Records persisted before the archived reveal existed carry no field at all
+  // (rehydration replaces the whole value), so absence reads as hidden.
+  const showArchived = useStore(s => s.showArchived === true)
+  const lineage = orderBy === 'lineage'
   const groupExpansion = useStore(s => s.groupExpansion)
   const sessionOrderByAccount = useStore(s => s.sessionOrderByAccount)
   const workspaceReady = workspacePhase === 'ready' && workspaceStreamState !== 'loading'
@@ -811,14 +855,14 @@ export function WorkspaceBrowser({
     return list.ids.filter(id => list.byId[id] !== undefined && !accounted.has(id))
   }, [list, workspaces])
   const flatMemberIds = useMemo(
-    () => visibleSessionIds(list, archivedSessionIds),
-    [archivedSessionIds, list],
+    () => visibleSessionIds(list, archivedSessionIds, showArchived),
+    [archivedSessionIds, list, showArchived],
   )
   const orderedWorkspaces = useMemo(() => workspaces.map((workspace) => {
     const memberIds = workspace.sessionIds
-    const baseOrder = orderBy === 'updated'
-      ? orderByRecency(memberIds, list.byId)
-      : reconcileManualOrder(memberIds, sessionOrderByAccount[workspace.workspaceId], list.byId)
+    const baseOrder = orderBy === 'manual'
+      ? reconcileManualOrder(memberIds, sessionOrderByAccount[workspace.workspaceId], list.byId)
+      : orderByRecency(memberIds, list.byId)
     return {
       ...workspace,
       sessionIds: pinCurrentBlank(
@@ -828,18 +872,18 @@ export function WorkspaceBrowser({
     }
   }), [currentBlank, list.byId, orderBy, sessionOrderByAccount, workspaces])
   const orderedUngroupedSessionIds = useMemo(() => {
-    const baseOrder = orderBy === 'updated'
-      ? orderByRecency(ungroupedMemberIds, list.byId)
-      : reconcileManualOrder(ungroupedMemberIds, sessionOrderByAccount[UNGROUPED_KEY], list.byId)
+    const baseOrder = orderBy === 'manual'
+      ? reconcileManualOrder(ungroupedMemberIds, sessionOrderByAccount[UNGROUPED_KEY], list.byId)
+      : orderByRecency(ungroupedMemberIds, list.byId)
     return pinCurrentBlank(
       baseOrder,
       currentBlank !== undefined && ungroupedMemberIds.includes(currentBlank) ? currentBlank : undefined,
     )
   }, [currentBlank, list.byId, orderBy, sessionOrderByAccount, ungroupedMemberIds])
   const orderedFlatSessionIds = useMemo(() => {
-    const baseOrder = orderBy === 'updated'
-      ? orderByRecency(flatMemberIds, list.byId)
-      : reconcileManualOrder(flatMemberIds, sessionOrderByAccount[FLAT_SESSION_ORDER_KEY], list.byId)
+    const baseOrder = orderBy === 'manual'
+      ? reconcileManualOrder(flatMemberIds, sessionOrderByAccount[FLAT_SESSION_ORDER_KEY], list.byId)
+      : orderByRecency(flatMemberIds, list.byId)
     return pinCurrentBlank(
       baseOrder,
       currentBlank !== undefined && flatMemberIds.includes(currentBlank) ? currentBlank : undefined,
@@ -1073,6 +1117,45 @@ export function WorkspaceBrowser({
       console.warn('session archive rejected:', reason)
     })
   }
+  const onSessionUnarchive = (sessionId: SessionNode['id']) => {
+    unarchiveSession(sessionId).catch((reason: unknown) => {
+      console.warn('session unarchive rejected:', reason)
+    })
+  }
+
+  // Session delete confirms in its own dialog, which says up front what goes
+  // with the Session (its sub-agent Sessions) and what stays (its forks, unless
+  // the person ticks the cascade).
+  const [sessionDeleteTarget, setSessionDeleteTarget] = useState<{ sessionId: SessionNode['id']; title: string } | null>(null)
+  const [sessionDeleting, setSessionDeleting] = useState(false)
+  const [sessionDeleteError, setSessionDeleteError] = useState<string | null>(null)
+  const [sessionDeleteScopeCounts, setSessionDeleteScopeCounts] = useState<SessionDeleteScope>({ subagents: 0, forks: 0 })
+  const [sessionDeleteCascade, setSessionDeleteCascade] = useState(false)
+  const onSessionDelete = (sessionId: SessionNode['id'], currentTitle: string) => {
+    setSessionDeleteTarget({ sessionId, title: currentTitle })
+    setSessionDeleteError(null)
+    setSessionDeleteScopeCounts(sessionDeleteScope(list.byId, sessionId))
+    setSessionDeleteCascade(false)
+  }
+  const closeSessionDelete = () => {
+    if (sessionDeleting) return
+    setSessionDeleteTarget(null)
+    setSessionDeleteError(null)
+  }
+  const confirmSessionDelete = () => {
+    /* v8 ignore next -- the Modal is absent without a target and its button is disabled while deleting. */
+    if (sessionDeleting || sessionDeleteTarget === null) return
+    setSessionDeleting(true)
+    setSessionDeleteError(null)
+    deleteSession(sessionDeleteTarget.sessionId, { cascade: sessionDeleteCascade }).then((outcome) => {
+      setSessionDeleting(false)
+      if (outcome.kind === 'deleted') setSessionDeleteTarget(null)
+      else setSessionDeleteError(outcome.message)
+    }).catch((reason: unknown) => {
+      setSessionDeleting(false)
+      setSessionDeleteError(reason instanceof Error ? reason.message : String(reason))
+    })
+  }
 
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
@@ -1179,8 +1262,10 @@ export function WorkspaceBrowser({
             <ViewOptionsMenu
               groupBy={groupBy}
               orderBy={orderBy}
+              showArchived={showArchived}
               onGroupPick={(mode) => { actions.setGroupBy(mode) }}
               onOrderPick={(mode) => { actions.setOrderBy(mode, activeSessionOrders) }}
+              onArchivedToggle={(reveal) => { actions.setShowArchived(reveal) }}
               t={t}
             />
           )}
@@ -1252,6 +1337,7 @@ export function WorkspaceBrowser({
               open={openSearchResult}
               workspaces={workspaces}
               archivedSessionIds={archivedSessionIds}
+              showArchived={showArchived}
               query={normalizedQuery}
               remote={remoteSearch}
               resultLimit={searchResultLimit}
@@ -1267,6 +1353,9 @@ export function WorkspaceBrowser({
                 useSessionStatus={useSessionStatus}
                 open={open} forkSession={forkSession}
                 onSessionRename={onSessionRename} onSessionArchive={onSessionArchive}
+                onSessionUnarchive={onSessionUnarchive} onSessionDelete={onSessionDelete}
+                archivedSessionIds={archivedSessionIds}
+                lineage={lineage}
                 setSessionOrder={saveSessionOrder}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
@@ -1280,6 +1369,8 @@ export function WorkspaceBrowser({
                 useSessionStatus={useSessionStatus}
                 onSessionRename={onSessionRename}
                 onSessionArchive={onSessionArchive}
+                onSessionUnarchive={onSessionUnarchive}
+                onSessionDelete={onSessionDelete}
                 forkSession={forkSession}
                 workspaces={orderedWorkspaces}
                 ungroupedSessionIds={orderedUngroupedSessionIds}
@@ -1289,6 +1380,8 @@ export function WorkspaceBrowser({
                 setGroupExpanded={actions.setGroupExpanded}
                 setSessionOrder={saveSessionOrder}
                 archivedSessionIds={archivedSessionIds}
+                showArchived={showArchived}
+                lineage={lineage}
                 startSession={startSession}
                 open={open}
                 insertWorkspaceBefore={insertWorkspaceBefore}
@@ -1399,6 +1492,45 @@ export function WorkspaceBrowser({
       >
         {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
+      </Modal>
+      <Modal
+        open={sessionDeleteTarget !== null}
+        onClose={closeSessionDelete}
+        closeLabel={t('close')}
+        title={t('delete.session.title')}
+        {...sessionDeleteTarget === null
+          ? {}
+          : { description: t('delete.session.desc', { name: sessionDeleteTarget.title }) }}
+        footer={(
+          <>
+            <Button variant="outline" disabled={sessionDeleting} onClick={closeSessionDelete}>{t('cancel')}</Button>
+            <Button
+              variant="outline"
+              className={css.deleteAction}
+              disabled={sessionDeleting}
+              onClick={confirmSessionDelete}
+            >
+              {t('delete.session.title')}
+            </Button>
+          </>
+        )}
+      >
+        {sessionDeleteScopeCounts.subagents > 0 && (
+          <div className={css.deleteNotice}>{t('delete.session.subagents', { n: sessionDeleteScopeCounts.subagents })}</div>
+        )}
+        {sessionDeleteScopeCounts.forks > 0 && (
+          <>
+            <div className={css.deleteNotice}>{t('delete.session.forksKept', { n: sessionDeleteScopeCounts.forks })}</div>
+            <Checkbox
+              checked={sessionDeleteCascade}
+              onChange={setSessionDeleteCascade}
+              disabled={sessionDeleting}
+              label={t('delete.session.cascade', { n: sessionDeleteScopeCounts.forks })}
+            />
+          </>
+        )}
+        {sessionDeleting && <div className={css.deleteStatus} role="status">{t('delete.session.pending')}</div>}
+        {sessionDeleteError !== null && <div className={css.renameError} role="alert">{sessionDeleteError}</div>}
       </Modal>
     </div>
   )

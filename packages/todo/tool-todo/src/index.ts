@@ -10,6 +10,10 @@ import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { TodoItem } from './types.ts'
 // Type-only: resolves the required ctx.sessionProjections service declaration.
 import type {} from '@deepseek-ai/dsh-session-projection'
@@ -35,12 +39,116 @@ export interface Config {
    * rejected.
    */
   allowParallelInProgress: boolean
+  /**
+   * Whether open tasks the model can no longer see (its latest `todo_write` left the visible
+   * history, as after a checkpoint) or was cut off from (the previous turn ended in an error, a
+   * cancel, or the output limit) come back as a task-state message on its next request (default true).
+   */
+  remindOpenTodos?: boolean
+  /**
+   * How many times one turn that wrote the list may be asked to continue or update it when it
+   * ends with open tasks (default 0, never). Off by default because a turn often stops with a
+   * plan on purpose (the user asked only for the plan, or the reply hit its output limit), and
+   * the push would spend a model call working against that.
+   */
+  maxOpenTodoContinuationsPerTurn?: number
 }
+
+/** Continuation requests per turn when `maxOpenTodoContinuationsPerTurn` is not configured. */
+const DEFAULT_OPEN_TODO_CONTINUATIONS = 0
 
 /** Schemastery configuration for the todo tool consumer. */
 export const Config: z<Config> = z.object({
   allowParallelInProgress: z.boolean().required(),
+  remindOpenTodos: z.boolean().default(true),
+  maxOpenTodoContinuationsPerTurn: z.natural().default(DEFAULT_OPEN_TODO_CONTINUATIONS),
 })
+
+/** Plugin name recorded on the task-state and continuation messages this package adds. */
+const TODO_PLUGIN = 'tool-todo'
+
+/**
+ * Whether a task still owes work.
+ * @param item - one task.
+ * @returns true for `pending` and `in_progress`.
+ */
+function isOpen(item: TodoItem): boolean {
+  return item.status !== 'completed'
+}
+
+/**
+ * Render the open tasks, one per line, in list order.
+ * @param todos - the whole list.
+ * @returns lines of the form `- [status] content`.
+ */
+function renderOpen(todos: readonly TodoItem[]): string {
+  return todos.filter(isOpen).map(item => `- [${item.status}] ${item.content}`).join('\n')
+}
+
+/**
+ * The task-state message for open tasks the model cannot see or was cut off from.
+ * @param todos - the whole list.
+ * @returns the model-facing text.
+ */
+function reminderText(todos: readonly TodoItem[]): string {
+  return [
+    '<task_list>',
+    'Open tasks from your task list earlier in this session:',
+    renderOpen(todos),
+    'If they are still part of the work, continue with the in-progress one. If the current request moves on from them, update the list with `todo_write` (mark them completed or drop them) instead of continuing them.',
+    '</task_list>',
+  ].join('\n')
+}
+
+/**
+ * The continuation request for a turn that planned work and stopped with tasks open.
+ * @param todos - the whole list.
+ * @returns the model-facing text.
+ */
+function continuationText(todos: readonly TodoItem[]): string {
+  return [
+    'Your task list still has open tasks:',
+    renderOpen(todos),
+    'Continue with the next one. If you are waiting on the user, or the plan changed, update the list with `todo_write` to match and then end your reply.',
+  ].join('\n')
+}
+
+/**
+ * Text of a message's text blocks.
+ * @param message - any message.
+ * @returns the joined text.
+ */
+function textOf(message: Message): string {
+  return message.content.map(block => (block.type === 'text' ? block.text : '')).join('')
+}
+
+/**
+ * Whether the model can currently see this exact list: its latest visible `todo_write` call
+ * carries it, or a task-state message with the same open tasks is visible after that call.
+ * @param session - the agent's session.
+ * @param todos - the latest logged list.
+ * @returns true when the list is on the model-visible history.
+ */
+function listVisible(session: Session, todos: readonly TodoItem[]): boolean {
+  const reminder = reminderText(todos)
+  const wanted = JSON.stringify(todos.map(item => ({ content: item.content, status: item.status })))
+  for (const message of session.deriveMessages().toReversed()) {
+    if (message.role === 'user' && textOf(message) === reminder) return true
+    if (message.role !== 'assistant') continue
+    for (const block of message.content) {
+      if (block.type !== 'tool-call' || block.name !== 'todo_write') continue
+      try {
+        const args = JSON.parse(block.arguments) as { todos?: { content: string; status: string }[] }
+        const seen = (args.todos ?? []).map(item => ({ content: item.content.trim(), status: item.status }))
+        return JSON.stringify(seen) === wanted
+      } catch (_unparsable) {
+        // A malformed call was rejected before it could write this list, so it does not show it.
+        return false
+      }
+    }
+  }
+  return false
+}
 
 const DESCRIPTION_HEAD =
   'Record and update a structured task list for the current work. Send the ENTIRE '
@@ -127,6 +235,7 @@ const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
  */
 export function apply(ctx: Context, config: Config): void {
   const allowParallel = config.allowParallelInProgress
+  installOpenTodoFollowUp(ctx, config)
   // Standing-plan fold: latest whole todo/write list, cleared by the next
   // turn/start (turn/end keeps the finished checklist visible); null before the
   // first write or after a later turn begins; every other event returns the
@@ -137,11 +246,11 @@ export function apply(ctx: Context, config: Config): void {
     init: () => null,
     apply: (state, event) => {
       if (event.type === 'todo/write') return event.data.todos
-      if (event.type === 'turn/start') return null
+      if (event.type === 'turn/start') return state?.some(isOpen) === true ? state : null
       return state
     },
     wire: { viewSchema: todosProjectionSchema, view: state => state },
-    stateVersion: 2,
+    stateVersion: 3,
   })
   ctx.tools.register(defineTool({
     name: 'todo_write',
@@ -220,4 +329,81 @@ export function apply(ctx: Context, config: Config): void {
     },
     presentCall: args => ({ card: 'generic', title: 'Update todo list', kind: 'other', rawInput: args.todos }),
   }))
+}
+
+/**
+ * Keep open tasks from being dropped: a turn that wrote the list and stops with tasks open is
+ * asked to continue or update it (at most `maxOpenTodoContinuationsPerTurn` times), and open
+ * tasks come back as a task-state message when the model can no longer see its latest list or
+ * the previous turn did not complete.
+ * @param ctx - plugin context.
+ * @param config - the reminder switch and the per-turn continuation cap.
+ */
+function installOpenTodoFollowUp(ctx: Context, config: Config): void {
+  // Schemastery (`Config`) fills the default before apply runs; the cast records that runtime fact.
+  const maxContinuations = (config as Required<Pick<Config, 'maxOpenTodoContinuationsPerTurn'>>).maxOpenTodoContinuationsPerTurn
+  /** The turn in which each session last wrote its list. */
+  const writtenIn = new Map<SessionId, number>()
+  /** Each session's current turn, and how many continuations it already asked for. */
+  const turns = new Map<SessionId, { turn: number; continuations: number; previousCompleted: boolean }>()
+
+  // The `todos` projection keeps a list with open tasks across turns, so it is the latest list here.
+  const latestList = (session: Session): readonly TodoItem[] | null => ctx.sessionProjections.stateOf(session, 'todos') ?? null
+
+  ctx.on('session/event', (session, event) => {
+    switch (event.type) {
+      case 'todo/write': {
+        const current = turns.get(session.id)
+        if (current !== undefined) writtenIn.set(session.id, current.turn)
+        break
+      }
+      case 'turn/start': {
+        const previous = turns.get(session.id)
+        turns.set(session.id, { turn: event.data.turn, continuations: 0, previousCompleted: previous?.previousCompleted ?? true })
+        break
+      }
+      case 'turn/end': {
+        const current = turns.get(session.id)
+        if (current !== undefined) current.previousCompleted = event.data.reason.kind === 'completed'
+        break
+      }
+      default:
+        // Other events do not move the list or the turn.
+        break
+    }
+  })
+
+  ctx.on('agent/disposed', ({ agent }) => {
+    writtenIn.delete(agent.id)
+    turns.delete(agent.id)
+  })
+
+  if (config.remindOpenTodos !== false) {
+    ctx.on('agent/pre-step', async ({ agent, step, signal }, next): Promise<PreStepDecision> => {
+      const decision = await next()
+      if (decision.kind === 'reject' || signal.aborted) return decision
+      const todos = latestList(agent.session)
+      if (todos === null || !todos.some(isOpen)) return decision
+      const cutOff = step === 1 && turns.get(agent.id)?.previousCompleted === false
+      if (!cutOff && listVisible(agent.session, todos)) return decision
+      const reminder: UserMessage = createUserMessage({
+        content: [{ type: 'text', text: reminderText(todos) }],
+        source: { kind: 'plugin', plugin: TODO_PLUGIN, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks carried over` },
+      })
+      return { ...decision, messages: [...decision.messages, reminder] }
+    })
+  }
+
+  ctx.on('agent/turn-stopping', ({ agent, turn, signal }) => {
+    if (signal.aborted || maxContinuations === 0) return
+    const current = turns.get(agent.id)
+    if (current === undefined || current.turn !== turn || writtenIn.get(agent.id) !== turn) return
+    const todos = latestList(agent.session)
+    if (todos === null || !todos.some(isOpen) || current.continuations >= maxContinuations) return
+    current.continuations += 1
+    agent.steer(createUserMessage({
+      content: [{ type: 'text', text: continuationText(todos) }],
+      source: { kind: 'plugin', plugin: TODO_PLUGIN, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks remain` },
+    }))
+  })
 }

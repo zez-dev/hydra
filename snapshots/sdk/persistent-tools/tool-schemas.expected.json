@@ -17,6 +17,223 @@
       }
     },
     {
+      "name": "doctor",
+      "description": "Read-only environment self-check of this Hydra installation: home, workspace folders, sandbox, native addon, git, mounted plugins, tool-calling compat rows, and credential references (never key values). Set probe to also send one tiny model request to the default route and report its latency or failure class.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "probe": {
+            "type": "boolean",
+            "description": "Also probe the default model route with one tiny request."
+          }
+        }
+      }
+    },
+    {
+      "name": "journal",
+      "description": "The research journal of this workspace: the durable memory of a research goal across sessions. `breakthrough` records a confirmed step toward the objective; `hypothesis` adds one (text) or sets its status (id + status); `experiment` records what was tried and the result; `dead_end` records what must not be retried and why; `next` replaces the next steps; `read` returns the journal. Entries are written to the journal file at once and recalled into every later request, so record findings the moment they happen. `slug` defaults to the research this session runs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The operation.",
+            "enum": [
+              "breakthrough",
+              "hypothesis",
+              "experiment",
+              "dead_end",
+              "next",
+              "read"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "Journal slug; defaults to the active research of this session."
+          },
+          "text": {
+            "type": "string",
+            "description": "breakthrough/hypothesis/dead_end: one or two sentences."
+          },
+          "id": {
+            "type": "string",
+            "description": "hypothesis: the hypothesis id to update."
+          },
+          "status": {
+            "type": "string",
+            "description": "hypothesis: the new status when `id` is given.",
+            "enum": [
+              "open",
+              "supported",
+              "refuted"
+            ]
+          },
+          "what": {
+            "type": "string",
+            "description": "experiment: what was tried."
+          },
+          "result": {
+            "type": "string",
+            "description": "experiment: what happened."
+          },
+          "steps": {
+            "type": "array",
+            "description": "next: the next steps in order.",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "knowledge_add",
+      "description": "Index a folder of documents the user named, so this workspace can search it with the knowledge tools. Call it only when the user asks you to use, read, or learn from a folder of documents; the user approves the folder first and is asked separately before its files are summarized.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The folder the user named: absolute, relative to the workspace, or starting with ~."
+          },
+          "name": {
+            "type": "string",
+            "description": "A short collection name of letters, digits, - and _; the folder's name when omitted."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    {
+      "name": "memory",
+      "description": "Long-term memory across sessions. `remember` stores a durable fact, shortcut, or preference, or a lesson (a root cause found, an approach that failed and why, a corrected assumption) the user would want later work to know; `search` finds stored entries; `forget` deletes one by id. Entries related to the current work appear in <retrieved_memory>; use one only when its situation matches. Write each entry so it names its situation (the file, command, or component). Never remember plans or progress reports.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "The operation.",
+            "enum": [
+              "remember",
+              "search",
+              "forget"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "description": "remember: the knowledge to store, one or two sentences."
+          },
+          "kind": {
+            "type": "string",
+            "description": "remember: fact (default), shortcut, or preference.",
+            "enum": [
+              "fact",
+              "shortcut",
+              "preference"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "description": "remember: short lowercase topic tags.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "query": {
+            "type": "string",
+            "description": "search: words matched against entry text and tags, best match first; omit to list everything."
+          },
+          "id": {
+            "type": "string",
+            "description": "forget: the entry id."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "off_peak",
+      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "queue (park a task) | list (what is queued)",
+            "enum": [
+              "queue",
+              "list"
+            ]
+          },
+          "task": {
+            "type": "string",
+            "description": "What to do when the window opens; required for `queue`."
+          }
+        },
+        "required": [
+          "action"
+        ]
+      }
+    },
+    {
+      "name": "run_experiment",
+      "description": "Run one research experiment as a shell command in the workspace and record it in the research journal: the command, exit code, metrics read from the output with your regular expressions, deltas against the previous run with the same `title`, and an output excerpt. Use it instead of `bash` for experiments so results are never lost. Requires an active research goal in this session (start one with /research).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Short stable name of the experiment; repeating a title yields per-metric deltas."
+          },
+          "command": {
+            "type": "string",
+            "description": "The shell command to run in the workspace directory."
+          },
+          "hypothesisId": {
+            "type": "string",
+            "description": "The journal hypothesis this experiment tests."
+          },
+          "timeoutMs": {
+            "type": "number",
+            "description": "Time budget in milliseconds; capped by the deployment maximum."
+          },
+          "metrics": {
+            "type": "array",
+            "description": "Metrics to read from stdout and stderr; the first capture group (else the whole match) must be a number.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Metric name."
+                },
+                "regex": {
+                  "type": "string",
+                  "description": "JavaScript regular expression."
+                }
+              },
+              "required": [
+                "name",
+                "regex"
+              ]
+            }
+          }
+        },
+        "required": [
+          "title",
+          "command"
+        ]
+      }
+    },
+    {
       "name": "str_replace_editor",
       "description": "Custom editing tool for viewing, creating and editing files\n* State is persistent across command calls and discussions with the user\n* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep\n* The `create` command cannot be used if the specified `path` already exists as a file\n* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`\n* A null placeholder for a parameter unused by the selected command is treated as omitted. Required parameters still need values; omit `str_replace.new_str` rather than setting it to null when deleting a match\n\nNotes for using the `str_replace` command:\n* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!\n* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique\n* The `new_str` parameter should contain the edited lines that should replace the `old_str`",
       "parameters": {
@@ -99,6 +316,23 @@
           "command",
           "path"
         ]
+      }
+    },
+    {
+      "name": "usage",
+      "description": "Read-only token usage across every recorded session: overall totals, a table by provider and model, and a per-day series. Counts what providers reported for assistant messages, bucketed by the local day each message happened. Use since and until to look at one stretch of days.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "Inclusive first local day as YYYY-MM-DD. Omit for all recorded history."
+          },
+          "until": {
+            "type": "string",
+            "description": "Inclusive last local day as YYYY-MM-DD. Omit to run to the most recent day."
+          }
+        }
       }
     }
   ],

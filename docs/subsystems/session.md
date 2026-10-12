@@ -161,6 +161,12 @@ interface SessionEventMap {
    * so tolerating concurrent writers needs a signal beyond the log.
    */
   'session/end-seed': { inherited?: true }
+  /**
+   * Retired on 2026-09-26 with the checkpoint plugin, whose producer left the tree; released logs still carry it, appended `ignorable`,
+   * so the declaration stays and nothing replays it. Log-only pre-dispatch record of one checkpoint-critic model request.
+   * @param data - the exact auxiliary request as the retired producer logged it.
+   */
+  'session/checkpoint-critic': CheckpointCriticEventData
 }
 ```
 
@@ -577,7 +583,13 @@ declare class Session {
    *   history) and
    *   rejected by the compiler for non-surface types like `turn/start` or
    *   `assistant/attempt`. Assistant messages embed their exact provider
-   *   stream and cannot cite top-level source events.
+   *   stream and cannot cite top-level source events. A log-only type instead
+   *   takes an optional {@link LogOnlyIntent}, whose `ignorable` marks the
+   *   record safe for a reader that does not recognize `type` to skip. A
+   *   surface event cannot be marked ignorable: an event the surface reads
+   *   changes reconstruction by definition, so the parameter type forbids it
+   *   for literal and non-literal values alike, and the append refuses it at
+   *   the log for anything a cast got past the type.
    * @returns the logged event — its assigned `seq`/`time` plus the SNAPSHOT of
    *   `data` that entered the log, so reading `event.data` back sees the logged
    *   value, never the caller's still-mutable input.
@@ -599,7 +611,7 @@ declare class Session {
   append<T extends SessionEventType>(
     type: T,
     data: SessionEventMap[T],
-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : []
+    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T> & { readonly ignorable?: never }] : [opts?: LogOnlyIntent]
     ): SessionEvent<T>;
   /**
    * The {@link EpochHeader} in force after the log's last header event — the
@@ -839,6 +851,22 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
  * @returns the new Session identity.
  */
 @Remote('fork') fork(request: SessionForkRequest): Promise<SessionForkValue>
+
+/**
+ * Rewind: fork at the completed boundary before the turn holding `atSeq`,
+ * so the new Session ends right where that turn began.
+ * @param request - source Session and an event seq inside the turn to rewind to.
+ * @returns the new Session identity and the rewound turn's user prompt.
+ */
+@Remote('rewind') rewind(request: SessionRewindRequest): Promise<SessionRewindValue>
+
+/**
+ * Delete one stored Session with the sub-agent Sessions it started; its forks
+ * are kept unless `cascade` deletes every descendant.
+ * @param request - Session identity and cascade choice.
+ * @returns every identity removed, descendants before their parents.
+ */
+@Remote('delete') delete(request: SessionDeleteRequest): Promise<SessionDeleteValue>
 
 /**
  * Admit one prompt after explicitly resuming its Session.

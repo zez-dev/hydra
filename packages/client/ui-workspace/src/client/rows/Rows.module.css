@@ -5,7 +5,7 @@
   gap: 6px;
   border-radius: 8px;
   padding: 0 8px;
-  padding-inline-start: calc(8px + var(--dsh-workspace-indent, 0px));
+  padding-inline-start: calc(8px + var(--dsh-workspace-indent, 0px) + var(--dsh-lineage-indent, 0px));
   cursor: pointer;
   user-select: none;
   color: var(--dsw-alias-label-primary);
@@ -16,8 +16,17 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
+/* The open session: an ember tint and a 2px ember bar at the leading edge
+   (an inset shadow, since the drag markers own both pseudo-elements). */
 .sessionRow.selected {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-interactive-bg-active);
+  box-shadow: inset 2px 0 0 var(--dsw-alias-brand-primary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sessionRow {
+    transition: background-color 120ms var(--ds-ease-in-out), box-shadow 160ms var(--ds-ease-in-out);
+  }
 }
 
 .searchResultRow {
@@ -386,4 +395,34 @@
   .sessionRow .title {
     scroll-behavior: auto;
   }
+}
+
+/* Archived rows are reachable only through the archived reveal: they read as
+   set aside, while every affordance (open, menu, drag) stays live. */
+.archived {
+  opacity: 0.55;
+}
+
+.archivedBadge,
+.forkCount {
+  flex: none;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-tertiary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* Lineage connector for a fork nested under its parent row; the indent itself
+   is the row's padding, so the glyph only marks where the branch lands. */
+.branchGlyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  margin-inline-end: 2px;
+  color: var(--dsw-alias-label-tertiary);
 }

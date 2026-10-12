@@ -11,3 +11,7 @@
   - menuitem "Last updated":
     - text: Last updated
     - img
+  - menuitem "Lineage"
+  - separator
+  - text: Archived sessions
+  - menuitem "Show archived"

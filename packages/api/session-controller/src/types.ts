@@ -205,6 +205,9 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'session/steer-unavailable': { readonly itemId: MessageId }
     'session/title-invalid': { readonly sessionId: SessionId }
     'session/fork-unavailable': { readonly sessionId: SessionId }
+    'session/rewind-unavailable': { readonly sessionId: SessionId }
+    'session/live': { readonly sessionId: SessionId }
+    'session/owned': { readonly sessionId: SessionId }
     'subagent/not-found': {
       readonly parentSessionId: SessionId
       readonly childSessionId: SessionId
@@ -307,6 +310,34 @@ export interface SessionForkRequest {
 /** Identity of a newly forked Session. */
 export interface SessionForkValue {
   readonly sessionId: SessionId
+}
+
+/** Session rewind request: an event seq inside the turn to rewind to. */
+export interface SessionRewindRequest {
+  readonly sessionId: SessionId
+  /** Any event seq of the turn whose start becomes the new Session's end. */
+  readonly atSeq: number
+}
+
+/** Identity of the rewound Session plus the rewound turn's user prompt, when it had one. */
+export interface SessionRewindValue {
+  readonly sessionId: SessionId
+  readonly prompt?: string
+}
+
+/** Session delete request. */
+export interface SessionDeleteRequest {
+  readonly sessionId: SessionId
+  /**
+   * Also delete every fork descendant, deepest first. Without it the forks
+   * are kept, and only the sub-agent sessions the target started are deleted with it.
+   */
+  readonly cascade?: boolean
+}
+
+/** Identities removed by one delete, descendants before their parents. */
+export interface SessionDeleteValue {
+  readonly sessionIds: readonly SessionId[]
 }
 
 /** Session prompt request. */

@@ -1,6 +1,6 @@
 /** Assistant reasoning disclosure, independent of Tool-call presentation. */
 import { useMemo, useState } from 'react'
-import { DisclosureRow, IconThinkOutline14, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
+import { DisclosureRow, HydraLogo, MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChatViewSlotProps } from '../contract/slots.ts'
 import { markdownLabels } from '../markdown-labels.ts'
 import a11yCss from './accessibility.module.css'
@@ -44,7 +44,7 @@ export function ReasoningRow({ text, running, t }: { text: string; running: bool
         leadingClassName={css.leading}
         titleClassName={css.title}
         chevronClassName={css.chevron}
-        icon={<IconThinkOutline14 size={14} />}
+        icon={<HydraLogo size={14} className={css.dragon} />}
         title={t('message.think')}
         open={expanded}
         expandable

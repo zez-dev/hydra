@@ -104,7 +104,7 @@
 /* One line under the title on the quieter ink; it ellipsizes like the title. */
 .entryDescription {
   overflow: hidden;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-tertiary);
   font-size: 13px;
   line-height: 1.4;
   white-space: nowrap;

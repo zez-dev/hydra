@@ -9,7 +9,7 @@ import { RemoteStreamCarrierError } from '@deepseek-ai/dsh-api-gateway/client'
 import { SESSION_FORMAT_VERSION, SessionSeq } from '@deepseek-ai/dsh-session/types'
 import { ok, type RemoteMock } from '@deepseek-ai/dsh-remote-mock'
 import { createClientTest, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
-import { ClientSessions, SessionCreateError, SessionForkError } from '../src/client/sessions/service.ts'
+import { ClientSessions, SessionCreateError, SessionDeleteError, SessionForkError } from '../src/client/sessions/service.ts'
 import { scopeOf } from '../src/client/scope.ts'
 import type {
   SessionAssistantStreamBaseline, SessionFollowFrame, SessionFollowRequest,
@@ -955,6 +955,34 @@ describe('fork', () => {
   })
 })
 
+describe('rewind', () => {
+  it('forks before the anchored turn, hands back its prompt, and increments the child title', async ({ bench }) => {
+    const b = bench()
+    b.svc.handleControlFrame({
+      type: 'projection', sessionId: sid('source'), key: 'title', value: 'Roadmap', seq: 2,
+    })
+    await feedList(b, [{ id: 'source', cwd: '/work' }])
+    b.mock.remote.session.rewind.mockResolvedValue(ok({ sessionId: sid('child'), prompt: 'try again' }))
+    b.mock.remote.session.rename.mockImplementation((payload) => {
+      const { title } = payload as { title: string }
+      return Promise.resolve(ok({ title, seq: 3 }))
+    })
+    await expect(b.svc.rewind({ sessionId: sid('source'), atSeq: 7.5, increaseTitle: true }))
+      .resolves.toEqual({ sessionId: 'child', prompt: 'try again' })
+    expect(b.mock.remote.session.rewind).toHaveBeenCalledExactlyOnceWith({ sessionId: 'source', atSeq: 7 })
+    expect(b.mock.remote.session.rename).toHaveBeenCalledExactlyOnceWith({ sessionId: 'child', title: 'Roadmap (1)' })
+  })
+
+  it('propagates a refused rewind as a fork error', async ({ bench }) => {
+    const b = bench()
+    const error = new RemoteError('session/rewind-unavailable', 'first turn', { sessionId: sid('source') })
+    b.mock.remote.session.rewind.mockResolvedValue(err(error))
+    const failure = await b.svc.rewind({ sessionId: sid('source'), atSeq: 1 }).catch((cause: unknown) => cause)
+    expect(failure).toBeInstanceOf(SessionForkError)
+    expect(failure).toMatchObject({ sourceSessionId: 'source', rpcError: error })
+  })
+})
+
 describe('catalog arrival', () => {
   it('keeps a retained generation indexed after its Host row is removed', async ({ bench }) => {
     const b = bench()
@@ -1069,5 +1097,26 @@ describe('coverage tails (branch duals)', () => {
     await reference.ready
     expect(b.svc.binding(sid('ghost'))).toBeUndefined()
     expect(b.svc.binding(sid('s1'))).toBe(reference.binding)
+  })
+})
+
+describe('delete', () => {
+  it('removes the deleted ids from the list', async ({ bench }) => {
+    const b = bench()
+    await feedList(b, [{ id: 'root', cwd: '/work' }, { id: 'child', cwd: '/work', parentId: 'root' }])
+    b.mock.remote.session.delete.mockResolvedValue(ok({ sessionIds: [sid('child'), sid('root')] }))
+    await expect(b.svc.delete({ sessionId: sid('root'), cascade: true })).resolves.toEqual([sid('child'), sid('root')])
+    expect(b.svc.list.getSnapshot().ids).toEqual([])
+  })
+
+  it('surfaces a host refusal as a typed error carrying the refusal', async ({ bench }) => {
+    const b = bench()
+    await feedList(b, [{ id: 'root', cwd: '/work' }])
+    const error = new RemoteError('session/live', 'running a turn', { sessionId: sid('root') })
+    b.mock.remote.session.delete.mockResolvedValue(err(error))
+    const failure = await b.svc.delete({ sessionId: sid('root') }).catch((cause: unknown) => cause)
+    expect(failure).toBeInstanceOf(SessionDeleteError)
+    expect(failure).toMatchObject({ sessionId: 'root', rpcError: error })
+    expect(b.svc.list.getSnapshot().ids).toEqual([sid('root')])
   })
 })

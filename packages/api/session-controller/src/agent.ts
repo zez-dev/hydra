@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {
-  Agent, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef,
+  Agent, AgentOptions, AgentSetup, ModelSelection as AgentModelSelection, ModelSelectionRef, AgentHandle,
 } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
@@ -142,9 +142,21 @@ export class ApiSessionAgentController {
   private readonly creations = new Map<SessionId, Promise<Agent>>()
   private readonly selections = new WeakMap<Agent, InstalledSelection>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
+  /**
+   * The disposal capability of every Agent this controller created or resumed.
+   * `AgentHandle` is the only way to tear an Agent down, and returning the bare
+   * Agent used to drop it, so a Session opened from the Web stayed live until
+   * the Host exited and could never be deleted.
+   */
+  private readonly handles = new Map<SessionId, AgentHandle>()
 
   /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
   constructor(private readonly ctx: Context) {
+    ctx.on('agent/disposed', ({ agent }) => {
+      // Torn down by its structural owner or by close(): the stored handle is
+      // stale either way, and disposing it twice would be a second teardown.
+      if (this.handles.get(agent.id)?.agent === agent) this.handles.delete(agent.id)
+    })
     ctx.typert.lookups.configure('agent', async (sessionId: SessionId) => {
       const found = await this.resolveAgent(sessionId)
       if ('error' in found) throw found.error
@@ -434,11 +446,11 @@ export class ApiSessionAgentController {
     if (published !== undefined && hasApiSessionSubagentOwner(this.ctx, published, live)) {
       throw new ApiSessionSubagentOwnership(sessionId)
     }
-    return (await this.ctx.agents.resume({
+    return this.keep(await this.ctx.agents.resume({
       resumeSessionId: sessionId,
       agentOptions: this.agentOptions(),
       setup: composition.setup,
-    })).agent
+    }))
   }
 
   private async createOrAdopt(
@@ -466,11 +478,11 @@ export class ApiSessionAgentController {
         const storedPreset = this.presetForObservation(observation)
         this.assertPresetUnchanged(sessionId, presetId, storedPreset)
         const composition = await this.composeAgent(storedPreset)
-        return (await this.ctx.agents.resume({
+        return this.keep(await this.ctx.agents.resume({
           resumeSessionId: sessionId,
           agentOptions: this.agentOptions(),
           setup: composition.setup,
-        })).agent
+        }))
       } catch (error: unknown) {
         if (!(error instanceof SessionQueryError)
           || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
@@ -483,7 +495,7 @@ export class ApiSessionAgentController {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
     }
     const composition = await this.composeAgent(presetId)
-    return (await this.ctx.agents.create({
+    return this.keep(await this.ctx.agents.create({
       sessionId,
       agentOptions: this.agentOptions(),
       meta: {
@@ -491,7 +503,45 @@ export class ApiSessionAgentController {
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
       setup: composition.setup,
-    })).agent
+    }))
+  }
+
+  /**
+   * Record an Agent's disposal handle and hand back the Agent.
+   * @param handle - the handle the registry returned for a create or resume.
+   * @returns the live Agent.
+   */
+  private keep(handle: AgentHandle): Agent {
+    this.handles.set(handle.agent.id, handle)
+    return handle.agent
+  }
+
+  /**
+   * Whether this controller holds the disposal capability for a live Agent.
+   * @param agent - a live Agent.
+   * @returns true when {@link close} could tear it down.
+   */
+  owns(agent: Agent): boolean {
+    return this.handles.get(agent.id)?.agent === agent
+  }
+
+  /**
+   * Close a live Session this controller opened, so it can be deleted.
+   * @param sessionId - Session identity.
+   * @returns `closed` after the Agent is torn down; `absent` when nothing is
+   *   live; `running` when a turn is in flight, which is never interrupted here;
+   *   `foreign` when the live Agent was opened by another owner, whose
+   *   disposal capability this controller does not hold.
+   */
+  async close(sessionId: SessionId): Promise<'closed' | 'absent' | 'running' | 'foreign'> {
+    const live = this.ctx.agents.get(sessionId)
+    if (live === undefined) return 'absent'
+    if (live.status === 'running') return 'running'
+    const handle = this.handles.get(sessionId)
+    if (handle === undefined || handle.agent !== live) return 'foreign'
+    this.handles.delete(sessionId)
+    await handle.dispose()
+    return 'closed'
   }
 
   private agentOptions(): AgentOptions {

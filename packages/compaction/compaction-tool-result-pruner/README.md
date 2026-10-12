@@ -53,7 +53,7 @@ All settings are optional; the defaults trim any result with more than 8,192 tex
 | `headChars` | `4096` | Leading Unicode code points retained. |
 | `tailChars` | `1024` | Trailing Unicode code points retained. |
 
-Character counts are Unicode code points, so slicing never splits an emoji pair, though a multi-character grapheme can still be cut. The head plus the marker plus the tail must fit within the threshold, so a valid configuration trims every over-budget result without growth or repeated rewriting. An unknown setting rejects the plugin at construction.
+Character counts are Unicode code points, so slicing never splits an emoji pair, though a multi-character grapheme can still be cut. Text without a surrogate code unit is counted and sliced by code unit, the same result without materializing every code point, and content whose code-unit length is within the threshold is skipped without counting at all. The head plus the marker plus the tail must fit within the threshold, so a valid configuration trims every over-budget result without growth or repeated rewriting. An unknown setting rejects the plugin at construction.
 
 ### When trimming runs
 

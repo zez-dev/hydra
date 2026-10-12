@@ -15,11 +15,12 @@ import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, SessionLogOffset, SessionSeq } from './types.ts'
 import type { TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
-import type { CreateSessionOptions, EpochHeader, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
+import type { CreateSessionOptions, EpochHeader, LogOnlyIntent, PrepareSessionOptions, RequestContext, SessionEvent, SessionEventMap, SessionEventType, SessionHeader, SessionId, SessionSeedEventState, SurfaceIntent, SurfaceEventType } from './types.ts'
 import { SurfaceManager, validateSessionEventData, validateSurfaceMetadata } from './surface.ts'
 import type { SessionSurface, SessionMessageProjection } from './surface.ts'
 import { foldRequestHeader } from './request-header.ts'
 
+import { isSurfaceEligibleType } from './surface.ts'
 export * from './types.ts'
 export { SessionPreparation } from './preparation.ts'
 export type { SessionPreparationOptions } from './preparation.ts'
@@ -697,7 +698,13 @@ export class Session {
    *   history) and
    *   rejected by the compiler for non-surface types like `turn/start` or
    *   `assistant/attempt`. Assistant messages embed their exact provider
-   *   stream and cannot cite top-level source events.
+   *   stream and cannot cite top-level source events. A log-only type instead
+   *   takes an optional {@link LogOnlyIntent}, whose `ignorable` marks the
+   *   record safe for a reader that does not recognize `type` to skip. A
+   *   surface event cannot be marked ignorable: an event the surface reads
+   *   changes reconstruction by definition, so the parameter type forbids it
+   *   for literal and non-literal values alike, and the append refuses it at
+   *   the log for anything a cast got past the type.
    * @returns the logged event — its assigned `seq`/`time` plus the SNAPSHOT of
    *   `data` that entered the log, so reading `event.data` back sees the logged
    *   value, never the caller's still-mutable input.
@@ -719,9 +726,16 @@ export class Session {
   append<T extends SessionEventType>(
     type: T,
     data: SessionEventMap[T],
-    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T>] : []
+    ...opts: T extends SurfaceEventType ? [opts: SurfaceIntent<T> & { readonly ignorable?: never }] : [opts?: LogOnlyIntent]
   ): SessionEvent<T> {
-    const surfaceOpts: SurfaceIntent | undefined = opts[0]
+    const surfaceOpts = opts[0] as SurfaceIntent | undefined
+    const logOnlyOpts: LogOnlyIntent | undefined = opts[0]
+    if (logOnlyOpts?.ignorable === true && isSurfaceEligibleType(type)) {
+      // The log is the durable boundary: a reader that skipped a surface event
+      // would reconstruct a different conversation, so the marker is refused
+      // here even when a cast got it past the parameter type.
+      throw new Error(`session event "${type}" joins the model-visible surface and cannot be marked ignorable`)
+    }
     const surfaceMetadata = {
       ...surfaceOpts?.sourceEventSeqs === undefined ? {} : { sourceEventSeqs: surfaceOpts.sourceEventSeqs },
       ...surfaceOpts?.surfaceOp === undefined ? {} : { surfaceOp: surfaceOpts.surfaceOp },
@@ -744,6 +758,7 @@ export class Session {
       time: Date.now(),
       data: dataSnapshot,
       ...(surfaceMetadataSnapshot as { surfaceOp?: unknown; sourceEventSeqs?: unknown }),
+      ...logOnlyOpts?.ignorable === true ? { ignorable: true } : {},
     } as unknown as SessionEvent<T>)
     validateSessionEventData(event, `session event "${type}" at seq ${event.seq}`)
     this.surfaceManager.validateNext(event as SessionEvent)

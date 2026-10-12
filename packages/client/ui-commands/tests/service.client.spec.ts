@@ -44,6 +44,7 @@ interface BenchOptions {
   execute?: (payload: { sessionId: SessionId; line: string }) => Promise<ExecuteValue>
   translate?: (namespace: string, key: string, params?: Record<string, unknown>) => string
   addressed?: SessionId
+  addressedMode?: 'continuable' | 'one-shot'
 }
 
 /**
@@ -92,6 +93,17 @@ async function bench(opts: BenchOptions = {}) {
       })
     },
   }
+  const subagentCalls: Array<{ method: 'commands' | 'command'; parentSessionId: SessionId; childSessionId: SessionId; line?: string }> = []
+  const subagentsRemote = {
+    commands: (parentSessionId: SessionId, childSessionId: SessionId) => {
+      subagentCalls.push({ method: 'commands', parentSessionId, childSessionId })
+      return Promise.resolve({ ok: true as const, value: S1_CMDS })
+    },
+    command: (parentSessionId: SessionId, childSessionId: SessionId, line: string) => {
+      subagentCalls.push({ method: 'command', parentSessionId, childSessionId, line })
+      return Promise.resolve({ ok: true as const, value: { commandId: 'child-command', result: { kind: 'success' as const } } })
+    },
+  }
   ctx.provide('inputTriggers', {
     registerSource(src: InputTriggerSource) {
       const key = `${src.trigger} ${src.name}`
@@ -114,11 +126,12 @@ async function bench(opts: BenchOptions = {}) {
     sessionOf: (scopeCtx: Context) => [...bindings.values()].find(binding => binding.ctx === scopeCtx)?.session,
     binding: (id: SessionId) => bindings.get(id),
     subagentAddress: (id: SessionId) => id === opts.addressed
-      ? { parentSessionId: sid('parent'), childSessionId: id, mode: 'continuable' as const }
+      ? { parentSessionId: sid('parent'), childSessionId: id, mode: opts.addressedMode ?? 'continuable' }
       : undefined,
   })
-  const remote = Object.assign(new TestRemote(ctx), { commands: commandsRemote })
+  const remote = Object.assign(new TestRemote(ctx), { commands: commandsRemote, subagents: subagentsRemote })
   ctx.provide('remote.commands', commandsRemote)
+  ctx.provide('remote.subagents', subagentsRemote)
   const executions: Array<{ sessionId: SessionId; name: string; result: CommandResult }> = []
   ctx.on('command/executed', (sessionId, name, result) => {
     executions.push({ sessionId, name, result })
@@ -158,7 +171,7 @@ async function bench(opts: BenchOptions = {}) {
     await source.candidates(session, { query: '', position: 'leading', drilled: false, signal: new AbortController().signal })
   }
   return {
-    ctx, fiber, command, source, mint, warm, listCalls, executeCalls, executions, registered, notices, focuses, remote,
+    ctx, fiber, command, source, mint, warm, listCalls, executeCalls, executions, registered, notices, focuses, remote, subagentCalls,
     removeSessions, removeConversation,
   }
 }
@@ -224,10 +237,34 @@ describe('registration', () => {
 })
 
 describe('candidates', () => {
-  it('does not fetch Agent-bound commands for an addressed child', async () => {
+  it('lists a continuable child\'s own commands through its parent address, never the session route', async () => {
     const b = await bench({ addressed: sid('child') })
+    const list = await b.source.candidates(proj('child'), req('g'))
+    expect(b.listCalls).toEqual([])
+    expect(b.subagentCalls).toEqual([{ method: 'commands', parentSessionId: sid('parent'), childSessionId: sid('child') }])
+    expect(list.map(candidate => candidate.name)).toEqual(['goal'])
+  })
+
+  it('runs a command in a continuable child through its parent address and refuses attachments there', async () => {
+    const b = await bench({ addressed: sid('child') })
+    await b.warm(proj('child'))
+    const outcome = menuPick(b.source, 'goal', proj('child'))
+    if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected the claim')
+    await expect(outcome.claim.submit('ship it', new Context(), [])).resolves.toEqual({ kind: 'success' })
+    expect(b.executeCalls).toEqual([])
+    expect(b.subagentCalls.at(-1)).toEqual({
+      method: 'command', parentSessionId: sid('parent'), childSessionId: sid('child'), line: '/goal ship it',
+    })
+    await expect(outcome.claim.submit('ship it', new Context(), [{ type: 'image' } as never])).resolves.toEqual({
+      kind: 'error', text: 'commands in a subagent session take no attachments',
+    })
+  })
+
+  it('offers no commands in a one-shot child, which takes no input', async () => {
+    const b = await bench({ addressed: sid('child'), addressedMode: 'one-shot' })
     await expect(b.warm(proj('child'))).resolves.toBeUndefined()
     expect(b.listCalls).toEqual([])
+    expect(b.subagentCalls).toEqual([])
   })
 
   it('pulls the session catalog; fuzzy filter and hint mapping apply', async () => {

@@ -73,8 +73,10 @@ The `mode` config decides what the model sees: `native` (every visible schema), 
 |---|---|---|
 | `mode` | `native` | How visible tools are presented to the model: `native`, `ptc`, or `both` |
 | `maxParallelSubCalls` | `10` | Concurrency cap for a `run_code` program's overlapping sub-calls; `1` restores strictly serial dispatch |
+| `argumentCoercion` | `none` (base bundle: `lenient`) | `lenient` repairs model arguments against each tool's parameter schema before validation: exact numeric, integer, and boolean spellings become scalars, JSON text for an object or array parameter is parsed, and `null` for an optional non-nullable parameter is dropped; the logged `tool/call` keeps the model's original text |
+| `nullableParameters` | `oneOf` (also `oneOf` in `dsh-base`) | `flat` presents every `oneOf: [X, {type: 'null'}]` parameter to the model as `X`; execution still validates against the declared schema. Off by default: Z.ai's own GLM client ships `oneOf` unions and even rewrites `anyOf` into `oneOf`, so set `flat` only for a gateway proven to mishandle them |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tools) is the exhaustive source for every accepted field. Non-native modes require a composed `ctx.ptcRuntime` whose language has a registered SDK renderer; an agent preset selects its own presentation with [`dsh-agent-tool-presentation`](../agent-tool-presentation/README.md), and one agent can shadow the default with `presentAs(mode)`.
+Both fields exist for models whose function calling is fragile. `dsh-base` turns `argumentCoercion: lenient` on and leaves `nullableParameters` at `oneOf`; set `argumentCoercion: none` to restore strict validation. The boolean spellings the coercion accepts (`true/1/yes/y/on` and `false/0/no/n/off`, case-insensitive) match what Z.ai's own GLM client accepts per tool. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tools) is the exhaustive source for every accepted field. Non-native modes require a composed `ctx.ptcRuntime` whose language has a registered SDK renderer; an agent preset selects its own presentation with [`dsh-agent-tool-presentation`](../agent-tool-presentation/README.md), and one agent can shadow the default with `presentAs(mode)`.
 
 ### Restrict tools per agent
 
@@ -110,6 +112,7 @@ The registry holds typed `ToolDefinition`s in scoped layers and projects them on
 | [`src/types.ts`](src/types.ts) | `ToolDefinition`, `ToolExecution`, `ToolExecutionResult`, guard and decision types |
 | [`src/schema.ts`](src/schema.ts) | The `defineTool` DSL: `ValueSchemaSpec`, `ParameterSchemaSpec`, `InferValue`, `InferArgs` |
 | [`src/json-schema.ts`](src/json-schema.ts) | The enforced raw JSON Schema subset and validation |
+| [`src/compat.ts`](src/compat.ts) | Weak-function-caller compatibility: argument coercion and nullable-parameter flattening |
 | [`src/presentation.ts`](src/presentation.ts) | The `card`-tagged UI render intents |
 | [`src/ptc.ts`](src/ptc.ts) | PTC mode: SDK generation, `run_code` dispatch bridge, settlement |
 | [`src/ts-types.ts`](src/ts-types.ts) | TypeScript SDK type rendering |

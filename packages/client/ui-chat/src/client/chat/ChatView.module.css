@@ -41,6 +41,10 @@
   margin: 0 auto;
   display: flex;
   flex-direction: column;
+  /* The view records every scroll it writes and takes any other offset for
+     the reader's, so the browser's own scroll anchoring must stay out of it,
+     both when the column is the scroller and inside a conversation scroller. */
+  overflow-anchor: none;
 }
 
 /* `hidden="until-found"` retains a zero-height box so browser find can reveal
@@ -77,13 +81,15 @@
 /* Selection still sets data-selected for details linkage; no outline —
    tool rows match Think chrome (no selected ring). */
 
-/* Turn activity keeps the former loader's one-line footprint. A pale
-   brand-blue band sweeps from left to right; reduced-motion keeps it static. */
+/* Turn activity keeps the former loader's one-line footprint: the dragon's
+   face with its eyes glowing, then its label, where a pale band sweeps from
+   left to right over the brand red; reduced motion keeps both still. */
 .turnStatus {
   align-self: flex-start;
   flex: none;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   height: calc(26px + var(--dsh-content-font-delta, 0px));
   font: var(--dsw-font-s-strong-14);
   /* The status line reads at the body size: the fixed 14 token supplies the
@@ -94,13 +100,53 @@
   font-size: var(--dsh-content-font-size, 14px);
   line-height: calc(22px + var(--dsh-content-font-delta, 0px));
   white-space: nowrap;
+}
+
+.turnStatusMark {
+  flex: none;
+  color: var(--dsw-alias-brand-primary);
+}
+
+@keyframes dsh-turn-status-dragon-halo {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 transparent);
+  }
+
+  50% {
+    filter: drop-shadow(0 0 3px var(--dsh-ember-halo));
+  }
+}
+
+@keyframes dsh-turn-status-dragon-eyes {
+  0%,
+  100% {
+    fill: var(--dsw-alias-brand-highlight);
+  }
+
+  50% {
+    fill: var(--dsh-dragon-eye-glow);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .turnStatusMark {
+    animation: dsh-turn-status-dragon-halo 1.6s ease-in-out infinite;
+  }
+
+  .turnStatusMark [data-part='pupil'] {
+    animation: dsh-turn-status-dragon-eyes 1.6s ease-in-out infinite;
+  }
+}
+
+.turnStatusText {
   background: linear-gradient(
     90deg,
-    var(--dsw-static-deepseek-500) 0%,
-    var(--dsw-static-deepseek-500) 40%,
+    var(--dsw-alias-brand-primary) 0%,
+    var(--dsw-alias-brand-primary) 40%,
     var(--dsw-static-deepseek-200) 50%,
-    var(--dsw-static-deepseek-500) 60%,
-    var(--dsw-static-deepseek-500) 100%
+    var(--dsw-alias-brand-primary) 60%,
+    var(--dsw-alias-brand-primary) 100%
   );
   background-position: 100% 0;
   background-size: 250% 100%;
@@ -129,7 +175,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .turnStatus {
+  .turnStatusText {
     background-position: 0 0;
     background-size: 100% 100%;
     animation: none;

@@ -33,7 +33,7 @@ Choose it when several plugins should agree on one replay-based measurement — 
 
 ### Measuring pressure
 
-`ctx.tokenMeter` exposes two operations. `measure(session, requestHeader?)` returns a detached, deeply immutable snapshot at one consumed-log revision: `totalTokens` is request-and-response pressure, and `surfaceTokens` is the surface-only route-priced total equal to the sum of `nodes[].tokens`. An optional `requestHeader` override selects the priced route and pressure fields; the node set still describes the current session. `estimateMessage(message)` prices one message with the fixed heuristic. Every call clones the positional surface nodes, so measurement is O(surface).
+`ctx.tokenMeter` exposes three operations. `measure(session, requestHeader?)` returns a detached, deeply immutable snapshot at one consumed-log revision: `totalTokens` is request-and-response pressure, and `surfaceTokens` is the surface-only route-priced total equal to the sum of `nodes[].tokens`. An optional `requestHeader` override selects the priced route and pressure fields; the node set still describes the current session. `estimateMessage(message)` prices one message with the fixed heuristic, and `estimateTools(tools)` prices tool schemas the way a logged header's are priced. Every call clones the positional surface nodes, so measurement is O(surface).
 
 ```text
 const { totalTokens, surfaceTokens, nodes } = ctx.tokenMeter.measure(session)
@@ -65,7 +65,7 @@ Both plugins have usable defaults. The meter consumes only the optional `llm` se
 
 ### Reading the numbers
 
-Occupancy is a reference figure, not a billing record: nothing in the harness makes decisions from it, and compaction reads `measure()` instead. A UI computes occupancy by dividing measured pressure by the separately resolved capacity for the selected model. The `contextBreakdown` figures are estimates that will not sum to `projectedTokens`, whose provider anchor carries exactly the heuristic error — CJK text and JSON schemas underprice badly at four characters per token.
+Occupancy is a reference figure, not a billing record, and it is the number the compaction backend acts on: `contextPressure` anchors to the backend's own price of the outgoing request (`compaction/pressure`, carrying the route's `density` and the `thresholdTokens` the next step condenses at) until the provider reports that request's usage, then to the provider's count, and prices the surface's movement since either anchor at that density, exactly as `measure()` does. A UI computes occupancy by dividing `projectedTokens` by the separately resolved capacity for the selected model. The `contextBreakdown` figures are heuristic estimates whose sum is not `projectedTokens`; a UI scales them to it and presents them as proportions of composition, since CJK text and JSON schemas underprice badly at four characters per token.
 
 -----
 
@@ -136,7 +136,7 @@ No direct invalidation; the named consumer owns any request-prefix changes.
 These limits define where the measurement stops and future work begins. They are current package constraints, not a general token-accounting comparison or a task backlog.
 
 - **The fixed heuristic is approximate** — text without reusable provider usage is priced by character count plus structural overhead, not an exact provider tokenizer or request serializer; only image occurrences on routes with declared pricing carry provider-exact visual tokens.
-- **Every measurement clones the current surface** — coherent immutable snapshots make reads O(surface), including below-threshold pressure checks.
+- **Every measurement at a new log revision clones the current surface** — coherent immutable snapshots make reads O(surface); a headerless `measure` at an unchanged revision returns the same frozen snapshot, so the pressure check, the cap clamp, and range selection within one step share one clone.
 - **Provider usage is only reusable for an identical canonical envelope** — tools, provider, model, or call-config changes deliberately fall back to full heuristic estimation; system-prompt changes are signed surface deltas until the next successful call.
 - **A system-prompt rewrite carries no shadow price** — the loop replaces a system node without an adjacent metering event, so `contextPressure.projectedTokens` folds that replacement at zero delta until the next usage sample; `contextBreakdown.systemTokens` and `measure()` reprice the new prompt immediately.
 - **Composition checkpoints retain the current surface** — exact system/message classification needs positional entries; checkpoint size and surface-event folding are O(current retained surface).
@@ -149,7 +149,7 @@ These limits define where the measurement stops and future work begins. They are
 
 This Dev Note is non-authoritative working context: notes for maintainers and open questions. Shipped behavior and accepted rationale live in the sections above, the package code, and the linked Agent Notes.
 
-- The fixed four-characters-per-token heuristic underprices CJK text and JSON schemas; the provider anchor carries exactly that error when usage is reused. Present the composition rows as an approximate composition, never as a total.
+- The fixed four-characters-per-token heuristic underprices CJK text and JSON schemas; a usage anchor corrects the anchored request exactly, and on a route without image pricing the surface delta after it is priced at the route's density (the provider's count over the heuristic's, the densest of the newest eight anchors on the route), so the undercount does not grow with the conversation; `estimatedTokens` keeps the pure heuristic size of the request beside it, so a consumer that learns the provider's count another way (compaction learns it from refusals) has the number to apply it to; a route with image pricing keeps the heuristic delta, because its images are already priced exactly. Present the composition rows as an approximate composition, never as a total.
 - A per-provider exact tokenizer is not decided; keeping one deterministic heuristic is what makes every consumer's measurement agree and replay-stable.
 
 </details>

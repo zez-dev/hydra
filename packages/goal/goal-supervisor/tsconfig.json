@@ -1,0 +1,48 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types"
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../../vendor/cosmokit"
+    },
+    {
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../../../vendor/schemastery"
+    },
+    {
+      "path": "../../core/agent"
+    },
+    {
+      "path": "../goal"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../../llm/llm"
+    },
+    {
+      "path": "../../session-query/session-query"
+    },
+    {
+      "path": "../../interaction/commands"
+    },
+    {
+      "path": "../../preset/agent-presets"
+    },
+    {
+      "path": "../../core/agent-default-model"
+    },
+    {
+      "path": "../../session-query/session-query-sqlite"
+    }
+  ]
+}

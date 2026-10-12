@@ -9,18 +9,32 @@ import type { SubagentRun } from '@deepseek-ai/dsh-subagent'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { assertNever, snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
-import type { WorkflowAgentEndInfo, WorkflowAgentInfo, WorkflowMeta, WorkflowResult, WorkflowRun, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
+import { callKeyHash } from '@deepseek-ai/dsh-workflow'
+import type { JournalCall, JournalCallOutcome, WorkflowAgentEndInfo, WorkflowAgentInfo, WorkflowMeta, WorkflowResult, WorkflowRun, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import { WORKFLOW_GUEST_SOURCE } from './guest-source.ts'
 import type { WorkflowProgress } from './guest-types.ts'
 import { renderThrown } from './realm.ts'
+import type { RunRecording } from './recording.ts'
 import type { ExecutionObserver } from './runtime.ts'
 import type { ChildStartRequest, WorkerInit } from './types.ts'
 
-interface ChildRecord {
+/** A call that spawned a child agent for real. */
+interface LiveChild {
+  readonly kind: 'live'
   readonly callId: number
+  readonly keyHash: string
   readonly run: SubagentRun
   disposal?: Promise<void>
 }
+
+/** A call a resume answered from the journal, having spawned nothing. */
+interface ReplayedChild {
+  readonly kind: 'replayed'
+  readonly callId: number
+  readonly call: JournalCall
+}
+
+type ChildRecord = LiveChild | ReplayedChild
 
 const GUEST_URL = `data:text/javascript,${encodeURIComponent(WORKFLOW_GUEST_SOURCE)}`
 const PROGRAM = `const { runWorkflowGuest } = await import(${JSON.stringify(GUEST_URL)}); return await runWorkflowGuest(workflowHost);`
@@ -115,6 +129,8 @@ export class PtcWorkflowRun implements WorkflowRun {
   private readonly children = new Map<number, ChildRecord>()
   private readonly pending = new Set<Promise<unknown>>()
   private readonly liveAgents = new Map<number, WorkflowAgentInfo>()
+  /** Agent identity by child id, so a settled call is journaled with the label the script gave it. */
+  private readonly observedAgents = new Map<string, WorkflowAgentInfo>()
   private started = 0
   private terminal = false
   private cancelReason: string | undefined
@@ -133,11 +149,11 @@ export class PtcWorkflowRun implements WorkflowRun {
     private readonly policy: SandboxExecutionPolicy,
     private readonly observer: ExecutionObserver,
     private readonly signal?: AbortSignal,
+    private readonly recording?: RunRecording,
   ) {
     this.externalAbort = () => { this.cancel('workflow signal aborted') }
     if (signal?.aborted) this.externalAbort()
     else signal?.addEventListener('abort', this.externalAbort, { once: true })
-    // Consumers attach durable run recording after start() returns.
     this.result = Promise.resolve().then(() => this.drive())
   }
 
@@ -197,6 +213,14 @@ export class PtcWorkflowRun implements WorkflowRun {
   private async startChild(request: ChildStartRequest): Promise<PtcJsonValue> {
     this.requireActive()
     const callId = ++this.started
+    const keyHash = callKeyHash(request)
+    // A resume answers this call from the journal only when the same position
+    // carries the same inputs; an edited prompt or route runs for real.
+    const journaled = this.recording?.replay.get(callId)
+    if (journaled !== undefined && journaled.keyHash === keyHash) {
+      this.children.set(callId, { kind: 'replayed', callId, call: journaled })
+      return { callId, childId: journaled.childId }
+    }
     const run = await this.subagents.start(this.provider, {
       prompt: [{ type: 'text', text: request.prompt }],
       parent: this.parent,
@@ -209,7 +233,7 @@ export class PtcWorkflowRun implements WorkflowRun {
         },
       },
     })
-    const record: ChildRecord = { callId, run }
+    const record: LiveChild = { kind: 'live', callId, keyHash, run }
     this.children.set(callId, record)
     // A provider can publish after the signal fired while startup was pending.
     if (this.controller.signal.aborted) {
@@ -219,7 +243,26 @@ export class PtcWorkflowRun implements WorkflowRun {
     return { callId, childId: run.id }
   }
 
-  private async childResult(record: ChildRecord): Promise<PtcJsonValue> {
+  private childResult(record: ChildRecord): Promise<PtcJsonValue> {
+    switch (record.kind) {
+      case 'replayed': return this.replayedResult(record)
+      case 'live': return this.liveResult(record)
+      /* v8 ignore next -- both variants of the closed union return above. */
+      default: return assertNever(record, 'workflow child record')
+    }
+  }
+
+  private replayedResult(record: ReplayedChild): Promise<PtcJsonValue> {
+    this.requireActive()
+    // The recorded value crossed the journal's file storage; narrow it again
+    // before it re-enters the guest realm.
+    const value = json(record.call.outcome.value)
+    // Re-record it so resuming THIS run replays the call in turn.
+    this.recording?.record({ ...record.call, settledAt: new Date().toISOString() })
+    return Promise.resolve(value)
+  }
+
+  private async liveResult(record: LiveChild): Promise<PtcJsonValue> {
     const signal = this.controller.signal
     signal.throwIfAborted()
     const aborted = Promise.withResolvers<never>()
@@ -227,17 +270,45 @@ export class PtcWorkflowRun implements WorkflowRun {
     signal.addEventListener('abort', onAbort, { once: true })
     try {
       const result = await Promise.race([record.run.result, aborted.promise])
-      return json({
+      const value = json({
         output: result.output,
         stopReason: result.stopReason,
         ...result.structured === undefined ? {} : { structured: result.structured },
       })
+      // Only a completed child is replayable: one that hit a rate limit or a
+      // cut connection must run again on resume, not reproduce its failure.
+      this.journal(record, result.stopReason === 'completed'
+        ? { ok: true, value }
+        : { ok: false, error: `child stopped: ${result.stopReason}` })
+      return value
+    } catch (error: unknown) {
+      // An aborted signal means the call never settled, so it gets no entry.
+      if (!signal.aborted) this.journal(record, { ok: false, error: renderThrown(error) })
+      throw error
     } finally {
       signal.removeEventListener('abort', onAbort)
     }
   }
 
+  private journal(record: LiveChild, outcome: JournalCallOutcome): void {
+    const observed = this.observedAgents.get(record.run.id)
+    this.recording?.record({
+      ordinal: record.callId,
+      kind: 'agent',
+      keyHash: record.keyHash,
+      childId: record.run.id,
+      ...observed === undefined ? {} : { label: observed.label },
+      ...observed?.phase === undefined ? {} : { phase: observed.phase },
+      settledAt: new Date().toISOString(),
+      outcome,
+    })
+  }
+
   private disposeChild(record: ChildRecord): Promise<void> {
+    if (record.kind === 'replayed') {
+      this.children.delete(record.callId)
+      return Promise.resolve()
+    }
     record.disposal ??= Promise.resolve().then(() => record.run.dispose()).catch((error: unknown) => {
       this.ctx.logger.warn(`workflow-ptc: child dispose failed: ${renderThrown(error)}`)
     }).finally(() => {
@@ -253,6 +324,7 @@ export class PtcWorkflowRun implements WorkflowRun {
       case 'log': this.observer.log(event.message); break
       case 'agent-start':
         this.liveAgents.set(event.info.seq, event.info)
+        this.observedAgents.set(event.info.childId, event.info)
         this.observer.agentStart(event.info)
         break
       case 'agent-end': this.endAgent(event.info); break
@@ -299,8 +371,13 @@ export class PtcWorkflowRun implements WorkflowRun {
       while (this.pending.size > 0) await Promise.allSettled([...this.pending])
       await Promise.all([...this.children.values()].map(record => this.disposeChild(record)))
       this.children.clear()
+      this.observedAgents.clear()
       for (const info of this.liveAgents.values()) this.endAgent({ ...info, outcome: 'cancelled' })
     }
+    // The result must not resolve before the journal is durable: a one-shot
+    // process can exit immediately after, and a run whose closing write never
+    // landed reconciles to `interrupted` at the next activation.
+    if (this.recording !== undefined) await this.recording.close(result)
     return result
   }
 }

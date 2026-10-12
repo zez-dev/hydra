@@ -43,7 +43,7 @@ The command turns each expected failure into a stable message you can show direc
 |---|---|
 | Compaction already running, or the agent is mid-turn | `Compaction is unavailable because this process has an active compaction, or the agent is not idle.` |
 | The history changed while condensing | `The history selected for compaction changed before it could be replaced. The attempt is recorded in the session log.` |
-| No useful summary could be produced | `Compaction could not produce a useful summary. The attempt is recorded in the session log.` |
+| No useful summary could be produced | `Compaction could not produce a useful summary: <reason>. The attempt is recorded in the session log.` The reason names a checkpoint no smaller than the history it replaces (with both token counts), a summary cut at its output cap even after the raises and smaller ranges the window affords (raise `summaryWindowRatio` on `dsh-compaction-basic` or route summarization to a model that answers without thinking), a summarization request the provider refused as over its window even after three retries on smaller ranges (lower `contextWindow` for that model to what the provider accepts), or the backend diagnostic itself, followed in parentheses by the engine's numbers when it recorded them (window, margin, request and summary caps, estimated and priced sizes, density, output floor), so a pasted reason carries what a maintainer needs. |
 | Condensation did not finish cleanly | `Compaction did not finish cleanly; some session history may have changed. Inspect the current session state before retrying.` |
 | The conversation could not be saved | `Compaction finished, but the session could not be saved.` |
 

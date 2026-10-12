@@ -9,6 +9,7 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import type { ContextPressureProjection, TokenUsageProjection } from '@deepseek-ai/dsh-token-meter/client'
 import { RetryId } from '@deepseek-ai/dsh-llm-retry'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
+import { contextPressureProjectionDefinition } from '../src/usage-projection.ts'
 
 const ZERO: TokenUsageProjection = {
   uncachedInputTokens: 0,
@@ -388,6 +389,62 @@ describe('contextPressure session projection', () => {
     expect(pressure(ctx, session).pressureTokens).toBe(250)
   })
 
+  it('anchors occupancy to the backend\'s priced request until the provider reports its usage', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    recordContext(session, 'small', 64_000)
+    const batch = createUserMessage({ content: [{ type: 'text', text: 'x'.repeat(40) }], source: { kind: 'user' } })
+    const batchTokens = ctx.tokenMeter.estimateMessage(batch)
+    // The backend priced the outgoing request, its admitted batch included,
+    // at 1.5 provider tokens per heuristic token.
+    session.append('compaction/pressure', {
+      estimatedTokens: 1_000, pendingTokens: batchTokens, pricedTokens: 1_500, density: 1.5,
+      contextWindow: 64_000, outputCap: 4_000, thresholdTokens: 51_200,
+    }, { ignorable: true })
+    expect(pressure(ctx, session)).toEqual({ contextWindow: 64_000, projectedTokens: 1_500, density: 1.5, thresholdTokens: 51_200 })
+    // The admitted batch lands: the price counted it ahead, so the figure holds.
+    session.append('user/message', batch, { surfaceOp: 'append' })
+    expect(pressure(ctx, session).projectedTokens).toBe(1_500)
+    // Growth past the batch is priced at the route's density, as the backend prices it.
+    const more = createUserMessage({ content: [{ type: 'text', text: 'y'.repeat(400) }], source: { kind: 'user' } })
+    session.append('user/message', more, { surfaceOp: 'append' })
+    expect(pressure(ctx, session).projectedTokens).toBe(1_500 + Math.round(ctx.tokenMeter.estimateMessage(more) * 1.5))
+    // The provider's count for that request is the newest anchor once it arrives.
+    usageChunk(session, { inputTokens: 1_700, outputTokens: 10 }, 1, 1)
+    finalUsage(session, { inputTokens: 1_700, outputTokens: 10 }, 1, 1)
+    expect(pressure(ctx, session).pressureTokens).toBe(1_700)
+    expect(pressure(ctx, session).projectedTokens).toBe(1_700)
+  })
+
+  it('counts a surface that shrank after the price in full, as a compaction does', async () => {
+    const { ctx, session } = await harness()
+    startStep(session, 1, 1)
+    recordContext(session, 'small', 64_000)
+    const big = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'z'.repeat(4_000) }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    session.append('compaction/pressure', {
+      estimatedTokens: 1_000, pendingTokens: 0, pricedTokens: 1_500, density: 1.5,
+      contextWindow: 64_000, outputCap: 4_000, thresholdTokens: 51_200,
+    }, { ignorable: true })
+    appendSummaryMeter(ctx, session, big.seq, big.seq)
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'short summary' }],
+      source: { kind: 'plugin', plugin: 'test' },
+    }), { surfaceOp: { op: 'replace', startSeq: big.seq, endSeq: big.seq }, sourceEventSeqs: [big.seq] })
+    const projectedTokens = pressure(ctx, session).projectedTokens ?? 0
+    expect(projectedTokens).toBeGreaterThan(0)
+    expect(projectedTokens).toBeLessThan(1_500)
+  })
+
+  it('counts all growth past a priced checkpoint that carries no pending batch', () => {
+    // A cached state may omit the pending batch; the growth past the price is then priced whole.
+    expect(contextPressureProjectionDefinition.wire.view({
+      surfaceTokens: 1_200, pricedTokens: 1_500, pricedSurfaceTokens: 1_000, density: 1.5, anchor: 'priced',
+    }).projectedTokens).toBe(1_800)
+  })
+
   it('carries the newest recorded capacity and replaces it on a model switch', async () => {
     const { ctx, session } = await harness()
     startStep(session, 1, 1)
@@ -439,7 +496,7 @@ describe('contextPressure session projection', () => {
     const checkpoint = JSON.parse(JSON.stringify(
       ctx.sessionProjections.checkpoint(session),
     )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
-    expect(checkpoint.contextPressure?.ver).toBe(5)
+    expect(checkpoint.contextPressure?.ver).toBe(6)
 
     await meterFiber.dispose()
     expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('contextPressure')

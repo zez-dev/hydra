@@ -24,6 +24,9 @@
       "path": "../../core/agent"
     },
     {
+      "path": "../../interaction/commands"
+    },
+    {
       "path": "../../llm/llm"
     },
     {

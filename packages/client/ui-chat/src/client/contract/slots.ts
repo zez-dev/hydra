@@ -84,6 +84,8 @@ export interface ChatNodeOwnerProps {
   openFile: (path: string, options?: OpenFileOptions) => void
   inspectCall: (callId: ToolCallId) => void
   forkAt: (seq: number) => void
+  /** Rewind: open a fork cut before the turn holding `seq`, its prompt pre-filled in the composer; absent hides the action. */
+  rewindTo?: ((seq: number) => void) | undefined
   /**
    * Session-authorized image loader, down-threaded from the Chat view so a
    * chat-node renderer can render the attachment presentation slot directly
@@ -154,6 +156,8 @@ export interface ChatViewInjected {
     read: () => ChatScrollPosition | null
   }
   forkAt: (seq: number) => void
+  /** Rewind: open a fork cut before the turn holding `seq`, its prompt pre-filled in the composer. */
+  rewindTo: (seq: number) => void
   fileMentions: (owner: TurnTailOwnerProps) => MarkdownFileMentions | undefined
 }
 

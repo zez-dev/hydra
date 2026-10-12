@@ -122,7 +122,7 @@ describe('agent loop', () => {
       configurable: true,
       value: (...args: Parameters<typeof agent.session.append>): ReturnType<typeof agent.session.append> => {
         if (args[0] === 'assistant/message') throw new Error('settlement rejected')
-        return Reflect.apply(append, agent.session, args) as ReturnType<typeof agent.session.append>
+        return Reflect.apply(append, agent.session, args)
       },
     })
 
@@ -243,7 +243,7 @@ describe('agent loop', () => {
       configurable: true,
       value: (...args: Parameters<typeof agent.session.append>): ReturnType<typeof agent.session.append> => {
         if (args[0] === 'assistant/attempt') throw settlementFailure
-        return Reflect.apply(append, agent.session, args) as ReturnType<typeof agent.session.append>
+        return Reflect.apply(append, agent.session, args)
       },
     })
     const errors: unknown[] = []
@@ -1357,6 +1357,73 @@ describe('agent loop', () => {
     ])
     // A max-token step is sticky: the later completed step must not
     // downgrade the turn outcome.
+    expect(reasons).toEqual([{ kind: 'max-tokens' }])
+  })
+
+  it('a tool call after a continuation keeps the turn going until the model answers', async () => {
+    // Step 1 is cut off; the continuation's step 2 calls a tool, whose
+    // result owes another request; step 3 answers. The turn must not stop
+    // after the tool result just because an earlier step was cut.
+    const adapter = new MockAdapter([
+      maxTokensResponse('first half'),
+      toolCallResponse('c1', 'echo', { text: 'ping' }),
+      textResponse('second half'),
+    ])
+    const ctx = await harness(adapter)
+    ctx.tools.register(defineContentToolFixture({
+      name: 'echo',
+      description: 'echo back',
+      parameters: { text: { type: 'string' } },
+      async execute(args) {
+        return [{ type: 'text', text: `echo: ${args.text}` }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    let continued = false
+    ctx.on('agent/turn-stopping', ({ agent: subject }) => {
+      if (continued) return
+      continued = true
+      subject.steer(createUserMessage({ content: [{ type: 'text', text: 'continue after truncation' }], source: { kind: 'plugin', plugin: 'max-tokens-test' } }))
+    })
+    const reasons: TurnEndReason[] = []
+    ctx.on('session/event', (_s, event) => { if (event.type === 'turn/end') reasons.push(event.data.reason) })
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    expect(adapter.requests).toHaveLength(3)
+    const last = adapter.requests[2]!.messages.at(-1)!
+    expect(last.content.some(block => block.type === 'tool-result')).toBe(true)
+    // The cut step still marks the turn's outcome.
+    expect(reasons).toEqual([{ kind: 'max-tokens' }])
+  })
+
+  it('a step cut while carrying a tool call stops the turn without executing the call', async () => {
+    // The cut arrives with a tool call the model never finished; the call is
+    // not executed and the turn ends max-tokens instead of owing another request.
+    const adapter = new MockAdapter([
+      [...toolCallResponse('c1', 'echo', { text: 'ping' }).slice(0, -1), { type: 'finish', reason: { kind: 'max-tokens' } }],
+    ])
+    const ctx = await harness(adapter)
+    let executed = 0
+    ctx.tools.register(defineContentToolFixture({
+      name: 'echo',
+      description: 'echo back',
+      parameters: { text: { type: 'string' } },
+      async execute() {
+        executed += 1
+        return [{ type: 'text', text: 'echo' }]
+      },
+    }))
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+    const reasons: TurnEndReason[] = []
+    ctx.on('session/event', (_s, event) => { if (event.type === 'turn/end') reasons.push(event.data.reason) })
+
+    send(agent, 'go')
+    await waitForIdle(ctx, agent)
+
+    expect(adapter.requests).toHaveLength(1)
+    expect(executed).toBe(0)
     expect(reasons).toEqual([{ kind: 'max-tokens' }])
   })
 

@@ -31,6 +31,8 @@ The `workflow` tool runs a model-authored orchestration script that fans work ou
 
 The model submits three parameters: `meta` (required identity data: `name`, `description`, and optional `whenToUse` and `phases`), `script` (required plain JavaScript body — no `export const meta` statement; the tool description carries the complete authoring contract), and `args` (optional JSON object exposed to the script as the `args` global; wrap a bare list in a field so the wire schema stays honest).
 
+A fourth optional parameter, `resumeRunId`, names an earlier run to continue. With the same script and args, every `agent()` call that already completed at the same position with the same prompt and route returns its recorded answer, and only the remaining work runs. It needs a journal Service Provider mounted; [`dsh-workflow-journal`](../workflow-journal/README.md) is the one the base bundle mounts, and `/workflows` is where run ids come from.
+
 Success returns the canonical envelope `{ runId, agentsStarted, result }`, rendered to the model as `workflow "<name>" completed (<count> agent<optional-s>).` followed by `Return value:` and the pretty-printed JSON. A workflow that cannot start — a script parse or meta validation failure — returns an error the model can correct from. Cancellation and execution failures return `Error: workflow run was cancelled` or `Error: workflow run failed: <error>`; partial output is never reported as success.
 
 ### What to expect during a run

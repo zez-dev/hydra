@@ -1,0 +1,117 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 760px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.heading h3,
+.heading p,
+.status,
+.failure p,
+.entryText,
+.notice {
+  margin: 0;
+}
+
+.heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.heading h3 {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.heading p,
+.status,
+.failure,
+.entryMeta,
+.notice {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.failure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-separator-secondary);
+  border-radius: 8px;
+  background: var(--dsw-alias-fill-tertiary);
+}
+
+.entry[data-busy='true'] {
+  opacity: 0.7;
+}
+
+.entryMain {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.entryText {
+  font-size: 13px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.entryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.entryActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.promoteForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.promoteLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.editor {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  resize: vertical;
+}

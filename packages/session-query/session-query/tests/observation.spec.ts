@@ -7,6 +7,7 @@ import SessionPersistence, {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
   SessionReadOnlyError,
+  type SessionDeleteResult,
 } from '@deepseek-ai/dsh-session-persistence'
 import type {
   SessionAccess,
@@ -486,6 +487,7 @@ describe('SessionObservationReader cold path', () => {
     }
 
     class SwapPersistence extends SessionPersistence {
+      delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
       static readCalls = 0
 
       create(): Promise<SessionHandle> {

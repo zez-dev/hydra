@@ -93,7 +93,7 @@ AgentLoop 在启动已排队工作前等待串行 `agent/created` 初始化。�
 turn/start
   claim next-step input plus one queued message
   assemble prompt sections + tool schemas; project runtime context
-  -> agent/pre-step                   reject | enter(messages, startsRequestSeries?)
+  -> agent/pre-step(messages, prompt) reject | enter(messages, startsRequestSeries?)
      reject, or a first enter rewritten empty -> close the turn with no step
      step/start
      agent/request -> prepareCall (cancellation commits neither system nor users)

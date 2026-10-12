@@ -21,6 +21,8 @@
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Thought for a while":
   - text: Thought for a while
   - img
@@ -43,6 +45,8 @@
 - text: Compare with this screenshot {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Thought for a while":
   - text: Thought for a while
   - img
@@ -60,6 +64,8 @@
   - text: Ran for {{duration}}
 - text: {{clock}} Continue with the queued comparison {{clock}}
 - button "Copy":
+  - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
   - img
 - button "Thought for a while":
   - text: Thought for a while

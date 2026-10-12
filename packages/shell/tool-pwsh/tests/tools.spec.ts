@@ -391,6 +391,27 @@ describe('argument validation', () => {
   })
 })
 
+describe('optional description parameter', () => {
+  it('runs a call without a description under requireDescription: false and shows the command on both cards', async () => {
+    const { ctx, bash } = await setup({ requireDescription: false })
+    expect(ctx.tools.schemas().find(s => s.name === 'pwsh')?.parameters.required).toEqual(['command'])
+    bash.handler = () => runResult('hi\n')
+    const result = await call(ctx, 'pwsh', { command: 'Write-Output hi' })
+    expect(result.isError).toBe(false)
+    expect(text(result)).toContain('hi')
+    const definition = ctx.tools.get('pwsh')
+    expect(definition?.presentCall?.({ command: 'Get-Process' }))
+      .toEqual({ card: 'terminal', title: 'Get-Process', description: 'Get-Process' })
+    expect(definition?.presentCall?.({ command: 'Start-Sleep -Seconds 60', run_in_background: true })).toEqual({
+      card: 'generic',
+      title: 'Start-Sleep -Seconds 60',
+      kind: 'execute',
+      rawInput: 'Start-Sleep -Seconds 60',
+      content: [{ type: 'text', text: 'Start-Sleep -Seconds 60' }],
+    })
+  })
+})
+
 describe('execution through the bash seam', () => {
   it('forwards command, session cwd, timeout, and managed DSH_* environment', async () => {
     const dshHome = mkdtempSync(join(tmpdir(), 'dsh-tool-pwsh-home-'))

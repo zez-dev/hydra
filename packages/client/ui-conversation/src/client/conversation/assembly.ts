@@ -180,6 +180,9 @@ export class UiConversation extends Service {
   readonly views: ConversationViewRegistry
   private readonly bindings = new WeakMapWithValues<SessionBinding, BindingRecord>()
   private readonly images: HistoricalImageCache
+  /** Draft text waiting for a Session's composer to mount. */
+  private readonly seededDrafts = new Map<SessionId, string>()
+  private draftWriter: ((sessionId: SessionId, text: string) => boolean) | undefined
 
   /**
    * @param ctx - owning Client context.
@@ -211,6 +214,40 @@ export class UiConversation extends Service {
         for (const record of [...this.bindings.values]) this.drop(record, true)
       }
     }, 'ui-conversation assembly')
+  }
+
+  /**
+   * Bind the live composer writer the input plane owns. `seedDraft` prefers
+   * it and falls back to a pending seed when it reports no mounted composer.
+   * @param writer - writes `text` into `sessionId`'s composer; false when none is mounted.
+   */
+  bindDraftWriter(writer: (sessionId: SessionId, text: string) => boolean): void {
+    this.draftWriter = writer
+  }
+
+  /**
+   * Put `text` into a Session's composer: immediately when its composer is
+   * mounted, otherwise the next time the input plane mounts one for it.
+   * @param sessionId - the Session whose composer receives the text.
+   * @param text - the draft text; the user still decides whether to send it.
+   */
+  seedDraft(sessionId: SessionId, text: string): void {
+    if (this.draftWriter?.(sessionId, text) === true) {
+      this.seededDrafts.delete(sessionId)
+      return
+    }
+    this.seededDrafts.set(sessionId, text)
+  }
+
+  /**
+   * Take the draft seeded for a Session, once.
+   * @param sessionId - the Session whose composer is mounting.
+   * @returns the seeded text, or `undefined` when none waits.
+   */
+  takeSeededDraft(sessionId: SessionId): string | undefined {
+    const text = this.seededDrafts.get(sessionId)
+    if (text !== undefined) this.seededDrafts.delete(sessionId)
+    return text
   }
 
   /**

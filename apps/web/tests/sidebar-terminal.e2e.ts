@@ -148,10 +148,10 @@ describe.skipIf(process.platform === 'win32')('Web sidebar terminal', () => {
     await expect.poll(defaults).toEqual(applicationDefaults)
     await selectTerminalTheme(page, 'Dark')
     await expect.poll(() => terminal.evaluate(root => getComputedStyle(root.querySelector('.xterm')!.parentElement!).backgroundColor))
-      .toBe('rgb(21, 21, 23)')
+      .toBe('rgb(7, 7, 8)')
     expect(await defaults()).toEqual(applicationDefaults)
     await command(page, "printf '\\033]110\\007\\033]111\\007\\033]112\\007'")
-    await expect.poll(defaults).toEqual({ foreground: 'rgb(249, 250, 251)', background: 'rgb(21, 21, 23)' })
+    await expect.poll(defaults).toEqual({ foreground: 'rgb(249, 250, 251)', background: 'rgb(7, 7, 8)' })
     await selectTerminalTheme(page, 'Light')
     await expect.poll(defaults).toEqual({ foreground: 'rgb(15, 17, 21)', background: 'rgb(255, 255, 255)' })
 

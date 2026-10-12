@@ -27,6 +27,12 @@ Run JavaScript workflows in fresh Node processes under the calling Session's fil
 
 Mount this engine in a composition that provides subagents, sandbox policy and the [Node PTC runtime](../../ptc-runtime/ptc-runtime-node/README.md). It supplies workflow execution for `dsh-tool-workflow` and for `dsh-tool-ralph` when explicitly enabled. Ralph remains disabled in shipped defaults. The engine rejects non-TypeScript PTC providers when it loads. Python PTC compositions must disable the `workflow-ptc`, `tool-workflow` and any enabled `tool-ralph` rows.
 
+### Recording and resuming runs
+
+When [`dsh-workflow-journal`](../workflow-journal/README.md) is mounted, the engine records each run and every `agent()` call as it settles, and a run's result does not resolve until its closing record is durable. A call is recorded replayable only when the child reached `stopReason: 'completed'`.
+
+Passing `resumeRunId` starts a new run against that record: each `agent()` call whose position and input hash match a replayable call returns the recorded result without spawning a child, and every other call runs for real. The resumed run is never rewritten; the new run records `resumedFrom`. Resuming without a journal mounted, or naming a run the journal does not hold, throws `INVALID_ARGUMENT` before any work starts.
+
 ### Minimal configuration
 
 With those dependencies available, mount the engine and its model-facing consumer:
@@ -85,6 +91,7 @@ One self-contained guest program runs the existing VM and workflow helpers insid
 | [`src/runtime.ts`](src/runtime.ts) | VM evaluation, helper contracts and combinators |
 | [`src/realm.ts`](src/realm.ts) | Lossless-JSON materialization across VM realms |
 | [`src/meta.ts`](src/meta.ts) | Metadata validation and normalization |
+| [`src/recording.ts`](src/recording.ts) | Binds a run to `ctx.workflowJournal` and selects what a resume may replay |
 | — | No runtime invariant companion is published; the workflow service owns event pairing and PTC owns managed-process observations. |
 
 ### Values and child ownership
@@ -158,6 +165,8 @@ These limits qualify workflow execution and cleanup.
 - **Child cleanup follows provider contracts** — the adapter awaits disposal and pending starts without a separate abandonment timer.
 - **The VM is not a security boundary** — withheld globals guide script authors; OS policy governs code that reaches Node.
 - **Cross-realm errors fail `instanceof Error` inside scripts** — branch on stable fields such as `name` and `code`.
+- **A resume matches calls by position, so a reordered stage replays less** — a call is replayed only when its position and its input hash both match. Under `pipeline()`, second-stage calls are issued as first-stage results arrive, so a partial replay can change that order and shift positions. A shifted call runs for real; it is never answered with another call's result, so the cost is lost replay coverage, not a wrong answer.
+- **A replayed call reports the child that originally answered** — `workflow/agent-start` carries the recorded child id, because that session holds the output. Nothing was spawned for it in the resumed run.
 
 <a id="dev-note"></a>
 ### Dev Note

@@ -49,6 +49,9 @@
           - option "openai-completions" [selected]
           - option "openai-responses"
           - option "anthropic-messages"
+        - text: 推理级别
+        - switch "推理级别" [checked]
+        - text: 未声明级别的模型提供关闭、低、中、高、xhigh、max 六档。选定的级别会发送给服务器；未选择时沿用服务器自己的默认值。
         - region "模型目录":
           - text: 模型目录 已自定义模型目录
           - button "恢复默认模型"

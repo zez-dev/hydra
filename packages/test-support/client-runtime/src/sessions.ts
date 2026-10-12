@@ -311,7 +311,7 @@ export class TestSessions implements ISessions {
 
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
-    method: 'create' | 'setSubagentCatalogOpen' | 'refreshSubagents' | 'refresh' | 'search' | 'fork'
+    method: 'create' | 'setSubagentCatalogOpen' | 'refreshSubagents' | 'refresh' | 'search' | 'fork' | 'rewind' | 'delete'
     args: unknown[]
   }[] = []
 
@@ -685,6 +685,27 @@ export class TestSessions implements ISessions {
   fork(opts: { sessionId: SessionId; atSeq?: number; increaseTitle?: boolean }): Promise<SessionId> {
     this.calls.push({ method: 'fork', args: [opts] })
     return Promise.resolve(opts.sessionId)
+  }
+
+  /**
+   * Recorded rewind stub: no child materializes; the returned prompt echoes
+   * nothing, so benches only prove the call.
+   * @param opts - source session, anchor seq, and title policy.
+   * @returns a placeholder child id.
+   */
+  rewind(opts: { sessionId: SessionId; atSeq: number; increaseTitle?: boolean }): Promise<{ sessionId: SessionId; prompt?: string }> {
+    this.calls.push({ method: 'rewind', args: [opts] })
+    return Promise.resolve({ sessionId: `${opts.sessionId}-rewind` as SessionId })
+  }
+
+  /**
+   * Record the delete request and answer with the target id alone.
+   * @param opts - target session and cascade choice.
+   * @returns the target id (no record is removed).
+   */
+  delete(opts: { sessionId: SessionId; cascade?: boolean }): Promise<readonly SessionId[]> {
+    this.calls.push({ method: 'delete', args: [opts] })
+    return Promise.resolve([opts.sessionId])
   }
 
   /**

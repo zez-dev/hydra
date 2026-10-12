@@ -44,3 +44,39 @@ export function indexSubagentDescendants(
   return indexed
 }
 /* jscpd:ignore-end */
+
+/** What deleting one Session removes with it, and what it keeps. */
+export interface SessionDeleteScope {
+  /** Sub-agent Sessions it started, through uninterrupted `origin: 'subagent'` links; always deleted with it. */
+  readonly subagents: number
+  /** Descendant Sessions that are not sub-agents (forks, and forks of those); kept unless the delete cascades. */
+  readonly forks: number
+}
+
+/**
+ * Count what deleting one Session takes with it and what it keeps, from the
+ * summaries the Client holds.
+ * @param summaries - Session summaries keyed by id.
+ * @param sessionId - the Session to delete.
+ * @returns the sub-agent and fork descendant counts.
+ */
+export function sessionDeleteScope(
+  summaries: Readonly<Record<SessionId, LineageEntry>>,
+  sessionId: SessionId,
+): SessionDeleteScope {
+  let forks = 0
+  for (const entry of Object.values(summaries)) {
+    if (entry.origin === 'subagent') continue
+    const seen = new Set<SessionId>()
+    let parentId = entry.parentId
+    while (parentId !== undefined && !seen.has(parentId)) {
+      if (parentId === sessionId) {
+        forks += 1
+        break
+      }
+      seen.add(parentId)
+      parentId = summaries[parentId]?.parentId
+    }
+  }
+  return { subagents: indexSubagentDescendants(summaries).get(sessionId)?.count ?? 0, forks }
+}

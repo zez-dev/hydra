@@ -46,6 +46,7 @@ The single config field toggles background support.
 | Field | Default | Meaning |
 |---|---|---|
 | `enableRunInBackground` | `true` | Expose `run_in_background`; when `false`, forced background calls are rejected |
+| `requireDescription` | `true` (shipped compositions: `false`) | Require the UI-only `description` parameter; `false` makes it optional for models that omit annotation parameters, and the command text stands in for the UI |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-pwsh) is the exhaustive source for every accepted field and its JSDoc; the generated [tool catalog](../../../docs/tool-catalog.md#deepseek-aidsh-tool-pwsh) carries the full argument schema.
 

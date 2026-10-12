@@ -42,6 +42,16 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
+/**
+ * Create a fixture directory with the same owner-only mode the store applies.
+ * The sweep refuses any directory writable by group or others, so the mode is
+ * explicit here: under a host umask of 0002 these would be group-writable and
+ * every sweep assertion would fail against a root the policy correctly skipped.
+ */
+function makeDir(path: string): void {
+  mkdirSync(path, { recursive: true, mode: 0o700 })
+}
+
 /** Write a file with an mtime `ageDays` in the past (fractional allowed). */
 function writeAged(path: string, content: string, ageDays: number): void {
   writeFileSync(path, content)
@@ -256,7 +266,7 @@ function active(path: string): SweepRoot {
 describe('startup cleanup sweep', () => {
   it('deletes files older than the cutoff and keeps fresh ones', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
     const fresh = join(dir, 'fresh.txt'); writeAged(fresh, 'y', 1)
     await runSweep([active(root)])
@@ -266,7 +276,7 @@ describe('startup cleanup sweep', () => {
 
   it('keeps a file exactly at the boundary (only strictly-older expires)', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const requestedMs = Date.now() - 30 * DAY_MS
     const boundary = join(dir, 'boundary.txt')
     writeFileSync(boundary, 'x')
@@ -279,7 +289,7 @@ describe('startup cleanup sweep', () => {
 
   it('disabled (cleanupPeriodDays: 0) sweeps nothing', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 400)
     await runSweep([active(root)], 0)
     expect(existsSync(old)).toBe(true)
@@ -288,8 +298,8 @@ describe('startup cleanup sweep', () => {
   it('prunes empty active session directories after deleting expired files', async () => {
     const emptied = sessionDir(root, 'emptied')
     const kept = sessionDir(root, 'kept')
-    mkdirSync(emptied, { recursive: true })
-    mkdirSync(kept, { recursive: true })
+    makeDir(emptied)
+    makeDir(kept)
     writeAged(join(emptied, 'a.txt'), 'x', 40)
     writeAged(join(kept, 'fresh.txt'), 'y', 1)
     await runSweep([active(root)])
@@ -299,12 +309,12 @@ describe('startup cleanup sweep', () => {
 
   it('skips a symlink INSIDE a session dir and non-session siblings', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     // A symlink pointing at an old target must NOT be followed or deleted.
     const target = join(root, 'target.txt'); writeAged(target, 'keep', 40)
     const link = join(dir, 'link.txt'); symlinkSync(target, link)
     // A non-session sibling directory under a shared root is untouched.
-    const unrelated = join(root, 'not-a-session'); mkdirSync(unrelated)
+    const unrelated = join(root, 'not-a-session'); makeDir(unrelated)
     const unrelatedOld = join(unrelated, 'old.txt'); writeAged(unrelatedOld, 'x', 40)
     await runSweep([active(root)])
     // The symlink itself survives (lstat sees a link, not a file), so its dir is
@@ -318,7 +328,7 @@ describe('startup cleanup sweep', () => {
     // A `session-<12hex>`-NAMED symlink pointing at a directory of old files must
     // never be descended: lstat on the entry sees a link, so the target's files
     // are left intact and the link itself is not removed.
-    const victimDir = join(root, 'victim'); mkdirSync(victimDir, { recursive: true })
+    const victimDir = join(root, 'victim'); makeDir(victimDir)
     const victimOld = join(victimDir, 'old.txt'); writeAged(victimOld, 'x', 40)
     const linkName = `session-${'a'.repeat(12)}`
     const link = join(root, linkName); symlinkSync(victimDir, link)
@@ -330,7 +340,7 @@ describe('startup cleanup sweep', () => {
   it('skips a POSIX session directory writable by another local user', async () => {
     if (process.platform === 'win32') return
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
     chmodSync(dir, 0o777)
     const warn = vi.fn()
@@ -342,12 +352,12 @@ describe('startup cleanup sweep', () => {
   it('sweeps only exact session-<12hex> names, not lookalikes', async () => {
     // `session-backup` and `session-<11hex>` match the old startsWith check but
     // are NOT backend-generated names; their old files must survive.
-    const backup = join(root, 'session-backup'); mkdirSync(backup, { recursive: true })
+    const backup = join(root, 'session-backup'); makeDir(backup)
     const backupOld = join(backup, 'old.txt'); writeAged(backupOld, 'x', 40)
-    const shortHex = join(root, `session-${'a'.repeat(11)}`); mkdirSync(shortHex, { recursive: true })
+    const shortHex = join(root, `session-${'a'.repeat(11)}`); makeDir(shortHex)
     const shortOld = join(shortHex, 'old.txt'); writeAged(shortOld, 'x', 40)
     // A real session dir alongside them IS swept, proving the sweep still runs.
-    const real = sessionDir(root, 'sess-1'); mkdirSync(real, { recursive: true })
+    const real = sessionDir(root, 'sess-1'); makeDir(real)
     const realOld = join(real, 'old.txt'); writeAged(realOld, 'x', 40)
     await runSweep([active(root)])
     expect(existsSync(backupOld)).toBe(true)
@@ -360,9 +370,9 @@ describe('startup cleanup sweep', () => {
     // emptied should have its outer directory removed too; the active root, even
     // when fully emptied, must survive (the live process still writes into it).
     const prior = mkdtempSync(join(tmpdir(), 'dsh-spill-'))
-    const priorDir = sessionDir(prior, 'old-sess'); mkdirSync(priorDir, { recursive: true })
+    const priorDir = sessionDir(prior, 'old-sess'); makeDir(priorDir)
     writeAged(join(priorDir, 'old.txt'), 'x', 40)
-    const activeDir = sessionDir(root, 'sess-1'); mkdirSync(activeDir, { recursive: true })
+    const activeDir = sessionDir(root, 'sess-1'); makeDir(activeDir)
     writeAged(join(activeDir, 'old.txt'), 'x', 40)
     try {
       await runSweep([{ path: prior, pruneWhenEmpty: true }, active(root)])
@@ -376,7 +386,7 @@ describe('startup cleanup sweep', () => {
 
   it('de-duplicates repeated roots and lets non-prunable status win', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     writeAged(join(dir, 'old.txt'), 'x', 40)
     await sweepSpillRoots({
       roots: [
@@ -393,7 +403,7 @@ describe('startup cleanup sweep', () => {
 
   it('does NOT prune a discovered root that still holds a fresh file', async () => {
     const prior = mkdtempSync(join(tmpdir(), 'dsh-spill-'))
-    const priorDir = sessionDir(prior, 'sess'); mkdirSync(priorDir, { recursive: true })
+    const priorDir = sessionDir(prior, 'sess'); makeDir(priorDir)
     writeAged(join(priorDir, 'fresh.txt'), 'y', 1)
     try {
       await runSweep([{ path: prior, pruneWhenEmpty: true }])
@@ -411,10 +421,10 @@ describe('startup cleanup sweep', () => {
     const fakeTmp = mkdtempSync(join(tmpdir(), 'dsh-faketmp-'))
     const priorDefault = mkdtempSync(join(fakeTmp, DEFAULT_ROOT_PREFIX))
     const priorDir = sessionDir(priorDefault, 'old-sess')
-    mkdirSync(priorDir, { recursive: true })
+    makeDir(priorDir)
     const priorOld = join(priorDir, 'old.txt'); writeAged(priorOld, 'x', 40)
     const cfgDir = sessionDir(root, 'sess-1')
-    mkdirSync(cfgDir, { recursive: true })
+    makeDir(cfgDir)
     const cfgOld = join(cfgDir, 'old.txt'); writeAged(cfgOld, 'x', 40)
     class Discovering extends LocalSpillStore {
       protected override defaultRootsBase(): string { return fakeTmp }
@@ -441,7 +451,7 @@ describe('startup cleanup sweep', () => {
     const fakeTmp = mkdtempSync(join(tmpdir(), 'dsh-faketmp-'))
     const activeDefault = mkdtempSync(join(fakeTmp, DEFAULT_ROOT_PREFIX))
     const dir = sessionDir(activeDefault, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
     class Discovering extends LocalSpillStore {
       protected override defaultRootsBase(): string { return fakeTmp }
@@ -464,7 +474,7 @@ describe('startup cleanup sweep', () => {
     const alias = join(root, 'configured-root')
     symlinkSync(activeDefault, alias, process.platform === 'win32' ? 'junction' : 'dir')
     const dir = sessionDir(activeDefault, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
     try {
       const roots = await gatherSweepRoots(alias, () => {}, fakeTmp)
@@ -487,9 +497,9 @@ describe('startup cleanup sweep', () => {
     if (process.platform === 'win32') return
     const unsafeParent = join(root, 'unsafe-parent')
     const unsafeRoot = join(unsafeParent, 'configured')
-    mkdirSync(unsafeRoot, { recursive: true, mode: 0o700 })
+    makeDir(unsafeRoot)
     const dir = sessionDir(unsafeRoot, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
     chmodSync(unsafeParent, 0o777)
     const warn = vi.fn()
@@ -501,7 +511,7 @@ describe('startup cleanup sweep', () => {
 
   it('does not block activation but is awaited on disposal (quiescence)', async () => {
     const dir = sessionDir(root, 'sess-1')
-    mkdirSync(dir, { recursive: true })
+    makeDir(dir)
     const old = join(dir, 'old.txt'); writeAged(old, 'x', 40)
 
     // Hold the sweep open behind a barrier we control.
@@ -553,7 +563,7 @@ describe('discoverDefaultRoots', () => {
     try {
       // A real backend-shaped root (dsh-spill-<6>) via mkdtemp — the only match.
       const realRoot = mkdtempSync(join(base, DEFAULT_ROOT_PREFIX))
-      mkdirSync(join(base, 'unrelated-dir'))
+      makeDir(join(base, 'unrelated-dir'))
       // Names of the EXACT default shape that must still be excluded because they
       // are not real directories the backend could have created.
       writeFileSync(join(base, `${DEFAULT_ROOT_PREFIX}file01`), 'x') // matches shape but is a file

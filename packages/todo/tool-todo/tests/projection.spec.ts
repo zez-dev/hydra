@@ -82,7 +82,7 @@ describe('todos projection provider', () => {
     expect(projections?.asOfSeq).toBe(session.seq - 1)
   })
 
-  it('clears the standing plan on the next turn/start (turn/end keeps it)', async () => {
+  it('clears a finished plan on the next turn/start (turn/end keeps it)', async () => {
     const bench = await harness(true)
     const session = bench.session
     seedMessage(session)
@@ -95,6 +95,18 @@ describe('todos projection provider', () => {
     const cleared = await bench.tailProjections()
     expect(cleared?.values.todos).toBeNull()
     expect(cleared?.asOfSeq).toBe(session.seq - 1)
+  })
+
+  it('keeps a plan with open tasks across the next turn/start', async () => {
+    const bench = await harness(true)
+    const session = bench.session
+    seedMessage(session)
+    const list: TodoItem[] = [{ content: 'done', status: 'completed' }, { content: 'next', status: 'pending' }]
+    session.append('turn/start', { turn: 1 })
+    session.append('todo/write', { todos: list })
+    session.append('turn/end', { turn: 1, reason: { kind: 'error', error: { message: 'Connection error.', code: 'TRANSPORT' } } })
+    session.append('turn/start', { turn: 2 })
+    expect((await bench.tailProjections())?.values.todos).toEqual(list)
   })
 
   it('has no todos key when tool-todo is not composed', async () => {

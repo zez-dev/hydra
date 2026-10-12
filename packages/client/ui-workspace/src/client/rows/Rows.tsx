@@ -6,13 +6,13 @@
  * visual-only except workspace Rename/Delete and session Rename/Fork/Archive; the
  * session and workspace hover cards are suppressed while a menu is open.
  */
-import { useEffect, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard, IconAlarmClockOutline16, IconArchiveOutline20, IconBranchOutline16,
   IconEditOutline16, IconEllipsisOutline16, IconFolderClose16, IconFolderOpen16,
-  IconPlusOutline16, IconTrashOutline16, IconTriangleRightFill14, Menu, relativeTime,
-  StateDot,
+  IconPlusOutline16, IconTrashOutline16, IconTreeCorner8x10, IconTriangleRightFill14, Menu,
+  relativeTime, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
@@ -322,6 +322,20 @@ function ActiveScheduleIndicator({ t, search = false }: { t: RowTranslate; searc
   )
 }
 
+/** Archive membership marker; the row itself stays the only action. */
+function ArchivedBadge({ t }: { t: RowTranslate }) {
+  return <span className={css.archivedBadge}>{t('archived.badge')}</span>
+}
+
+/** Direct ordinary forks nested under this row in the lineage order. */
+function ForkCount({ count, t }: { count: number; t: RowTranslate }) {
+  return (
+    <span className={css.forkCount}>
+      {t(count === 1 ? 'forks.count.one' : 'forks.count.other', { n: count })}
+    </span>
+  )
+}
+
 /** Hover-card body: full title, relative time, and every relevant live status. */
 function SessionHoverContent({ node, now, t }: { node: SessionNode; now: number; t: RowTranslate }) {
   const statuses = sessionStatuses(node, t)
@@ -363,7 +377,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
   return (
     <button
       type="button"
-      className={clsx(css.searchResultRow, selected && css.selected)}
+      className={clsx(css.searchResultRow, selected && css.selected, result.archived && css.archived)}
       role="treeitem"
       aria-selected={selected}
       onClick={() => { onOpen(result.id) }}
@@ -375,6 +389,7 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
           )}
         </span>
         <span className={css.searchResultTitle}>{result.title}</span>
+        {result.archived && <ArchivedBadge t={t} />}
         {result.hasActiveSchedule && <ActiveScheduleIndicator t={t} search />}
       </span>
       <span className={css.searchResultMeta}>
@@ -397,6 +412,8 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @param props.onRename - open the session rename dialog (id + current title).
  * @param props.onFork - fork a session at its last completed turn.
  * @param props.onArchive - archive a session by id.
+ * @param props.onUnarchive - restore an archived session by id.
+ * @param props.onDelete - open the browser-owned session delete dialog (id + current title).
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
  * @param props.drag - optional row-drag target wiring; blank rows cannot start a drag.
  * @param props.flat - omit the empty status slot in the hierarchy-free flat list.
@@ -404,7 +421,8 @@ export function SearchResultItem({ result, currentId, onOpen, t }: {
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false, t,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onUnarchive, onDelete, onReveal, drag,
+  flat = false, t,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -416,6 +434,10 @@ export function SessionNodeItem({
   onFork: (id: SessionNode['id']) => void
   /** Archive this session (row menu action; commits without a dialog). */
   onArchive: (id: SessionNode['id']) => void
+  /** Restore this archived session (row menu action; replaces Archive on an archived row). */
+  onUnarchive: (id: SessionNode['id']) => void
+  /** Open the browser-owned session delete dialog (destructive row menu action). */
+  onDelete: (id: SessionNode['id'], currentTitle: string) => void
   /** Scroll this row into view after search navigation, then acknowledge it. */
   onReveal?: (() => void) | undefined
   /** Present on reorderable-list rows so every row can remain a drop target. */
@@ -441,19 +463,25 @@ export function SessionNodeItem({
   }, [onReveal])
   // Archive hides the row through the registry-global archive set and never
   // touches the session log, so it is not styled as destructive and needs no
-  // confirmation dialog.
+  // confirmation dialog. A row reached through the archived reveal offers the
+  // inverse instead: both directions move the same accounting slot.
   const sessionMenuItems = [
     { id: 'rename', label: t('rename'), icon: <IconEditOutline16 /> },
     { id: 'fork', label: t('menu.fork'), icon: <IconBranchOutline16 /> },
     // 20-native glyph in the menu's 16px icon slot (Menu.module.css .itemIcon).
-    { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    row.archived
+      ? { id: 'unarchive', label: t('menu.unarchiveSession'), icon: <IconArchiveOutline20 size={16} /> }
+      : { id: 'archive', label: t('menu.archiveSession'), icon: <IconArchiveOutline20 size={16} /> },
+    { id: 'delete', label: t('menu.deleteSession'), icon: <IconTrashOutline16 />, danger: true },
   ]
   // Figma session cell: pad 8, status slot 16, then a 4px title gap.
   const ownRow = (
     <div
       ref={rowRef}
+      style={{ '--dsh-lineage-indent': `${row.depth * 14}px` } as CSSProperties}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
+        row.archived && css.archived,
         flat && !showStatus && css.flatSessionRowWithoutStatus,
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
       )}
@@ -495,7 +523,12 @@ export function SessionNodeItem({
           {showStatus && <SessionStatusDots statuses={statuses} />}
         </span>
       )}
+      {row.depth > 0 && (
+        <span className={css.branchGlyph} aria-hidden="true"><IconTreeCorner8x10 /></span>
+      )}
       <span ref={titleRef} className={css.title}>{title}</span>
+      {row.archived && <ArchivedBadge t={t} />}
+      {row.forkCount > 0 && <ForkCount count={row.forkCount} t={t} />}
       {row.hasActiveSchedule && <ActiveScheduleIndicator t={t} />}
       {/* A blank New Session row is a provisional placeholder: nothing has
           happened in it yet, so a "now" timestamp and the row verbs
@@ -513,6 +546,8 @@ export function SessionNodeItem({
               if (id === 'rename') onRename(node.id, row.title)
               if (id === 'fork') onFork(node.id)
               if (id === 'archive') onArchive(node.id)
+              if (id === 'unarchive') onUnarchive(node.id)
+              if (id === 'delete') onDelete(node.id, row.title)
             }}
             portal
             closeOnPointerLeave

@@ -2300,6 +2300,110 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 这 10 个工具限定于隐式 Team Lead 与持久 teammate 作用域。随产品发布的 dsh-base bundle 默认禁用该包；文档中的 Agent Teams profile patch 会启用它，并禁用旧 continuable child 的同名控制工具。
 
 
+<a id="deepseek-aidsh-knowledge"></a>
+
+## `@deepseek-ai/dsh-knowledge`
+
+### `knowledge_browse`
+
+列出知识集合包含的内容：某个文件夹下直接包含的文件夹和文件及其文件数量，以及每个已摘要文件的类型和摘要；或列出带有某个主题标签的文件。未指定集合时列出所有集合。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "collection": {
+      "type": "string",
+      "description": "The collection to list.",
+      "enum": [
+        "docs"
+      ]
+    },
+    "folder": {
+      "type": "string",
+      "description": "Folder inside the collection; omit for its top level."
+    },
+    "tag": {
+      "type": "string",
+      "description": "List the collection's files that carry this topic tag instead of a folder."
+    }
+  }
+}
+```
+
+来源： [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+### `knowledge_read`
+
+按 ref（`collection:path`，或来自 knowledge_search 的 `collection:path#Lstart-Lend`）读取一个已索引文件的若干行。返回带编号的行；对长文件可请求更靠后的 startLine 继续读取。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ref": {
+      "type": "string",
+      "description": "The file ref, optionally with a line range."
+    },
+    "startLine": {
+      "type": "integer",
+      "description": "First line to read, 1-based; overrides the ref's range."
+    },
+    "endLine": {
+      "type": "integer",
+      "description": "Last line to read, inclusive."
+    }
+  },
+  "required": [
+    "ref"
+  ]
+}
+```
+
+来源： [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+### `knowledge_search`
+
+搜索已索引的文档集合。返回摘要匹配的文件夹和文件（已生成摘要时）以及最匹配的段落，每项都带有可引用或用 knowledge_read 打开的 ref（`collection:path#Lstart-Lend`）。请使用主题中的具体词语；结果按匹配词的数量和罕见程度排序。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "description": "Words describing what to find."
+    },
+    "collection": {
+      "type": "string",
+      "description": "Search only this collection.",
+      "enum": [
+        "docs"
+      ]
+    },
+    "kind": {
+      "type": "string",
+      "description": "Search only documents (text) or only source files and scripts (code).",
+      "enum": [
+        "text",
+        "code"
+      ]
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Most passages to return (default 8, at most 30)."
+    }
+  },
+  "required": [
+    "query"
+  ]
+}
+```
+
+来源： [`packages/learning/knowledge/src/tools.ts`](../packages/learning/knowledge/src/tools.ts)
+
+The knowledge tools ship as the package's `./tools` entry and register nothing until a collection is configured; the `collection` enum lists the configured collection names.
+
 <a id="deepseek-aidsh-tool-todo"></a>
 
 ## `@deepseek-ai/dsh-tool-todo`

@@ -63,6 +63,9 @@ for await (const chunk of ctx.llm.stream({
 - **通过配置暴露并激活提供方**——适配器声明可配置提供方路由与 settings namespace，配置界面因此可以激活休眠提供方并编辑连接信息，无需重启。`LlmConfigurableProvider.error` 报告供修复的配置诊断；未受影响的模型仍可提供服务。
 - **发现与解析模型**——列出适配器公布的模型、询问端点它提供哪些模型（候选携带可选的 `inputModalities`；缺省表示未知），并解析某个精确模型的上下文窗口、输出默认值、推理（reasoning）强度、输入模态与系统提示词更新模式：当模型把任意位置最新的 `system` 消息读作有效系统提示词时，`LlmResolvedModelInfo.systemPromptUpdate` 为 `'in-history'`；只读取开头 system 消息时该字段缺失；`normalizeModelInfo` 以 `INVALID_MODEL_INFO` 拒绝任何其他值。
 - **校验调用配置**——显式或配置的推理强度会在任何提供方 I/O 之前对照精确模型校验；请求省略输出上限时，会填入适配器配置的输出上限。
+- **合计一条用量记录**——`usageTokens(usage)` 把提供方报告的互斥 `TokenUsage` 分桶加成计费 token：未命中缓存的 input，加上两个 cache 分桶，再加上 output。`reasoningTokens` 是 `outputTokens` 的子集，故意不再计入，这样预算、计量与用量报告用的是同一个总数。
+- **发送一个纯文本辅助请求**——在对话之外向模型发起请求的插件用 `auxiliaryRoute(configured, logged)` 选择路由：两者都已配置时用其配置的提供方与模型，否则用会话最近一次已记录请求的提供方与模型。`streamText(chunks, signal, errors)` 组装该请求的流并返回拼接后的文本；失败或中止的请求抛出携带失败 message 与 `code` 的错误，被截断或请求工具的输出抛出调用方给出的错误，`signal` 中止后在下一个分片处抛出其 reason。
+- **以插件身份加入召回材料**——`createPluginRecallMessage(plugin, text)` 构建插件为某一步加入召回材料时使用的用户消息：一个文本块，来源为该插件并声明 `recall` 形式。`isPluginRecallMessage(message, plugin)` 识别该插件的召回消息，`messageText(message)` 读取一条消息的文本块并拼接。
 - **不展开即读取内嵌 Assistant 流**——`assistantStreamFirstTokenTime`（首 token）、`assistantStreamHasVisibleContent`（任一可见内容）与 `assistantStreamHasVisibleText`（任一可见文本）通过可提前退出的扫描直接从紧凑记录得出结果；`lastAssistantStreamChunk` 反向扫描到某一类型的最后一个原始 chunk，`assistantStreamChunks` 与 `joinAssistantStreamText` 扫描整个流，`assembleAssistantStream` 向 `BlockAssembler` 每个 run 喂一段拼接 delta，blocks／usage／replayState 与逐成员展开相同。`runFirstTokenTime` 与 `runFirstVisibleTime` 对单个打包 run 做提前退出扫描，`isTokenDelta`、`isVisibleChunk` 与 `chunkHasVisibleText` 定义单个 chunk 的 token 与可见性规则。`expandAssistantStream` 仍是持久边界读取记录的校验路径；它不被记忆化，因为保留的展开在事件生命周期内约花费紧凑流的十倍内存。
 
 ### 失败与恢复
@@ -89,10 +92,10 @@ for await (const chunk of ctx.llm.stream({
 |---|---|
 | [`src/index.ts`](src/index.ts) | `LlmRuntime` 服务：适配器注册表、可配置提供方目录、模型发现、调用准备与流式边界 |
 | [`src/types.ts`](src/types.ts) | `StreamChunk` 协议、内容块映射、结束原因与共享词汇 |
-| [`src/message.ts`](src/message.ts) | 投递、历史与请求共享的不可变消息构造函数 |
-| [`src/assembler.ts`](src/assembler.ts) | `BlockAssembler`：分片到块的增量组装 |
+| [`src/message.ts`](src/message.ts) | 投递、历史与请求共享的不可变消息构造函数；插件召回消息与消息文本 |
+| [`src/assembler.ts`](src/assembler.ts) | `BlockAssembler`：分片到块的增量组装；`streamText` 用于单个纯文本请求 |
 | [`src/assistant-stream.ts`](src/assistant-stream.ts) | 带时间信息的紧凑 Assistant 流累积、严格校验、精确展开与记录级读取器 |
-| [`src/call-config.ts`](src/call-config.ts) | 调用配置校验、适配器默认值填入与请求冻结 |
+| [`src/call-config.ts`](src/call-config.ts) | 调用配置校验、适配器默认值填入、请求冻结与辅助请求路由 |
 | [`src/retry-policy.ts`](src/retry-policy.ts) | 提供方自有重试策略解析（normal 与 always 模式） |
 | [`src/error.ts`](src/error.ts) | `HarnessError`/`LlmError` 分类体系与提供方无关失败 code |
 | [`src/content.ts`](src/content.ts) | 共享文件与图片辅助函数：内容遍历、文件投影、图片卸载计数与已卸载图片投影 |

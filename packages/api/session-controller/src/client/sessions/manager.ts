@@ -535,15 +535,65 @@ export class SessionManager {
       sessionId: opts.sessionId,
       ...opts.atSeq === undefined ? {} : { atSeq: opts.atSeq },
     })
+    this.recordForkChild(result, opts.sessionId, source)
+    return result
+  }
+
+  /**
+   * Contract session.rewind; on success merge the child into summaries like
+   * `fork` does, since a rewound child is a fork cut before a turn.
+   * @param opts - source session and the seq inside the turn to rewind to.
+   * @returns the rewind result (child id plus the rewound prompt).
+   */
+  async rewind(
+    opts: { sessionId: SessionId; atSeq: SessionSeq },
+  ): Promise<RemoteResult<{ sessionId: SessionId; prompt?: string }>> {
+    const source = this.summaries.find(s => s.sessionId === opts.sessionId)
+    const result = await this.remote.session.rewind({ sessionId: opts.sessionId, atSeq: opts.atSeq })
+    this.recordForkChild(result, opts.sessionId, source)
+    return result
+  }
+
+  /**
+   * Merge a fork or rewind child into summaries: the child the result names,
+   * or the one a failed Workspace attachment names after publication.
+   * @param result - the fork or rewind result.
+   * @param parentSessionId - the source session the child nests under.
+   * @param source - the source's summary as read before the request.
+   */
+  private recordForkChild(
+    result: RemoteResult<{ sessionId: SessionId }>,
+    parentSessionId: SessionId,
+    source: SessionSummary | undefined,
+  ): void {
     const childId = result.ok
       ? result.value.sessionId
       : workspaceAttachSessionId(result.error)
     if (childId !== undefined) {
       this.recordMutation({ kind: 'upsert', summary: {
         sessionId: childId, updatedAt: Date.now(), running: false, blank: false,
-        parentSessionId: opts.sessionId,
+        parentSessionId,
         ...(source?.cwd !== undefined ? { cwd: source.cwd } : {}),
       } })
+    }
+  }
+
+  /**
+   * Contract session.delete; on success remove every deleted row, sub-agent
+   * rows included (an `api-session/removed` for a sub-agent only marks it
+   * idle), before the Host's own notification lands.
+   * @param opts - session id and whether fork descendants go too.
+   * @returns the delete result (every removed session id).
+   */
+  async delete(
+    opts: { sessionId: SessionId; cascade?: boolean },
+  ): Promise<RemoteResult<{ sessionIds: readonly SessionId[] }>> {
+    const result = await this.remote.session.delete({
+      sessionId: opts.sessionId,
+      ...(opts.cascade === undefined ? {} : { cascade: opts.cascade }),
+    })
+    if (result.ok) {
+      for (const sessionId of result.value.sessionIds) this.applyRemoval(sessionId, false)
     }
     return result
   }
@@ -658,7 +708,17 @@ export class SessionManager {
    */
   handleSessionRemoved(sessionId: SessionId): void {
     const summary = this.summaries.find(candidate => candidate.sessionId === sessionId)
-    const durableSubagent = summary?.origin === 'subagent' || this.addresses.has(sessionId)
+    this.applyRemoval(sessionId, summary?.origin === 'subagent' || this.addresses.has(sessionId))
+  }
+
+  /**
+   * Remove one Session from the list and its live state.
+   * @param sessionId - removed Session identity.
+   * @param durableSubagent - keep the row and projection, marked idle: a
+   *   sub-agent whose live Agent ended stays reachable from its parent's catalog;
+   *   a deleted one passes `false`.
+   */
+  private applyRemoval(sessionId: SessionId, durableSubagent: boolean): void {
     this.recordMutation(durableSubagent
       ? { kind: 'status', sessionId, running: false }
       : { kind: 'remove', sessionId })
@@ -666,7 +726,10 @@ export class SessionManager {
     if (durableSubagent) this.sessions.get(sessionId)?.handleRunning(false)
     else this.sessions.get(sessionId)?.handleRemoved()
     this.jobsBySession.delete(sessionId)
-    if (!durableSubagent) this.projectionStores.delete(sessionId)
+    if (!durableSubagent) {
+      this.projectionStores.delete(sessionId)
+      this.addresses.delete(sessionId)
+    }
     const inflightCatalog = this.catalogInflight.get(sessionId)
     if (inflightCatalog !== undefined) {
       inflightCatalog.parentAvailableOverride = false

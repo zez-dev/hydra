@@ -83,6 +83,22 @@ export class SessionCreateError extends Error {
   }
 }
 
+/** Structured session-delete failure. */
+export class SessionDeleteError extends Error {
+  override readonly name = 'SessionDeleteError'
+
+  /**
+   * @param rpcError - Host business or folded transport error.
+   * @param sessionId - the session the delete targeted.
+   */
+  constructor(
+    readonly rpcError: RemoteFailure,
+    readonly sessionId: SessionId,
+  ) {
+    super(`session delete failed: ${rpcError.code}: ${rpcError.message}`)
+  }
+}
+
 /** Structured session-fork failure. */
 export class SessionForkError extends Error {
   override readonly name = 'SessionForkError'
@@ -481,17 +497,55 @@ export class ClientSessions implements ISessions {
     if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
     this.projectList()
     const childId = result.value.sessionId
-    if (sourceTitle !== undefined) {
-      const reference = this.retain(childId, { source: 'controllerOperation' })
-      try {
-        await reference.ready
-        const renamed = await reference.binding.session.rename(increasedForkTitle(sourceTitle))
-        if (!renamed.ok) throw new Error(`fork child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
-      } finally {
-        reference.release()
-      }
-    }
+    if (sourceTitle !== undefined) await this.renameForkChild(childId, sourceTitle, 'fork')
     return childId
+  }
+
+  async rewind(opts: {
+    sessionId: SessionId
+    atSeq: number
+    increaseTitle?: boolean
+  }): Promise<{ sessionId: SessionId; prompt?: string }> {
+    const sourceTitle = opts.increaseTitle
+      ? this.list.getSnapshot().byId[opts.sessionId]?.title
+      : undefined
+    const result = await this.manager.rewind({
+      sessionId: opts.sessionId,
+      atSeq: SessionSeq(Math.floor(opts.atSeq)),
+    })
+    if (!result.ok) throw new SessionForkError(result.error, opts.sessionId)
+    this.projectList()
+    const childId = result.value.sessionId
+    if (sourceTitle !== undefined) await this.renameForkChild(childId, sourceTitle, 'rewind')
+    return { sessionId: childId, ...(result.value.prompt === undefined ? {} : { prompt: result.value.prompt }) }
+  }
+
+  /**
+   * Give a fork or rewind child the increased form of its source's title.
+   * @param childId - the new child session.
+   * @param sourceTitle - the source's title when the request was made.
+   * @param operation - the operation named in the rename failure.
+   * @throws {Error} when the rename fails.
+   */
+  private async renameForkChild(childId: SessionId, sourceTitle: string, operation: 'fork' | 'rewind'): Promise<void> {
+    const reference = this.retain(childId, { source: 'controllerOperation' })
+    try {
+      await reference.ready
+      const renamed = await reference.binding.session.rename(increasedForkTitle(sourceTitle))
+      if (!renamed.ok) throw new Error(`${operation} child rename failed: ${renamed.error.code}: ${renamed.error.message}`)
+    } finally {
+      reference.release()
+    }
+  }
+
+  async delete(opts: { sessionId: SessionId; cascade?: boolean }): Promise<readonly SessionId[]> {
+    const result = await this.manager.delete({
+      sessionId: opts.sessionId,
+      ...(opts.cascade === undefined ? {} : { cascade: opts.cascade }),
+    })
+    if (!result.ok) throw new SessionDeleteError(result.error, opts.sessionId)
+    this.projectList()
+    return result.value.sessionIds
   }
 
   /**

@@ -25,8 +25,8 @@ import { join } from 'node:path'
 import {
   acknowledgeReloadConnectionLoss, assertFixtureInventory, captureExpandedTurnProcessAria, captureStableAria,
   compareOrRefreshGolden, fixtureUserPrompts,
-  launchWebScaffold, parseSeedFixture, realizeSeedFixture, recordFixture, renderSeedFixture, seedSession, watchConsole,
-  webSnapshotMode, type WebScaffold,
+  launchWebScaffold, parseSeedFixture, realizeSeedFixture, recordFixture, renderSeedFixture, seedSession,
+  settleConversationAtBottom, watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { expandOwningTurnProcess, newEnglishPage, saveFailureShot } from './support.ts'
 
@@ -447,7 +447,8 @@ describe('web e2e: seeded history renders through cold resume', () => {
     expect(style).toEqual({
       backgroundColor: 'rgb(249, 250, 251)',
       borderRadius: '8px',
-      color: 'rgb(129, 133, 140)',
+      // Light tertiary text, AA on this fill (hydra-palette.client.spec.ts).
+      color: 'rgb(103, 108, 115)',
       fontSize: '11px',
       lineHeight: '16px',
       padding: ['10px', '16px', '12px', '12px'],
@@ -668,14 +669,7 @@ describe('web e2e: seeded history renders through cold resume', () => {
       if (await marker.getAttribute('aria-expanded') === 'true') await marker.click()
       await expect.poll(() => marker.getAttribute('aria-expanded'), { timeout: 5_000 }).toBe('false')
       await page.setViewportSize(originalViewport)
-      const scrollport = page.locator('[data-conversation-scroll]')
-      const backToBottom = page.getByRole('button', { name: 'Back to bottom', exact: true })
-      await expect.poll(async () => {
-        if (await backToBottom.count() > 0) await backToBottom.click()
-        const atFloor = await scrollport.evaluate((host: HTMLElement) =>
-          Math.abs(host.scrollHeight - host.clientHeight - host.scrollTop) <= 1)
-        return await backToBottom.count() === 0 && atFloor
-      }, { timeout: 15_000 }).toBe(true)
+      await settleConversationAtBottom(page, 15_000)
     } catch (cleanupError) {
       // The body's own assertion is the diagnosis; a cleanup failure would
       // replace it, and the state it failed to restore shows up in the next

@@ -46,8 +46,10 @@ async function bench() {
   const commandsRemote = { list: () => Promise.resolve({ ok: true as const, value: [] }) }
   // The service subscribes its cache-invalidation events on construction, so
   // the Remote face needs `$on` even where this spec dispatches none.
-  ctx.provide('remote', { commands: commandsRemote, $on: () => () => {} })
+  const subagentsRemote = { commands: () => Promise.resolve({ ok: true as const, value: [] }) }
+  ctx.provide('remote', { commands: commandsRemote, subagents: subagentsRemote, $on: () => () => {} })
   ctx.provide('remote.commands', commandsRemote)
+  ctx.provide('remote.subagents', subagentsRemote)
   await ctx.plugin(SlotRegistry).await()
   ctx.slots.register({
     name: 'root', children: { 'conversation.input.overlay': { kind: 'list', scope: 'session' } },
@@ -67,7 +69,7 @@ async function bench() {
 
 describe('apply', () => {
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['inputTriggers', 'sessions', 'remote', 'remote.commands', 'locale'])
+    expect(inject).toEqual(['inputTriggers', 'sessions', 'remote', 'remote.commands', 'remote.subagents', 'locale'])
   })
 
   it('mounts ctx.commandUi, registers the source and the overlay entry, and folds up on disposal', async () => {

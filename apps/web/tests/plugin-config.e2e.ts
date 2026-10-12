@@ -177,9 +177,11 @@ describe('web e2e: plugin configuration pages', () => {
     const save = panel.getByRole('button', { name: '保存', exact: true })
     await save.click()
 
-    await expect.poll(async () => (await settingsDocument()).includes('subagent-model-selection:'), { timeout: 10_000 })
-      .toBe(true)
-    expect(await settingsDocument()).toContain('maxDepth: 2')
+    // The card saves each plugin's settings in its own write; wait for both.
+    await expect.poll(async () => {
+      const document = await settingsDocument()
+      return document.includes('subagent-model-selection:') && document.includes('maxDepth: 2')
+    }, { timeout: 10_000 }).toBe(true)
     expect(await settingsDocument()).toContain('enabled: true')
     expect(await settingsDocument()).toContain('allowedModels:')
     expect(await settingsDocument()).toContain('provider:')

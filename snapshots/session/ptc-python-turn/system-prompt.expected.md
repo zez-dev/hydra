@@ -31,7 +31,7 @@ Use subagent in the background by default. Start independent delegations togethe
 
 ## Writing code for run_code
 
-`run_code` takes two required arguments: `code` — the body of an async Python function (top-level `await` and `return` both work) — and `description`, a short summary of what the program does. At run time exactly two of the names declared below are bound: `tools` and `ToolCallError`. Everything else is a STATIC STUB describing argument and return types — in particular the `TypedDict` classes do NOT exist at run time, so build arguments as plain `dict`/`list` JSON values: `await tools.name({"field": 1})`, never `FooArgs(field=1)`, which raises `NameError`. Inside the program:
+`run_code` takes `code` — the body of an async Python function (top-level `await` and `return` both work) — and an optional `description`, a short summary of what the program does. At run time exactly two of the names declared below are bound: `tools` and `ToolCallError`. Everything else is a STATIC STUB describing argument and return types — in particular the `TypedDict` classes do NOT exist at run time, so build arguments as plain `dict`/`list` JSON values: `await tools.name({"field": 1})`, never `FooArgs(field=1)`, which raises `NameError`. Inside the program:
 
 - Call tools as `await tools.name(args)` — subscript access for exotic, reserved, or underscore-leading names: `await tools["my-tool"](args)`. Every call resolves to the tool's typed canonical JSON value (each method's return type below). Tool arguments must be lossless JSON.
 - A FAILED tool call raises `ToolCallError`, whose `toolName` identifies the failed tool and whose message is human-readable — wrap in `try/except` to handle and continue.
@@ -50,7 +50,7 @@ class BashArgs(TypedDict):
     # The bash command to execute.
     command: str
     # Clear, concise description of what this command does in active voice, 5-10 words (shown in the UI). Examples: "ls" → "List files in current directory"; "git status" → "Show working tree status"; "npm install" → "Install package dependencies".
-    description: str
+    description: NotRequired[str]
     # Timeout in milliseconds. The executor applies its configured default and cap, and kills the command on expiry.
     timeoutMs: NotRequired[float]
     # Working directory for this command. Defaults to the session workspace; a relative path is resolved against it.
@@ -120,6 +120,11 @@ class CreateGoalOutput2Goal(TypedDict):
 class CreateGoalOutput2(TypedDict):
     goal: CreateGoalOutput2Goal
     activation: Literal["armed", "disarmed"]
+
+class DoctorArgs(TypedDict):
+    # Also probe the default model route with one tiny request.
+    probe: NotRequired[bool]
+    # Additional keys beyond those declared are allowed.
 
 class EditArgs(TypedDict):
     # Path to edit, resolved by the filesystem backend.
@@ -256,6 +261,32 @@ class JobOutputOutput(TypedDict):
     text: str
     job: JobOutputOutputJob
 
+class JournalArgs(TypedDict):
+    # The operation.
+    action: Literal["breakthrough", "hypothesis", "experiment", "dead_end", "next", "read"]
+    # Journal slug; defaults to the active research of this session.
+    slug: NotRequired[str]
+    # breakthrough/hypothesis/dead_end: one or two sentences.
+    text: NotRequired[str]
+    # hypothesis: the hypothesis id to update.
+    id: NotRequired[str]
+    # hypothesis: the new status when `id` is given.
+    status: NotRequired[Literal["open", "supported", "refuted"]]
+    # experiment: what was tried.
+    what: NotRequired[str]
+    # experiment: what happened.
+    result: NotRequired[str]
+    # next: the next steps in order.
+    steps: NotRequired[list[str]]
+    # Additional keys beyond those declared are allowed.
+
+class KnowledgeAddArgs(TypedDict):
+    # The folder the user named: absolute, relative to the workspace, or starting with ~.
+    path: str
+    # A short collection name of letters, digits, - and _; the folder's name when omitted.
+    name: NotRequired[str]
+    # Additional keys beyond those declared are allowed.
+
 class ListAgentsArgs(TypedDict):
     # children (default) lists direct children only; descendants walks the complete tree below you.
     scope: NotRequired[Literal["children", "descendants"]]
@@ -275,6 +306,37 @@ class ListAgentsOutput2(TypedDict):
     reason: Literal["corrupt", "unsupported", "unavailable"]
     parent: NotRequired[str]
     depth: NotRequired[float]
+
+class MemoryArgs(TypedDict):
+    # The operation.
+    action: Literal["remember", "search", "forget"]
+    # remember: the knowledge to store, one or two sentences.
+    text: NotRequired[str]
+    # remember: fact (default), shortcut, or preference.
+    kind: NotRequired[Literal["fact", "shortcut", "preference"]]
+    # remember: short lowercase topic tags.
+    tags: NotRequired[list[str]]
+    # search: words matched against entry text and tags, best match first; omit to list everything.
+    query: NotRequired[str]
+    # forget: the entry id.
+    id: NotRequired[str]
+    # Additional keys beyond those declared are allowed.
+
+class OffPeakArgs(TypedDict):
+    # queue (park a task) | list (what is queued)
+    action: Literal["queue", "list"]
+    # What to do when the window opens; required for `queue`.
+    task: NotRequired[str]
+    # Additional keys beyond those declared are allowed.
+
+class OffPeakOutputEntries(TypedDict):
+    id: str
+    state: str
+    task: str
+
+class OffPeakOutput(TypedDict):
+    open: bool
+    entries: list[OffPeakOutputEntries]
 
 class ReadArgs(TypedDict):
     # Path to read, resolved by the filesystem backend.
@@ -316,6 +378,25 @@ class ReadImageOutputImage(TypedDict):
 class ReadImageOutput(TypedDict):
     path: str
     image: ReadImageOutputImage
+
+class RunExperimentArgsMetrics(TypedDict):
+    # Metric name.
+    name: str
+    # JavaScript regular expression.
+    regex: str
+
+class RunExperimentArgs(TypedDict):
+    # Short stable name of the experiment; repeating a title yields per-metric deltas.
+    title: str
+    # The shell command to run in the workspace directory.
+    command: str
+    # The journal hypothesis this experiment tests.
+    hypothesisId: NotRequired[str]
+    # Time budget in milliseconds; capped by the deployment maximum.
+    timeoutMs: NotRequired[float]
+    # Metrics to read from stdout and stderr; the first capture group (else the whole match) must be a number.
+    metrics: NotRequired[list[RunExperimentArgsMetrics]]
+    # Additional keys beyond those declared are allowed.
 
 class SendMessageArgs(TypedDict):
     # The agent id of your direct continuable child, or your direct parent when you are a resident continuable child.
@@ -451,6 +532,13 @@ class UpdateGoalOutput2(TypedDict):
     goal: UpdateGoalOutput2Goal
     activation: Literal["armed", "disarmed"]
 
+class UsageArgs(TypedDict):
+    # Inclusive first local day as YYYY-MM-DD. Omit for all recorded history.
+    since: NotRequired[str]
+    # Inclusive last local day as YYYY-MM-DD. Omit to run to the most recent day.
+    until: NotRequired[str]
+    # Additional keys beyond those declared are allowed.
+
 class WebFetchArgs(TypedDict):
     # The HTTP(S) URL to fetch.
     url: str
@@ -508,6 +596,8 @@ class Tools(Protocol):
         """Execute a bash command (`bash -c`) and return its stdout/stderr. Each call runs in a fresh shell: no state (cwd, variables, functions) persists between calls — pass `workdir` instead of using `cd`. Non-zero exits are reported as `[exit code: N]`. Current harness environment facts are exposed through managed `$DSH_*` variables; inspect them when needed. Commands may run under a file sandbox; a blocked file operation is reported as `[sandbox: file access denied under <mode> mode]` — a policy denial, not a bug in the command; do not retry another way. Long output is truncated to its tail; the full output is saved to a file whose path is reported when available. Set `run_in_background: true` for long-running commands: the call returns a job id immediately; read its output with `job_output` and stop it with `job_kill`. Attempting a command the sandbox may deny is safe and expected: run it and read the marker rather than assuming the denial. When a command is denied and a wider mode would let it succeed, escalate immediately in the same turn — the one sanctioned exception to a denial: retry the exact same command once with `sandbox_permissions` (the narrowest wider mode that suffices) plus a one-sentence `justification`. Do not detour through chat to ask permission first — the approval prompt raised by that retry is how the user consents. If the session states approval prompts are disabled, there is no exception: a denial is final — do not set `sandbox_permissions`. Never escalate speculatively: ground the request in a real denial — normally the one this command just hit; escalating up front is fine only when this session already denied the same access. A rejected escalation is final for that command — stop and explain, never work around it — but it does not forbid attempting or escalating other commands later."""
     async def create_goal(self, args: CreateGoalArgs) -> CreateGoalOutput1 | CreateGoalOutput2:
         """Create one persisted same-session completion goal when the current direct human request is a long-running objective that should continue across autonomous goal rounds. You may infer that intent without requiring the user to say \"create a goal\". Do not use this for trivial single-turn work. Execution rejects non-human and subagent authority."""
+    async def doctor(self, args: DoctorArgs) -> Any:
+        """Read-only environment self-check of this Hydra installation: home, workspace folders, sandbox, native addon, git, mounted plugins, tool-calling compat rows, and credential references (never key values). Set probe to also send one tiny model request to the default route and report its latency or failure class."""
     async def edit(self, args: EditArgs) -> EditOutput:
         """Edit an existing UTF-8 text file by replacing literal text."""
     async def exit_plan_mode(self, args: ExitPlanModeArgs) -> ExitPlanModeOutput:
@@ -526,16 +616,26 @@ class Tools(Protocol):
         """List your background jobs (running and finished) with their ids, kinds, and statuses."""
     async def job_output(self, args: JobOutputArgs) -> JobOutputOutput:
         """Read a background job. Stream jobs return only output since the previous read; final-output jobs return their result after settlement. Every response ends with `[status: ...]`. Reads are non-blocking unless `wait: true`, which waits up to the configured cap."""
+    async def journal(self, args: JournalArgs) -> Any:
+        """The research journal of this workspace: the durable memory of a research goal across sessions. `breakthrough` records a confirmed step toward the objective; `hypothesis` adds one (text) or sets its status (id + status); `experiment` records what was tried and the result; `dead_end` records what must not be retried and why; `next` replaces the next steps; `read` returns the journal. Entries are written to the journal file at once and recalled into every later request, so record findings the moment they happen. `slug` defaults to the research this session runs."""
+    async def knowledge_add(self, args: KnowledgeAddArgs) -> str:
+        """Index a folder of documents the user named, so this workspace can search it with the knowledge tools. Call it only when the user asks you to use, read, or learn from a folder of documents; the user approves the folder first and is asked separately before its files are summarized."""
     async def list_agents(self, args: ListAgentsArgs) -> list[ListAgentsOutput1 | ListAgentsOutput2]:
         """List your continuable background subagents by durable id and label. Use it to recall which ones you started, not to poll for completion — you are told when one finishes. Status comes from the live registry: running means the agent is working right now, idle means it is loaded but between turns (it may be waiting on agents it started), and ready means it exists only in storage — resumable, not terminal, and not a result waiting to be collected; a `send_message` steers a running child at its nearest step boundary or starts a turn for an idle or ready child, and a direct child remains a `send_message` candidate in every status. The snapshot is not a delivery promise — `send_message` performs the authoritative check and may still fail. Children that could not be read are reported as diagnostics instead of being silently dropped. Scope `descendants` walks the whole tree below you in stable pre-order, annotating each entry with its durable direct-parent session id and depth. You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only."""
+    async def memory(self, args: MemoryArgs) -> Any:
+        """Long-term memory across sessions. `remember` stores a durable fact, shortcut, or preference, or a lesson (a root cause found, an approach that failed and why, a corrected assumption) the user would want later work to know; `search` finds stored entries; `forget` deletes one by id. Entries related to the current work appear in <retrieved_memory>; use one only when its situation matches. Write each entry so it names its situation (the file, command, or component). Never remember plans or progress reports."""
+    async def off_peak(self, args: OffPeakArgs) -> OffPeakOutput:
+        """Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens."""
     async def read(self, args: ReadArgs) -> ReadOutput:
         """Read a UTF-8 text file and return line-numbered content."""
     async def read_image(self, args: ReadImageArgs) -> ReadImageOutput:
         """Read a PNG/JPEG/WebP/GIF file and return the image itself. A path without a file extension is accepted; the format is detected from the file content, so normalized attachment paths can be passed directly without copying or renaming. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input."""
+    async def run_experiment(self, args: RunExperimentArgs) -> Any:
+        """Run one research experiment as a shell command in the workspace and record it in the research journal: the command, exit code, metrics read from the output with your regular expressions, deltas against the previous run with the same `title`, and an output excerpt. Use it instead of `bash` for experiments so results are never lost. Requires an active research goal in this session (start one with /research)."""
     async def send_message(self, args: SendMessageArgs) -> SendMessageOutput:
         """Send a message to a direct continuable child by its agent id. If you are a resident continuable child, you may also target your direct parent. If the target is still working, the message steers its nearest step; if it is idle, the message starts a turn. This call returns no answer from the agent — only confirmation that the message was delivered. A failure means the message was NOT delivered."""
     async def skill(self, args: SkillArgs) -> SkillOutput:
-        """Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill."""
+        """Load the full guidance of an available skill. Call this with the exact skill name from the session skill catalog when the user names that skill or the task clearly needs what it offers; adapt its steps to the task instead of following them as fixed rules."""
     async def subagent(self, args: SubagentArgs) -> SubagentOutput1 | SubagentOutput2 | SubagentOutput3:
         """Delegate a self-contained task to a subagent (a separate agent that works in its own context) to offload focused, independent work — research, a scoped implementation, an analysis — so it does not consume this conversation's context. The subagent returns its result, not its intermediate steps. Give it a complete, standalone prompt: it does not see this conversation. This tool runs in the background by default, immediately returns a durable subagent id, and keeps the child conversation available for later turns. When that run settles, the runtime sends the parent a notice containing its outcome and any final assistant message; `send_message` steers the child's nearest step while it is running and starts a turn while it is idle. Set `run_in_background: false` only when your next action depends on receiving the result."""
     async def subagent_fork(self, args: SubagentForkArgs) -> SubagentForkOutput1 | SubagentForkOutput2 | SubagentForkOutput3:
@@ -544,6 +644,8 @@ class Tools(Protocol):
         """Record and update a structured task list for the current work. Send the ENTIRE list every call — it REPLACES the previous list (there are no partial updates, no per-item edits). Use it to plan multi-step work and show progress: add one todo per concrete step before you start. Mark every todo being actively worked on `in_progress` — several at once when work genuinely runs in parallel (e.g. concurrent subagents or background commands), one for sequential work; while work remains, at least one task should be `in_progress`. Mark a todo `completed` the moment it is done (do not batch completions), and allow no `in_progress` item only once all work is complete. Skip the list for trivial single-step tasks. Statuses: `pending` (not started), `in_progress` (being worked on now), `completed` (finished)."""
     async def update_goal(self, args: UpdateGoalArgs) -> UpdateGoalOutput1 | UpdateGoalOutput2:
         """Update the exact current goal revision. edit, pause, and resume require a direct top-level human request. During an automatic continuation of the current goal, complete and blocked are also allowed. blocked is rejected before the configured minimum round count; the model remains responsible for judging that the same condition persisted across those rounds and must explain it in blocked_reason."""
+    async def usage(self, args: UsageArgs) -> Any:
+        """Read-only token usage across every recorded session: overall totals, a table by provider and model, and a per-day series. Counts what providers reported for assistant messages, bucketed by the local day each message happened. Use since and until to look at one stretch of days."""
     async def web_fetch(self, args: WebFetchArgs) -> WebFetchOutput:
         """Fetch the content of a specific HTTP(S) URL and return it decoded to text."""
     async def web_search(self, args: WebSearchArgs) -> WebSearchOutput:

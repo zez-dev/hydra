@@ -35,8 +35,8 @@ body * {
 }
 
 body[data-ds-dark-theme] {
-  --dsw-linear-gradient-think: linear-gradient(180deg, #151517 20.19%, rgba(21, 21, 23, 0) 100%);
-  --dsw-linear-think-select: linear-gradient(180deg, #232325 20.19%, rgba(35, 35, 37, 0) 100%);
+  --dsw-linear-gradient-think: linear-gradient(180deg, var(--dsw-alias-bg-base) 20.19%, rgba(7, 7, 8, 0) 100%);
+  --dsw-linear-think-select: linear-gradient(180deg, var(--dsw-alias-bg-layer-2) 20.19%, rgba(21, 21, 22, 0) 100%);
 }
 
 /* ---------- 字体 ---------- */

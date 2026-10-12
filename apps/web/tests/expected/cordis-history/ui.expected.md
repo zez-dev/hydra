@@ -19,6 +19,8 @@
 - text: "Use only Cordis tools. First call cordis_inspect_self with no arguments. Then call cordis_define with plugin kind \"new\", idPrefix \"snap\", name \"snapshot noop\", purpose \"does nothing, for the snapshot\", code.host exactly \"return { name: \\\"snapshot-noop\\\", apply(ctx) {} }\" and code.client exactly \"return { inject: [\\\"slots\\\"], apply(ctx) { ctx.slots.register({ name: \\\"shell.overlay\\\", id: \\\"snapshot-probe\\\" }, () => React.createElement(\\\"div\\\", { \\\"data-snapshot-probe\\\": \\\"loaded\\\" })) } }\". Read its returned pluginId and packageId, then call cordis_run with those exact IDs and mode \"run\". After the run request returns, reply exactly CORDIS_UI_READY and stop. 9/1 {{clock}}"
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "3 tool calls" [expanded]:
   - text: 3 tool calls
   - img
@@ -28,14 +30,12 @@
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - button "Think I will inspect the current Session's dynamic Cordis Plugins before defining the snapshot Package.":
   - img
-  - img
   - text: Think I will inspect the current Session's dynamic Cordis Plugins before defining the snapshot Package.
 - 'button "Tool call cordis_inspect_self · {}"':
   - img
   - img
   - text: "Tool call cordis_inspect_self · {}"
 - button "Think No dynamic Plugins are present, so I will define the requested Host and Client Package.":
-  - img
   - img
   - text: Think No dynamic Plugins are present, so I will define the requested Host and Client Package.
 - button "Register Cordis Plugin snapshot noop does nothing, for the snapshot Ready" [expanded]:
@@ -52,14 +52,12 @@
 - button "Inspect"
 - button "Think The Host returned snap-1/pkg-1, so I will request its first activation.":
   - img
-  - img
   - text: Think The Host returned snap-1/pkg-1, so I will request its first activation.
 - img
 - text: Run Cordis Plugin snap-1 · pkg-1 Ready
 - button "Inspect"
 - text: snap-1/pkg-1 is awaiting user approval (run-1).
 - button "Think The activation request has been submitted, so I will return the requested readiness marker.":
-  - img
   - img
   - text: Think The activation request has been submitted, so I will return the requested readiness marker.
 - paragraph: CORDIS_UI_READY
@@ -93,6 +91,8 @@
 - text: 9/1 {{clock}} Use only Cordis tools. Call cordis_stop with pluginId "snap-1". After it succeeds, reply exactly CORDIS_UI_DONE and stop. 9/1 {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "1 tool call" [expanded]:
   - text: 1 tool call
   - img
@@ -113,8 +113,6 @@
   - img
   - text: Ran for {{duration}}
 - text: 9/1 {{clock}}
-- button "Back to bottom":
-  - img
 - textbox "Message or run a task, / commands, @ files or sessions"
 - button "Add files or run commands":
   - img

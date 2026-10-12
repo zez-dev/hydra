@@ -11,6 +11,8 @@
 - text: Render this mathematical proof. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - heading "Math rendering" [level=2]
 - paragraph:
   - text: Inline dollar

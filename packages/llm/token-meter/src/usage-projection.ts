@@ -68,10 +68,14 @@ const pressureSchema: z.ZodType<ContextPressureProjection> = z.object({
   pressureTokens: z.number().int().nonnegative().optional(),
   projectedTokens: z.number().int().nonnegative().optional(),
   contextWindow: z.number().int().positive().optional(),
-}).strict().transform(({ pressureTokens, projectedTokens, contextWindow }) => ({
+  density: z.number().positive().optional(),
+  thresholdTokens: z.number().int().nonnegative().optional(),
+}).strict().transform(({ pressureTokens, projectedTokens, contextWindow, density, thresholdTokens }) => ({
   ...pressureTokens === undefined ? {} : { pressureTokens },
   ...projectedTokens === undefined ? {} : { projectedTokens },
   ...contextWindow === undefined ? {} : { contextWindow },
+  ...density === undefined ? {} : { density },
+  ...thresholdTokens === undefined ? {} : { thresholdTokens },
 }))
 
 /** Prompt-side pressure of one request: input plus cache traffic, no output. */
@@ -98,6 +102,12 @@ const contextPressureStateSchema = z.object({
   pressureTokens: z.number().int().nonnegative().optional(),
   surfaceTokens: z.number().int().nonnegative(),
   sampledSurfaceTokens: z.number().int().nonnegative().optional(),
+  pricedTokens: z.number().int().nonnegative().optional(),
+  pricedSurfaceTokens: z.number().int().nonnegative().optional(),
+  pendingTokens: z.number().int().nonnegative().optional(),
+  density: z.number().positive().optional(),
+  thresholdTokens: z.number().int().nonnegative().optional(),
+  anchor: z.enum(['usage', 'priced']).optional(),
   claim: z.object({
     start: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(SessionSeq),
     end: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).transform(SessionSeq),
@@ -162,9 +172,12 @@ export const tokenUsageProjectionDefinition = {
  * and steps forward once the next request reports its usage. Because nothing
  * but a request reports usage, it also cannot see a compaction: the fold
  * therefore carries a running surface total alongside it and publishes
- * `projectedTokens` — the sample plus the surface's signed movement since it
- * was taken — so occupancy answers for the next request rather than the last
- * one. The total rides {@link foldSurfaceProjection}, so the state stays O(1)
+ * `projectedTokens` — the newest anchor plus the surface's signed movement
+ * since it, priced at the route's density — so occupancy answers for the next
+ * request rather than the last one. A `compaction/pressure` event is the
+ * backend's own price of the request about to go out and anchors the figure
+ * until that request's usage arrives, so a reader sees the number the
+ * backend's fit check acted on. The total rides {@link foldSurfaceProjection}, so the state stays O(1)
  * and a replacement shrinks it by its logged shadow price. A replacement
  * without a claim preserves the previous total. A usage sample is stamped
  * BEFORE the same event joins the surface, so an `assistant/message` anchors
@@ -172,7 +185,7 @@ export const tokenUsageProjectionDefinition = {
  */
 export const contextPressureProjectionDefinition = {
   key: 'contextPressure',
-  stateVersion: 5,
+  stateVersion: 6,
   stateSchema: contextPressureStateSchema,
   init: () => ({ surfaceTokens: 0 }),
   apply: (state, event) => {
@@ -192,8 +205,23 @@ export const contextPressureProjectionDefinition = {
     const usage = usageOf(event)
     if (usage !== undefined) {
       const pressureTokens = pressureFrom(usage)
-      if (pressureTokens !== next.pressureTokens || next.sampledSurfaceTokens !== next.surfaceTokens) {
-        next = { ...next, pressureTokens, sampledSurfaceTokens: next.surfaceTokens }
+      if (pressureTokens !== next.pressureTokens || next.sampledSurfaceTokens !== next.surfaceTokens || next.anchor !== 'usage') {
+        next = { ...next, pressureTokens, sampledSurfaceTokens: next.surfaceTokens, anchor: 'usage' }
+      }
+    }
+    if (event.type === 'compaction/pressure') {
+      // The backend's own price of the request about to go out: the newest
+      // anchor until the provider reports that request's usage. The admitted
+      // batch is not in the log yet, so the anchor's surface counts it ahead.
+      const { pricedTokens, pendingTokens, density, thresholdTokens } = event.data
+      next = {
+        ...next,
+        pricedTokens,
+        pricedSurfaceTokens: next.surfaceTokens,
+        pendingTokens,
+        density,
+        thresholdTokens,
+        anchor: 'priced',
       }
     }
     if (fold.deltaTokens !== 0) {
@@ -207,12 +235,30 @@ export const contextPressureProjectionDefinition = {
   },
   wire: {
     viewSchema: pressureSchema,
-    view: ({ contextWindow, pressureTokens, surfaceTokens, sampledSurfaceTokens }) => ({
-      ...contextWindow === undefined ? {} : { contextWindow },
-      ...pressureTokens === undefined ? {} : { pressureTokens },
-      ...pressureTokens === undefined || sampledSurfaceTokens === undefined
-        ? {}
-        : { projectedTokens: Math.max(0, pressureTokens + surfaceTokens - sampledSurfaceTokens) },
-    }),
+    view: ({
+      contextWindow, pressureTokens, surfaceTokens, sampledSurfaceTokens,
+      pricedTokens, pricedSurfaceTokens, pendingTokens, density, thresholdTokens, anchor,
+    }) => {
+      // Newest anchor wins: the backend's price of the outgoing request until
+      // the provider reports that request's usage, then the provider's count.
+      // Either way the surface delta since the anchor is priced at the density
+      // the backend last priced this route at, as the backend's own check is.
+      const rate = density ?? 1
+      // Growth after the price first covers the batch the price already
+      // counted ahead; a shrink (a compaction) counts in full.
+      const grownPastPrice = (delta: number): number => delta >= 0 ? Math.max(0, delta - (pendingTokens ?? 0)) : delta
+      const projectedTokens = anchor === 'priced' && pricedTokens !== undefined && pricedSurfaceTokens !== undefined
+        ? Math.max(0, pricedTokens + Math.round(grownPastPrice(surfaceTokens - pricedSurfaceTokens) * rate))
+        : pressureTokens !== undefined && sampledSurfaceTokens !== undefined
+          ? Math.max(0, pressureTokens + Math.round((surfaceTokens - sampledSurfaceTokens) * rate))
+          : undefined
+      return {
+        ...contextWindow === undefined ? {} : { contextWindow },
+        ...pressureTokens === undefined ? {} : { pressureTokens },
+        ...projectedTokens === undefined ? {} : { projectedTokens },
+        ...density === undefined ? {} : { density },
+        ...thresholdTokens === undefined ? {} : { thresholdTokens },
+      }
+    },
   },
 } satisfies ProjectionDefinition<'contextPressure', ContextPressureState>

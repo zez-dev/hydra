@@ -15,6 +15,8 @@ import { redactSessionSnapshotIds } from './identity.ts'
 const SESSION_ID = '{{sessionId}}'
 const MESSAGE_ID = '{{messageId}}'
 const USED_TOKENS = '{{usedTokens}}'
+/** `compaction/pressure` fields measured from the rendered prompt, zeroed in session logs. */
+const PRESSURE_MEASURED_FIELDS = ['estimatedTokens', 'pendingTokens', 'pricedTokens', 'density'] as const
 const CWD = '{{cwd}}'
 const SYSTEM = '{{system}}'
 const TOOLS = '{{tools}}'
@@ -326,7 +328,8 @@ export function normalizeStdout(
  * Normalize a session JSONL log into a stable expected output: the header line's
  * volatile fields (`createdAt`, `id`, `cwd`) are zeroed/scrubbed; event,
  * historical packed-row, embedded Assistant-stream, goal lifecycle, and
- * catalog child-creation clocks are zeroed; and all volatile strings are
+ * catalog child-creation clocks are zeroed; the measured token counts of a
+ * `compaction/pressure` event are zeroed; and all volatile strings are
  * scrubbed. Projected inputs remain
  * projected. Packed `data.dt` gaps are normalized even when the projected row
  * omits its `time0` anchor.
@@ -375,6 +378,15 @@ export function normalizeSessionLog(
     if (record.type === 'hook/result' && record.data !== null && typeof record.data === 'object') {
       const data = record.data as Record<string, unknown>
       if ('durationMs' in data) data.durationMs = 0
+    }
+    // The pressure diagnostic's measured counts price the rendered prompt, which
+    // carries the workspace and checkout paths, so they differ by machine and
+    // operating system; the declared window, cap, and threshold stay compared.
+    // A cap shrunk to the room left near a full window is measured too, so a
+    // fixture that records one would need those two zeroed as well.
+    if (record.type === 'compaction/pressure' && record.data !== null && typeof record.data === 'object') {
+      const data = record.data as Record<string, unknown>
+      for (const field of PRESSURE_MEASURED_FIELDS) if (field in data) data[field] = 0
     }
     normalizeFeedbackClocks(record)
     if (record.type === 'goal/change' && record.data !== null && typeof record.data === 'object') {

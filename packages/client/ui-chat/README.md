@@ -8,9 +8,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use this package to render a browser chat from recorded Session conversations, including historical images, localized actions, and restored scroll position. Compact display folds completed-turn process rows while keeping the final answer and independently useful context visible; packed historical Assistant runs remain collapsed. Local transcript and steering submissions appear immediately, remain in their original surface, and disappear atomically when authoritative Session records arrive, while queued submissions stay outside Chat. The package does not assemble or modify model requests.
-
-File-mention providers receive the viewed Session ID with the closing-turn owner, so links into inherited history can address the fork itself.
+Use this package to render a browser chat from recorded Session conversations, including historical images and restored scroll position. Compact display folds completed-turn process rows while keeping the final answer and independently useful context visible; packed historical Assistant runs stay collapsed. Local transcript and steering submissions appear immediately and disappear atomically when authoritative Session records arrive; queued submissions stay outside Chat. The package never assembles or modifies model requests. Every user-style message carries a **Rewind to here** action that forks the Session before that message's turn; the completed-turn tail keeps the separate **Branch** action, which forks after the turn.
 
 ## Table of Contents
 
@@ -20,6 +18,8 @@ File-mention providers receive the viewed Session ID with the closing-turn owner
 - [Completed-turn footer](#completed-turn-footer)
 - [Turn Process Folding](#turn-process-folding)
 - [Scroll ownership](#scroll-ownership)
+- [Rewind and branch](#rewind-and-branch)
+- [Mounted window](#mounted-window)
 - [Model Experience](#model-experience)
 - [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
 - [Dev Note](#dev-note)
@@ -69,6 +69,16 @@ Chat restores semantic anchors across history prepend and renderer remounts. Pin
 -----
 
 <a id="model-experience"></a>
+## Rewind and branch
+
+**Rewind to here** forks the Session at the boundary before that message's turn through `sessions.rewind`, opens the child, and seeds the child's composer with the original prompt through `uiConversation.seedDraft` so the user can edit it before sending; nothing is sent automatically. Actions are localized through the package's dictionary. File-mention providers receive the viewed Session ID with the closing-turn owner, so links into inherited history can address the fork itself.
+
+## Mounted window
+
+A conversation of more than 200 loaded nodes mounts only the rows near the viewport: the rows within one and a half viewports above and below the visible ones, and the newest 24, render their node; every other row stays in the column as a placeholder of its last measured height (96px before it has ever been measured) that keeps the flow item's identity attributes, so scroll anchoring, turn navigation, and paging see the same column. The window follows the scroller's `scroll` events and a `ResizeObserver` on the scroller and the column, one measurement per animation frame, and each mounted row's height is remembered when it leaves the window. When a measurement mounts or unmounts rows, the first visible row that is already mounted (a placeholder only when no mounted row is visible, since a placeholder that mounts takes its real height) keeps its position: after the commit the scroller moves by that row's displacement, before paint, so a page of never-measured placeholders prepended above the reader mounts without moving what the reader is looking at. The view shares its scroll ledger with the window (`ledger` on `ChatNodeList`): the window records every scroll it writes there, as the view's own restores do, so the view never takes a correction for a reader scroll, and while the view follows the stream at the floor the window re-pins the floor instead of holding a row. Browser scroll anchoring is off on the column and on the conversation scroller (`overflow-anchor: none`): an adjustment the browser made would be an offset the view never recorded, which it takes for a reader scroll, and the window's layout reads mid-commit are where the browser would make one. Below the threshold every node mounts, so a short conversation and its fixtures are unchanged. `src/client/chat/flow-window.ts` owns the window; `ChatNodeList` applies it; `ChatNodePlaceholder` in `ChatNodeSeat.tsx` is the row that holds a place.
+
+-----
+
 ## Model Experience
 
 None, as this package renders logged conversation state in the browser and registers nothing model-facing.
@@ -83,7 +93,6 @@ None; Chat presentation does not assemble or mutate provider requests.
 
 - **The transcript reflects the loaded Session window** — older transcript nodes become available only after Session Controller loads the preceding event page. Turn navigation is wider than the window: the rail merges the loaded Turns with the host `turnOutline` projection, so every started Turn gets a fixed-pitch mark (10px apart; a ladder taller than the frame scrolls inside it with gradient fades), and activating an unloaded mark pages history through the Turn's `turn/start` seq before landing on its row. Without the projection (assemblies not mounting `dsh-session-turn-outline`) the rail falls back to loaded Turns only.
 - **Rail previews are card-sized** — one prompt line (50 characters) and up to three response lines (120), on loaded and unloaded Turns alike; an unloaded Turn's response arrives from the outline only once the Turn settled, so an open Turn previews its prompt (or just the Turn number) until then.
-
 
 <a id="dev-note"></a>
 ### Dev Note

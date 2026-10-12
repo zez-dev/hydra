@@ -11,6 +11,8 @@
 - text: "Assemble the link gallery: write the report and styles, inspect the sources, and summarize. {{clock}}"
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "16 tool calls" [expanded]:
   - text: 16 tool calls
   - img

@@ -40,19 +40,26 @@ export type ManualCompactionErrorCode =
  */
 export class ManualCompactionError extends Error {
   override readonly name = 'ManualCompactionError'
+  /**
+   * Numbers the engine had in hand when the failure was classified (window,
+   * caps, sizes, densities), for a reason text a person can act on; absent
+   * when the engine recorded none.
+   */
+  readonly facts: Readonly<Record<string, number | string>> | undefined
 
   /**
    * Create one classified compaction failure.
    * @param code - stable failure class; `busy` may originate from any compaction entry path.
    * @param message - backend diagnostic retained as the Error message.
-   * @param options - optional original failure.
+   * @param options - optional original failure and the engine's facts about it.
    */
   constructor(
     readonly code: ManualCompactionErrorCode,
     message: string,
-    options?: ErrorOptions,
+    options?: ErrorOptions & { facts?: Readonly<Record<string, number | string>> },
   ) {
     super(message, options)
+    this.facts = options?.facts
   }
 }
 

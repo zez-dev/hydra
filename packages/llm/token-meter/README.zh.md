@@ -33,7 +33,7 @@ kind: "package-reference"
 
 ### 测量压力
 
-`ctx.tokenMeter` 暴露两个操作。`measure(session, requestHeader?)` 在同一个已消费日志 revision 上返回独立、深度不可变的快照：`totalTokens` 是请求与响应压力，`surfaceTokens` 是仅表面的路由定价总量，等于 `nodes[].tokens` 之和。可选 `requestHeader` 覆盖会选择计价路由与压力字段；节点集合仍描述当前会话。`estimateMessage(message)` 用固定启发式规则为一条消息计价。每次调用都会克隆带位置的表面节点，因此测量是 O(surface)。
+`ctx.tokenMeter` 暴露三个操作。`measure(session, requestHeader?)` 在同一个已消费日志 revision 上返回独立、深度不可变的快照：`totalTokens` 是请求与响应压力，`surfaceTokens` 是仅表面的路由定价总量，等于 `nodes[].tokens` 之和。可选 `requestHeader` 覆盖会选择计价路由与压力字段；节点集合仍描述当前会话。`estimateMessage(message)` 用固定启发式规则为一条消息计价，`estimateTools(tools)` 按已记录 header 的方式为工具 schema 计价。每次调用都会克隆带位置的表面节点，因此测量是 O(surface)。
 
 ```text
 const { totalTokens, surfaceTokens, nodes } = ctx.tokenMeter.measure(session)

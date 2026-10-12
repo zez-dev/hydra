@@ -59,11 +59,17 @@ export interface SessionNode {
   completed: boolean
   /** The current list projection contains at least one active Schedule record. */
   hasActiveSchedule: boolean
+  /** Member of the registry-global archive set; present only while archived rows are revealed. */
+  archived: boolean
+  /** Lineage indent level: 0 for a root row, one more for each nesting step under a parent. */
+  depth: number
+  /** Ordinary forks nested directly under this row; 0 outside the lineage order. */
+  forkCount: number
   updatedAt: number
 }
 
 /** Session order selected by the Workspace browser. */
-export type SessionOrderBy = 'manual' | 'updated'
+export type SessionOrderBy = 'manual' | 'updated' | 'lineage'
 
 /** One workspace group section: header row facts + visible top-level session rows. */
 export interface GroupNode {
@@ -98,6 +104,8 @@ export interface SearchResultNode {
   completed: boolean
   /** The current list projection contains at least one active Schedule record. */
   hasActiveSchedule: boolean
+  /** Member of the registry-global archive set; present only while archived rows are revealed. */
+  archived: boolean
   snippet?: string
 }
 
@@ -112,6 +120,18 @@ export interface TreeView {
   expandedGroups: readonly string[]
   /** Browser-local order for Sessions without a backing Workspace account. */
   ungroupedOrder?: readonly string[]
+  /** Archived Sessions join their accounting slots as rows instead of staying hidden. */
+  showArchived?: boolean
+  /** Nest ordinary forks under the parent row they branched from. */
+  lineage?: boolean
+}
+
+/** Flat-list derivation options. */
+export interface FlatView {
+  /** Registry-global archive set; supplied members render as archived rows. */
+  archivedSessionIds?: readonly SessionId[]
+  /** Nest ordinary forks under the parent row they branched from. */
+  lineage?: boolean
 }
 
 interface Group {
@@ -202,12 +222,17 @@ export function pinCurrentBlank(
 /**
  * Ordinary sessions are visible; among blank sessions, only the current one
  * is visible. Subagent children use their parent header catalog; archived
- * sessions are visible nowhere, while their accounting slots remain so
- * unarchiving restores position.
+ * sessions are visible only while the caller reveals them, and their
+ * accounting slots remain either way so unarchiving restores position.
  */
-function sessionVisible(session: SessionSummary, current: SessionId | undefined, archived: ReadonlySet<SessionId>): boolean {
+function sessionVisible(
+  session: SessionSummary,
+  current: SessionId | undefined,
+  archived: ReadonlySet<SessionId>,
+  showArchived: boolean,
+): boolean {
   return session.origin !== 'subagent'
-    && !archived.has(session.id)
+    && (showArchived || !archived.has(session.id))
     && (!session.blank || session.id === current)
 }
 
@@ -264,6 +289,7 @@ function groupByWorkspace(
   list: SessionListState,
   workspaces: readonly WorkspaceView[],
   archived: ReadonlySet<SessionId>,
+  showArchived: boolean,
   ungroupedOrder: readonly string[] | undefined,
 ): Group[] {
   const current = mainSessionId(list)
@@ -275,7 +301,7 @@ function groupByWorkspace(
       const summary = list.byId[id]
       if (summary === undefined) continue // account may lead the list pull; the row appears when the summary lands
       accounted.add(id)
-      if (!sessionVisible(summary, current, archived)) continue
+      if (!sessionVisible(summary, current, archived, showArchived)) continue
       members.push(summary)
     }
     groups.push(buildGroup(
@@ -286,7 +312,7 @@ function groupByWorkspace(
   const stray = list.ids
     .map(id => list.byId[id])
     .filter((s): s is SessionSummary =>
-      s !== undefined && !accounted.has(s.id) && sessionVisible(s, current, archived))
+      s !== undefined && !accounted.has(s.id) && sessionVisible(s, current, archived, showArchived))
   if (stray.length > 0) {
     groups.push(buildGroup(
       UNGROUPED_KEY,
@@ -316,6 +342,7 @@ function sessionNode(
   s: SessionSummary,
   descendants: ReadonlyMap<SessionId, SubagentDescendantSummary>,
   statuses: SessionStatuses,
+  archived: ReadonlySet<SessionId>,
 ): SessionNode {
   const status = statuses.get(s.id)
   const pendingInteraction = visiblePendingKind(status?.pendingInteraction?.kind)
@@ -327,9 +354,63 @@ function sessionNode(
     runningSubagentCount: descendants.get(s.id)?.runningCount ?? 0,
     completed: status?.completionUnread === true,
     hasActiveSchedule: hasActiveSchedule(s),
+    archived: archived.has(s.id),
+    depth: 0,
+    forkCount: 0,
     updatedAt: s.updatedAt,
     ...(pendingInteraction === undefined ? {} : { pendingInteraction }),
   }
+}
+
+/**
+ * Arrange one account's rows so each ordinary fork follows the parent it
+ * branched from, one indent level deeper, and carries that parent's direct
+ * fork count. A row whose parent is absent from the same account — unknown to
+ * the list, archived while archived rows stay hidden, or accounted by another
+ * Workspace — stays a root row. Lineage cycles anchor on their first member so
+ * no row is dropped.
+ * @param rows - one account's visible rows in their selected display order.
+ * @param summaries - current Session summaries supplying the parent links.
+ * @returns the rows in nesting order with `depth` and `forkCount` resolved.
+ */
+function nestForkLineage(
+  rows: readonly SessionNode[],
+  summaries: SessionListState['byId'],
+): SessionNode[] {
+  const present = new Set(rows.map(row => row.id))
+  const children = new Map<SessionId, SessionNode[]>()
+  const roots: SessionNode[] = []
+  for (const row of rows) {
+    const parentId = summaries[row.id]?.parentId
+    if (parentId === undefined || parentId === row.id || !present.has(parentId)) {
+      roots.push(row)
+      continue
+    }
+    const siblings = children.get(parentId)
+    if (siblings === undefined) children.set(parentId, [row])
+    else siblings.push(row)
+  }
+  const nested: SessionNode[] = []
+  const visited = new Set<SessionId>()
+  const walk = (row: SessionNode, depth: number): void => {
+    if (visited.has(row.id)) return
+    visited.add(row.id)
+    const forks = children.get(row.id) ?? []
+    nested.push({ ...row, depth, forkCount: forks.length })
+    for (const fork of forks) walk(fork, depth + 1)
+  }
+  for (const root of roots) walk(root, 0)
+  for (const row of rows) walk(row, 0)
+  return nested
+}
+
+/** Apply the caller's lineage request to one account's rows. */
+function applyLineage(
+  rows: readonly SessionNode[],
+  summaries: SessionListState['byId'],
+  lineage: boolean,
+): SessionNode[] {
+  return lineage ? nestForkLineage(rows, summaries) : [...rows]
 }
 
 /**
@@ -337,14 +418,14 @@ function sessionNode(
  *
  * Every group shows; sessions populate under expanded groups in the selected
  * local order. Blank sessions are excluded except for the selected
- * provisional New Session row; archived sessions are excluded everywhere.
- * Content search lives outside this derivation
+ * provisional New Session row; archived sessions appear only while the view
+ * reveals them. Content search lives outside this derivation
  * (see {@link deriveSearchResults}).
  * @param list - sessions list snapshot (`mainView` retention feeds containsCurrent).
  * @param workspaces - real Workspaces in Host group order with caller-projected Session order.
  * @param archivedSessionIds - registry-global archive set.
  * @param statuses - unified UI status by Session.
- * @param view - local expansion arrays.
+ * @param view - local expansion arrays plus the archive-reveal and lineage requests.
  * @returns group sections in render order.
  */
 export function deriveGroups(
@@ -355,6 +436,7 @@ export function deriveGroups(
   view: TreeView,
 ): GroupNode[] {
   const archived = new Set(archivedSessionIds)
+  const showArchived = view.showArchived === true
   const expandedGroups = new Set(view.expandedGroups)
   const descendants = indexSubagentDescendants(list.byId)
   const current = mainSessionId(list)
@@ -362,8 +444,15 @@ export function deriveGroups(
     ? undefined
     : owningGroupKey(workspaces, current)
   const groups: GroupNode[] = []
-  for (const g of groupByWorkspace(list, workspaces, archived, view.ungroupedOrder)) {
+  for (const g of groupByWorkspace(list, workspaces, archived, showArchived, view.ungroupedOrder)) {
     const expanded = expandedGroups.has(g.key)
+    const sessions = expanded
+      ? applyLineage(
+        g.sessions.map(session => sessionNode(session, descendants, statuses, archived)),
+        list.byId,
+        view.lineage === true,
+      )
+      : []
     groups.push({
       key: g.key,
       workspaceId: g.workspaceId,
@@ -373,9 +462,7 @@ export function deriveGroups(
       sessionCount: g.sessions.length,
       expanded,
       containsCurrent: g.key === currentGroup,
-      sessions: expanded
-        ? g.sessions.map(session => sessionNode(session, descendants, statuses))
-        : [],
+      sessions,
     })
   }
   return groups
@@ -385,17 +472,19 @@ export function deriveGroups(
  * Select flat-list members without deriving row presentation or ordering.
  * @param list - sessions list snapshot.
  * @param archivedSessionIds - registry-global archive set.
+ * @param showArchived - keep archive-set members as rows instead of hiding them.
  * @returns known visible Session ids in list order, including ordinary forks and only the current blank.
  */
 export function visibleSessionIds(
   list: SessionListState,
   archivedSessionIds: readonly SessionId[],
+  showArchived = false,
 ): SessionId[] {
   const archived = new Set(archivedSessionIds)
   const current = mainSessionId(list)
   return list.ids.filter((id) => {
     const s = list.byId[id]
-    return s !== undefined && sessionVisible(s, current, archived)
+    return s !== undefined && sessionVisible(s, current, archived, showArchived)
   })
 }
 
@@ -404,16 +493,22 @@ export function visibleSessionIds(
  * @param list - sessions list snapshot used to select the ids.
  * @param sessionIds - known visible members in render order, including any pinned blank.
  * @param statuses - unified UI status by Session.
+ * @param view - the archive set marking revealed rows and the lineage request.
  * @returns flat rows in the supplied order with current status indicators.
  */
 export function deriveFlat(
   list: SessionListState,
   sessionIds: readonly SessionId[],
   statuses: SessionStatuses,
+  view: FlatView = {},
 ): SessionNode[] {
   const descendants = indexSubagentDescendants(list.byId)
-  return sessionIds
-    .map(id => sessionNode(list.byId[id] as SessionSummary, descendants, statuses))
+  const archived = new Set(view.archivedSessionIds ?? [])
+  return applyLineage(
+    sessionIds.map(id => sessionNode(list.byId[id] as SessionSummary, descendants, statuses, archived)),
+    list.byId,
+    view.lineage === true,
+  )
 }
 
 /**
@@ -423,10 +518,11 @@ export function deriveFlat(
  * @param list - session metadata authority.
  * @param workspaces - Workspace membership and display labels.
  * @param query - caller text; surrounding whitespace is ignored.
- * @param archivedSessionIds - registry-global archive set (members never match).
+ * @param archivedSessionIds - registry-global archive set (members match only while revealed).
  * @param statuses - unified UI status by Session.
  * @param content - ranked Host content-search page.
  * @param limit - protocol-owned maximum merged row count.
+ * @param showArchived - let archive-set members match instead of excluding them.
  * @returns bounded deduplicated flat rows and a refine-query hint bit.
  */
 export function deriveSearchResults(
@@ -437,6 +533,7 @@ export function deriveSearchResults(
   statuses: SessionStatuses,
   content: { items: readonly SessionSearchResultItem[]; hasMore: boolean },
   limit: number,
+  showArchived = false,
 ): SearchResultSet {
   const q = query.trim().toLowerCase()
   if (q === '') return { items: [], hasMore: false }
@@ -462,7 +559,8 @@ export function deriveSearchResults(
     const summary = list.byId[id]
     // Blank placeholders never match a query (their canonical title displays
     // localized, so matching it would tie search to one language).
-    if (summary === undefined || summary.blank || !sessionVisible(summary, current, archived)) continue
+    if (summary === undefined || summary.blank
+      || !sessionVisible(summary, current, archived, showArchived)) continue
     if (
       sessionTitle(summary).toLowerCase().includes(q)
       || labelOf(summary).toLowerCase().includes(q)
@@ -484,7 +582,8 @@ export function deriveSearchResults(
   for (const summary of orderedLocal) include(summary)
   for (const item of content.items) {
     const summary = list.byId[item.sessionId]
-    if (summary !== undefined && !summary.blank && sessionVisible(summary, current, archived)) include(summary)
+    if (summary !== undefined && !summary.blank
+      && sessionVisible(summary, current, archived, showArchived)) include(summary)
   }
 
   return {
@@ -503,6 +602,7 @@ export function deriveSearchResults(
           : { pendingInteraction }),
         completed: status?.completionUnread === true,
         hasActiveSchedule: hasActiveSchedule(summary),
+        archived: archived.has(summary.id),
         ...match === undefined ? {} : { snippet: match.snippet },
       }
     }),

@@ -250,7 +250,7 @@ const COMPLETIONS_COMPAT_GATE = {
   supportsLongCacheRetention: 'offer',
   openRouterRouting: 'withhold',
   vercelGatewayRouting: 'withhold',
-  zaiToolStream: 'withhold',
+  zaiToolStream: 'offer',
   supportsOpenAIGrammarTools: 'withhold',
   sendSessionAffinityHeaders: 'withhold',
   deferredToolsMode: 'withhold',
@@ -409,6 +409,8 @@ export interface PiAiCompatProfile {
    * `openai-completions`, the three Responses protocols, `bedrock-converse-stream`.
    */
   supportsStrictMode?: boolean
+  /** Whether to send z.ai's top-level `tool_stream: true` when tools are present so GLM streams tool calls; `openai-completions`. */
+  zaiToolStream?: boolean
   /** Prompt-cache marker convention; `openai-completions`. */
   cacheControlFormat?: NonNullable<OpenAICompletionsCompat['cacheControlFormat']>
   /**
@@ -636,6 +638,12 @@ export interface RouteCatalogRequest {
   defaultContextWindow: number
   /** Output capability for a model neither the entry nor the catalog sizes. */
   defaultMaxTokens: number
+  /**
+   * On a route the installed catalog does not describe, give every
+   * `openai-completions` model that declares no `reasoningEfforts` the
+   * {@link AUTO_REASONING_LEVELS}; the adapter sends their fields itself.
+   */
+  autoReasoningLevels?: boolean
   /** Modalities for a model neither the entry nor the catalog declares. */
   defaultInput: Model<Api>['input']
 }
@@ -797,6 +805,14 @@ function resolveModelCompat(
   return { compat: { ...inherited, ...configured } as ModelCompat }
 }
 
+/**
+ * Levels a custom route's undeclared model offers when reasoning levels are
+ * on: the spellings the chat templates and `reasoning_effort` servers share,
+ * plus `xhigh` and `max`, which current vLLM accepts. A server that refuses a
+ * level above `high` is asked for `high` instead.
+ */
+export const AUTO_REASONING_LEVELS: readonly ModelThinkingLevel[] = Object.freeze(['off', 'low', 'medium', 'high', 'xhigh', 'max'])
+
 /** One route's materialized catalog, plus the request caps its profile chose. */
 export interface RouteCatalog {
   /** The materialized models in configuration order. */
@@ -814,6 +830,8 @@ export interface RouteCatalog {
    * picked, so only an explicit configuration lands here.
    */
   configuredMaxTokens: ReadonlyMap<string, number>
+  /** Models given {@link AUTO_REASONING_LEVELS}, whose reasoning fields the adapter sends itself. */
+  autoReasoningModels: ReadonlySet<string>
 }
 
 /**
@@ -879,6 +897,7 @@ export function resolveRouteModels(
   assertOfferedCompatFields(provider, 'route', request.compat)
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
+  const autoReasoningModels = new Set<string>()
   const resolveEntry = (entry: PiAiModelProfile): Model<Api> => {
     assertOfferedCompatFields(provider, `model "${entry.id}"`, entry.compat)
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
@@ -909,6 +928,9 @@ export function resolveRouteModels(
     // Only a value the profile named is a deployment choice; the catalog's is
     // the model's capability and stays out of request defaults.
     if (entry.maxTokens !== undefined) configuredMaxTokens.set(entry.id, entry.maxTokens)
+    const auto = request.autoReasoningLevels === true && base === undefined
+      && entry.reasoningEfforts === undefined && api === 'openai-completions'
+    if (auto) autoReasoningModels.add(entry.id)
     return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
@@ -925,7 +947,7 @@ export function resolveRouteModels(
       cost: base?.cost ?? NO_COST,
       contextWindow,
       maxTokens,
-      ...resolveModelReasoning(provider, entry, base),
+      ...auto ? autoReasoning() : resolveModelReasoning(provider, entry, base),
       ...resolveModelCompat(provider, entry, request.compat, base, api),
     }
   }
@@ -953,5 +975,25 @@ export function resolveRouteModels(
     invalid(provider, `sets compat "${field}", but no model on the route speaks a protocol that takes it;`
       + ` it exists on ${takers.join(', ')}`)
   }
-  return { models: serviceableModels, configuredMaxTokens, modelErrors }
+  return {
+    models: serviceableModels,
+    configuredMaxTokens,
+    modelErrors,
+    autoReasoningModels: new Set([...autoReasoningModels].filter(id => !modelErrors.has(id))),
+  }
+}
+
+/**
+ * The reasoning fields of a model given {@link AUTO_REASONING_LEVELS}: every
+ * other level pinned unsupported, `off` left absent (supported, sent as the
+ * adapter decides).
+ * @returns the materialized reasoning fields.
+ */
+function autoReasoning(): ModelReasoning {
+  const map: ThinkingLevelMap = {}
+  for (const level of THINKING_LEVELS) {
+    if (level === 'off') continue
+    map[level] = AUTO_REASONING_LEVELS.includes(level) ? level : null
+  }
+  return { reasoning: true, thinkingLevelMap: map }
 }

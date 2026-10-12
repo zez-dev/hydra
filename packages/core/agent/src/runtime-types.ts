@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Scoped } from '@deepseek-ai/dsh-scope'
 import type {
-  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk,
+  LlmAttemptId, LlmCallConfig, LlmFailure, MessageId, ReasoningEffortId, ResolvedRetryPolicy, StreamChunk, ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import type { AgentCancelCause, Session, SessionSeq, UserMessage } from '@deepseek-ai/dsh-session'
 export type { AgentCancelCause } from '@deepseek-ai/dsh-session'
@@ -107,6 +107,14 @@ export interface Inbox {
  * it is not a third observable status.
  */
 export type AgentStatus = 'idle' | 'running'
+
+/** The model-visible prompt a proposed step's request will carry, assembled before `agent/pre-step`. */
+export interface StepPrompt {
+  /** The fully rendered system prompt; `''` when none is active. */
+  readonly systemPrompt: string
+  /** Tool schemas in canonical order. */
+  readonly tools: readonly ToolSchema[]
+}
 
 /** Whether and with which messages the loop enters a proposed step. */
 export type PreStepDecision =
@@ -311,13 +319,14 @@ declare module '@deepseek-ai/cordis' {
      * `next()` preserves the current messages.
      * @param payload.agent - the agent proposing the step.
      * @param payload.messages - messages removed from the inbox for this step.
+     * @param payload.prompt - the rendered system prompt and tool schemas the step's request carries, not yet logged.
      * @param payload.turn - the turn that will own the step.
      * @param payload.step - the step proposed by the loop.
      * @param payload.signal - the current turn's cancellation signal.
      * Scope-filtered dispatch (`@deepseek-ai/dsh-scope`): agent-scoped listeners receive only that agent.
      * @mode waterfall
      */
-    'agent/pre-step'(this: Scoped<Agent>, payload: { agent: Agent; messages: UserMessage[]; turn: number; step: number; signal: AbortSignal }, next: () => Promise<PreStepDecision>): Promise<PreStepDecision>
+    'agent/pre-step'(this: Scoped<Agent>, payload: { agent: Agent; messages: UserMessage[]; prompt: StepPrompt; turn: number; step: number; signal: AbortSignal }, next: () => Promise<PreStepDecision>): Promise<PreStepDecision>
     /**
      * Replace the frozen call configuration. `await next()` yields the config
      * the machine would use (agent options on the first request, the logged

@@ -12,7 +12,7 @@ import {
   SessionPersistenceNotFoundError,
   SessionPersistenceRevision,
 } from '@deepseek-ai/dsh-session-persistence'
-import type { SessionAccess, SessionHandle, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import type { SessionAccess, SessionDeleteResult, SessionHandle, SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import * as toolSchedule from '../src/index.ts'
 
 interface StoredProbeSession {
@@ -22,6 +22,7 @@ interface StoredProbeSession {
 
 /** In-memory handle-based persistence, just enough for agent-loop's write path. */
 class PersistenceProbe extends SessionPersistence {
+  delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
   private readonly stored = new Map<string, StoredProbeSession>()
 
   override async create(header: SessionHeader): Promise<SessionHandle> {

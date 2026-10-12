@@ -11,13 +11,17 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-ptc-runtime'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import z from '@deepseek-ai/schemastery'
-import WorkflowEngine, { WorkflowError, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
-import type { WorkflowRun, WorkflowRunInfo, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
+import WorkflowEngine, { WorkflowError, WorkflowRunId, scriptHash } from '@deepseek-ai/dsh-workflow'
+import type { WorkflowMeta, WorkflowRun, WorkflowRunInfo, WorkflowStartRequest } from '@deepseek-ai/dsh-workflow'
 import { PtcWorkflowRun } from './host.ts'
 import { validateMeta } from './meta.ts'
+import { attachRecording, replayableCalls } from './recording.ts'
+import type { RunRecording } from './recording.ts'
 import type { WorkerInit, WorkerLimits } from './types.ts'
 
 export { validateMeta } from './meta.ts'
+export { attachRecording, replayableCalls } from './recording.ts'
+export type { RecordingRequest, RunRecording } from './recording.ts'
 export { materializeFromRealm, MaterializeError } from './realm.ts'
 export type {
   ChildHandle,
@@ -94,6 +98,41 @@ function resolveMaxTotalAgents(requested: number | undefined, ceiling: number): 
 }
 
 /**
+ * Bind one run to the journal, resolving a resume request against it. A
+ * resume names a run the journal knows and needs a journal to be mounted;
+ * both failures are caller errors and throw before the run is published.
+ * @param ctx - the engine context, whose journal is optional.
+ * @param request - the caller's start request.
+ * @param id - the new run's id (a resume is a new run that records its source).
+ * @param meta - the run's validated meta block.
+ * @returns the recorder, or `undefined` when no journal is mounted.
+ */
+function resolveRecording(
+  ctx: Context,
+  request: WorkflowStartRequest,
+  id: WorkflowRunId,
+  meta: WorkflowMeta,
+): RunRecording | undefined {
+  const journal = ctx.get('workflowJournal')
+  if (journal === undefined) {
+    if (request.resumeRunId === undefined) return undefined
+    throw new WorkflowError('resuming a workflow run requires a mounted workflow journal', 'INVALID_ARGUMENT')
+  }
+  const open = {
+    id,
+    sessionId: request.parent.session.id,
+    scriptHash: scriptHash(request.script),
+    meta,
+  }
+  if (request.resumeRunId === undefined) return attachRecording(ctx, journal, { ...open, replay: new Map() })
+  const prior = journal.get(request.resumeRunId)
+  if (prior === undefined) {
+    throw new WorkflowError(`no journaled workflow run "${request.resumeRunId}" to resume`, 'INVALID_ARGUMENT')
+  }
+  return attachRecording(ctx, journal, { ...open, resumedFrom: prior.id, replay: replayableCalls(prior) })
+}
+
+/**
  * The PTC-backed workflow engine. `start()` validates the script up front
  * (meta + a host-side body parse) and returns a {@link WorkflowRun} whose
  * `result` never rejects; the `workflow/*` events fire around the run per
@@ -136,6 +175,7 @@ class PtcWorkflowEngine extends WorkflowEngine {
     const subagentProvider = resolveSubagentProvider(this.ctx, this.config.provider, request.subagentProvider)
     const maxTotalAgents = resolveMaxTotalAgents(request.maxTotalAgents, this.config.maxTotalAgents)
     const id = WorkflowRunId(randomUUID())
+    const recording = resolveRecording(this.ctx, request, id, meta)
     const info: WorkflowRunInfo = { id, meta }
     const limits: WorkerLimits = {
       maxConcurrentAgents: this.config.maxConcurrentAgents === 0
@@ -171,6 +211,7 @@ class PtcWorkflowEngine extends WorkflowEngine {
         agentEnd: (agent) => { this.emitWorkflowEvent('workflow/agent-end', info, agent) },
       },
       request.signal,
+      recording,
     )
 
     this.emitWorkflowEvent('workflow/start', info)

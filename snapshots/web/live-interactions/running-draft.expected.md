@@ -17,12 +17,14 @@
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy":
   - img
+- 'button "Rewind to here: redo this turn in a new conversation"':
+  - img
 - button "Context injection @deepseek-ai/dsh-system-prompt":
   - img
   - img
   - text: Context injection @deepseek-ai/dsh-system-prompt
 - paragraph: partial
-- status: Deep diving...
+- status: The dragon is thinking…
 - textbox "Message or run a task, / commands, @ files or sessions":
   - paragraph: Queue this follow-up while the current turn is running.
 - button "Add files or run commands":

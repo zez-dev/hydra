@@ -164,6 +164,57 @@ interface JobRead {
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxcronsessions--cronsessionsservice"></a>
+
+### `ctx.cronSessions` — `CronSessionsService`
+
+The `ctx.cronSessions` service.
+
+```ts cordis-catalog
+/**
+ * All schedules, oldest first.
+ * @returns every stored schedule.
+ */
+list(): CronSchedule[]
+
+/**
+ * Validate and store a schedule; it is enabled immediately.
+ * @param input - name, cron expression, prompt, and workspace of the schedule.
+ * @returns the stored schedule with its id.
+ */
+add(input: CronScheduleInput): Promise<CronSchedule>
+
+/**
+ * Enable or disable a schedule.
+ * @param id - the schedule id.
+ * @param enabled - whether the ticker may start runs for it.
+ * @returns the updated schedule.
+ */
+setEnabled(id: string, enabled: boolean): Promise<CronSchedule>
+
+/**
+ * Remove a schedule; a live run finishes on its own, and no record keeps its outcome.
+ * @param id - the schedule id.
+ */
+remove(id: string): Promise<void>
+
+/**
+ * Start a run now regardless of the expression; resolves when the run finishes.
+ * @param id - the schedule id.
+ * @returns the run's outcome.
+ */
+runNow(id: string): Promise<CronRunOutcome>
+
+/**
+ * Whether a run for the schedule is live.
+ * @param id - the schedule id.
+ * @returns true while a session started by this schedule has not finished.
+ */
+isRunning(id: string): boolean
+```
+
+Source: [`packages/schedule/cron-sessions/src/types.ts`](../../packages/schedule/cron-sessions/src/types.ts)
+
 <a id="ctxjobs--jobregistry-abstract-seam"></a>
 
 ### `ctx.jobs` — `JobRegistry` (abstract seam)
@@ -287,4 +338,94 @@ abstract attachController(name: string): () => void
 Types: [Agent](core.zh.md)
 
 Source: [`packages/jobs/jobs/src/index.ts`](../../packages/jobs/jobs/src/index.ts)
+
+<a id="ctxoffpeak--offpeakservice"></a>
+
+### `ctx.offPeak` — `OffPeakService`
+
+The `ctx.offPeak` service.
+
+```ts cordis-catalog
+/**
+ * Whether a window is open right now.
+ * @returns true while the clock lies inside a configured window, and always
+ *   true when the plugin is disabled, so callers need no separate check.
+ */
+isOpen(): boolean
+
+/**
+ * Every queue entry, oldest first.
+ * @returns the stored entries in queue order.
+ */
+list(): OffPeakEntry[]
+
+/**
+ * Queue a task to run in the next window.
+ * @param input - the session to run in, the task text, and its workspace.
+ * @returns the stored entry.
+ */
+queue(input: { sessionId: SessionId; objective: string; cwd?: string }): Promise<OffPeakEntry>
+
+/**
+ * Remove one queued entry.
+ * @param id - the entry id.
+ */
+cancel(id: string): Promise<void>
+
+/**
+ * Drain the queue now, regardless of the clock.
+ * @returns what the drain started and finished.
+ */
+drain(): Promise<OffPeakDrainSummary>
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/schedule/off-peak/src/types.ts`](../../packages/schedule/off-peak/src/types.ts)
+
+<a id="cron-sessions-events"></a>
+
+### `cron-sessions/*` events
+
+<a id="cron-sessionschange--emit"></a>
+
+#### `cron-sessions/change` — emit
+
+A schedule was added, changed, removed, or ran.
+
+```ts cordis-catalog
+/**
+ * A schedule was added, changed, removed, or ran.
+ * @param payload.id - the schedule.
+ * @param payload.kind - what happened.
+ * @param payload.sessionId - the run's session for run events.
+ * @mode emit
+ */
+'cron-sessions/change'(payload: CronSessionsChange): void
+```
+
+Source: [`packages/schedule/cron-sessions/src/index.ts`](../../packages/schedule/cron-sessions/src/index.ts)
+
+<a id="off-peak-events"></a>
+
+### `off-peak/*` events
+
+<a id="off-peakchange--emit"></a>
+
+#### `off-peak/change` — emit
+
+A queue entry was added, started, finished, or cancelled.
+
+```ts cordis-catalog
+/**
+ * A queue entry was added, started, finished, or cancelled.
+ * @param payload.id - the entry.
+ * @param payload.kind - what happened.
+ * @param payload.sessionId - the entry's session.
+ * @mode emit
+ */
+'off-peak/change'(payload: OffPeakChange): void
+```
+
+Source: [`packages/schedule/off-peak/src/index.ts`](../../packages/schedule/off-peak/src/index.ts)
 <!-- END GENERATED cordis-surface -->

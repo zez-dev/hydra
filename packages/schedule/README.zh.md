@@ -25,6 +25,7 @@ schedule 组让 agent（智能体）为当前会话创建、列出和取消提�
 | 包 | 职责 | ctx 键 |
 |---|---|---|
 | [`schedule/`](schedule/README.zh.md) | 会话本地提醒：安排、列出并取消活动记录；发布供 header 目录与列表行标识读取的可选只读 projection；把到期提醒作为会话消息交付 | —（工具只注册在精确的 agent scope 中） |
+| [`off-peak/`](off-peak/README.md) | 在配置的本地时段之外把目标轮次推迟进持久队列，时段开启时排空队列；提供 `/offpeak` 与 `off_peak` 工具 | `ctx.offPeak` |
 
 -----
 

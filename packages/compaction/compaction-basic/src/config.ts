@@ -21,6 +21,20 @@ const DEFAULT_THRESHOLD_RATIO = 0.8
 
 /** Default verbatim-tail fraction for every routed model. */
 const DEFAULT_RETAIN_RATIO = 0.16
+/** Default free fraction of the window beyond the output cap. */
+const DEFAULT_RESERVE_MARGIN_RATIO = 0.05
+/** Default share of the window reserved for the reply when deciding to condense. */
+const DEFAULT_OUTPUT_RESERVE_RATIO = 0.25
+/** Default steps a failed compaction waits before trying again. */
+const DEFAULT_FAILURE_BACKOFF_STEPS = 8
+/** Default window fraction of growth that ends a backoff early. */
+const DEFAULT_FAILURE_BACKOFF_GROWTH_RATIO = 0.1
+/** Default floor for a request output cap shrunk to fit the window. */
+const DEFAULT_MIN_OUTPUT_TOKENS = 256
+/** Default bound on the summarization cap as a fraction of the window. */
+const DEFAULT_SUMMARY_WINDOW_RATIO = 0.25
+/** Default multiplier for the summarization cap after a cut checkpoint. */
+const DEFAULT_OUTPUT_RETRY_FACTOR = 4
 
 /** Fields shared by top-level defaults and exact-target overrides. */
 const POLICY_CONFIG_KEYS = [
@@ -32,6 +46,13 @@ const POLICY_CONFIG_KEYS = [
   'maxTokens',
   'compactionRetries',
   'maxOverflowRetries',
+  'reserveMarginRatio',
+  'outputReserveRatio',
+  'failureBackoffSteps',
+  'failureBackoffGrowthRatio',
+  'minOutputTokens',
+  'summaryWindowRatio',
+  'outputRetryFactor',
 ] as const
 
 /** Complete public top-level configuration key set. */
@@ -91,6 +112,13 @@ export function resolveConfig(config: BasicCompactionConfig = {}): ResolvedConfi
     maxTokens: config.maxTokens ?? 8192,
     compactionRetries: config.compactionRetries ?? 1,
     maxOverflowRetries: config.maxOverflowRetries ?? 1,
+    reserveMarginRatio: config.reserveMarginRatio ?? DEFAULT_RESERVE_MARGIN_RATIO,
+    outputReserveRatio: config.outputReserveRatio ?? DEFAULT_OUTPUT_RESERVE_RATIO,
+    failureBackoffSteps: config.failureBackoffSteps ?? DEFAULT_FAILURE_BACKOFF_STEPS,
+    failureBackoffGrowthRatio: config.failureBackoffGrowthRatio ?? DEFAULT_FAILURE_BACKOFF_GROWTH_RATIO,
+    minOutputTokens: config.minOutputTokens ?? DEFAULT_MIN_OUTPUT_TOKENS,
+    summaryWindowRatio: config.summaryWindowRatio ?? DEFAULT_SUMMARY_WINDOW_RATIO,
+    outputRetryFactor: config.outputRetryFactor ?? DEFAULT_OUTPUT_RETRY_FACTOR,
     modelPolicies,
     auto: config.auto ?? true,
   })
@@ -121,6 +149,13 @@ export function resolveTargetPolicy(
     maxTokens: override?.maxTokens ?? config.maxTokens,
     compactionRetries: override?.compactionRetries ?? config.compactionRetries,
     maxOverflowRetries: override?.maxOverflowRetries ?? config.maxOverflowRetries,
+    reserveMarginRatio: override?.reserveMarginRatio ?? config.reserveMarginRatio,
+    outputReserveRatio: override?.outputReserveRatio ?? config.outputReserveRatio,
+    failureBackoffSteps: override?.failureBackoffSteps ?? config.failureBackoffSteps,
+    failureBackoffGrowthRatio: override?.failureBackoffGrowthRatio ?? config.failureBackoffGrowthRatio,
+    minOutputTokens: override?.minOutputTokens ?? config.minOutputTokens,
+    summaryWindowRatio: override?.summaryWindowRatio ?? config.summaryWindowRatio,
+    outputRetryFactor: override?.outputRetryFactor ?? config.outputRetryFactor,
   })
 }
 
@@ -163,7 +198,35 @@ export function resolveCompactSpec(
     maxTokens: policy.maxTokens,
     compactionRetries: policy.compactionRetries,
     maxOverflowRetries: policy.maxOverflowRetries,
+    reserveMarginRatio: policy.reserveMarginRatio,
+    outputReserveRatio: policy.outputReserveRatio,
+    failureBackoffSteps: policy.failureBackoffSteps,
+    failureBackoffGrowthRatio: policy.failureBackoffGrowthRatio,
+    minOutputTokens: policy.minOutputTokens,
+    summaryWindowRatio: policy.summaryWindowRatio,
+    outputRetryFactor: policy.outputRetryFactor,
+    marginTokens: Math.floor(contextWindow * policy.reserveMarginRatio),
+    outputReserveTokens: Math.floor(contextWindow * policy.outputReserveRatio),
+    failureBackoffGrowthTokens: Math.floor(contextWindow * policy.failureBackoffGrowthRatio),
+    summaryCapTokens: Math.max(1, Math.min(policy.maxTokens, Math.floor(contextWindow * policy.summaryWindowRatio))),
+    summaryCeilingTokens: Math.max(1, Math.floor(contextWindow * policy.summaryWindowRatio)),
   })
+}
+
+/**
+ * The pressure threshold that also keeps room for the reply and the margin:
+ * the ratio threshold, or the window minus the reserved reply minus the
+ * margin when that is lower. The reserved reply is the lower of the output
+ * cap and `outputReserveTokens`, so a cap sized near the window does not
+ * condense a mostly empty surface; the request-time clamp asks for the room
+ * left when the whole cap does not fit. Never below one token.
+ * @param spec - the routed model's scaled budgets.
+ * @param outputCap - output cap the next request will ask for; `0` when unknown.
+ * @returns the estimated-token count at or above which the surface must condense.
+ */
+export function fitThresholdTokens(spec: ResolvedCompactSpec, outputCap: number): number {
+  const reserved = Math.min(outputCap, spec.outputReserveTokens)
+  return Math.max(1, Math.min(spec.thresholdTokens, spec.contextWindow - reserved - spec.marginTokens))
 }
 
 /** Choose an explicit retention form or inherit the already-resolved fallback. */
@@ -247,6 +310,13 @@ function validatePolicy(
   if (maxOverflowRetries !== undefined) {
     assertNonNegativeInteger(`${name}.maxOverflowRetries`, maxOverflowRetries)
   }
+  if (config.reserveMarginRatio !== undefined) assertFraction(`${name}.reserveMarginRatio`, config.reserveMarginRatio)
+  if (config.outputReserveRatio !== undefined) assertFraction(`${name}.outputReserveRatio`, config.outputReserveRatio)
+  if (config.failureBackoffSteps !== undefined) assertNonNegativeInteger(`${name}.failureBackoffSteps`, config.failureBackoffSteps)
+  if (config.failureBackoffGrowthRatio !== undefined) assertFraction(`${name}.failureBackoffGrowthRatio`, config.failureBackoffGrowthRatio)
+  if (config.minOutputTokens !== undefined) assertPositiveInteger(`${name}.minOutputTokens`, config.minOutputTokens)
+  if (config.summaryWindowRatio !== undefined) assertRatio(`${name}.summaryWindowRatio`, config.summaryWindowRatio)
+  if (config.outputRetryFactor !== undefined) assertFactor(`${name}.outputRetryFactor`, config.outputRetryFactor)
 
   validateSummarizationPair(config, name)
 }
@@ -300,6 +370,18 @@ function assertPositiveInteger(name: string, value: unknown): asserts value is n
 function assertNonNegativeInteger(name: string, value: unknown): asserts value is number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`${name} (${String(value)}) must be a non-negative integer`)
+  }
+}
+
+function assertFactor(name: string, value: unknown): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) {
+    throw new Error(`${name} (${String(value)}) must be a finite number of at least 1`)
+  }
+}
+
+function assertFraction(name: string, value: unknown): asserts value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value >= 1) {
+    throw new Error(`${name} (${String(value)}) must be a number in [0, 1)`)
   }
 }
 

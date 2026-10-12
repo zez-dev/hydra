@@ -4,7 +4,7 @@ import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import { agentEvents } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import GoalService, { GoalId } from '@deepseek-ai/dsh-goal'
+import GoalService, { GoalId, UNLIMITED_GOAL_ROUNDS } from '@deepseek-ai/dsh-goal'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
 import { createUserMessage, LlmAdapter, LlmError  } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -162,6 +162,22 @@ describe('goal-round outcome policy', () => {
     expect(block.text).toMatch(
       /<goal_round>\nObjective: "Ship verified support"\nRound: 3\/9[\s\S]*current workspace[\s\S]*verify[\s\S]*mark it complete/,
     )
+  })
+
+  it('shows an unlimited round budget as unlimited', () => {
+    const goal: GoalView = {
+      id: GoalId('goal-unlimited-prompt'),
+      revision: 1,
+      objective: 'Keep improving',
+      phase: 'active',
+      maxGoalRounds: UNLIMITED_GOAL_ROUNDS,
+      roundsStarted: 3,
+      createdAt: 1,
+      updatedAt: 2,
+      activation: 'armed',
+    }
+    const [block] = goalSession.renderGoalRoundPrompt(goal, 4)
+    expect(block?.type === 'text' ? block.text : '').toContain('Round: 4/unlimited\n')
   })
 
   it('quotes multiline or tag-like objective text as one unambiguous data value', () => {

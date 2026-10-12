@@ -4,7 +4,7 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { agentEvents, type Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime, { ToolCallId, type GenerateOptions, LlmAdapter, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import SessionPersistence, { type SessionHandle, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
+import SessionPersistence, { type SessionDeleteResult, type SessionHandle, type SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import * as checkpointPolicy from '../src/index.ts'
@@ -14,6 +14,7 @@ const contexts: Context[] = []
 // The policy only requires the service's presence; it flushes through
 // `ctx.sessions`, so no handle is ever opened in these tests.
 class TestPersistence extends SessionPersistence {
+  delete(): Promise<SessionDeleteResult> { return Promise.resolve({ deleted: false }) }
   create(): Promise<SessionHandle> { return Promise.reject(new Error('not used')) }
   open(): Promise<SessionHandle> { return Promise.reject(new Error('not used')) }
   flush(): Promise<void> { return Promise.resolve() }
@@ -220,7 +221,7 @@ describe('session-checkpoint-policy tool and step boundaries', () => {
     ctx.on('session/flush', (current) => { flushed.push(current.id) })
     const signal = new AbortController().signal
     await agentEvents(ctx, agent).waterfall(
-      'agent/pre-step', { messages: [], turn: 1, step: 1, signal },
+      'agent/pre-step', { messages: [], prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
       () => Promise.resolve({ kind: 'enter', messages: [] }),
     )
     expect(flushed).toEqual([session.id])

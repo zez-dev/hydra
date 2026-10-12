@@ -170,6 +170,16 @@ export function apply(ctx: Context): void {
                 // Fork or child-title failure leaves the source view unchanged.
               })
           },
+          rewindTo: (seq) => {
+            ctx.sessions.rewind({ sessionId, atSeq: seq, increaseTitle: true })
+              .then(({ sessionId: childId, prompt }) => {
+                if (prompt !== undefined) ctx.uiConversation.seedDraft(childId, prompt)
+                ctx.uiWorkspace.openSession(childId)
+              })
+              .catch(() => {
+                // Rewind or child-title failure leaves the source view unchanged.
+              })
+          },
         }
       },
     }, ChatView)

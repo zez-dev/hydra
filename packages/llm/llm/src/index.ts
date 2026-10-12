@@ -47,8 +47,10 @@ export * from './content.ts'
 export * from './assistant-stream.ts'
 export * from './message.ts'
 export * from './retry-policy.ts'
-export { BlockAssembler } from './assembler.ts'
-export { callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from './call-config.ts'
+export * from './usage.ts'
+export * from './reasoning.ts'
+export { BlockAssembler, streamText } from './assembler.ts'
+export { auxiliaryRoute, callConfigEquals, isAgentLoopRequest, markAgentLoopRequest } from './call-config.ts'
 export type { LlmCallConfig, LlmCallConfigAdapterDefaults } from './call-config.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -1067,6 +1069,7 @@ export class LlmRuntime extends TypertRemoteService {
     }
 
     let completed = false
+    let delivered = 0
     try {
       while (true) {
         let item: { done: true } | { done: false; value: StreamChunk }
@@ -1077,7 +1080,10 @@ export class LlmRuntime extends TypertRemoteService {
             : { done: false, value: next.value }
         } catch (error: unknown) {
           completed = true
-          yield adapterFailureChunk(error, options.signal)
+          // A throw after chunks arrived is the connection dying under a
+          // response the provider had started: a transport failure, retried
+          // like one, unless the adapter classified it itself.
+          yield adapterFailureChunk(error, options.signal, delivered > 0)
           return
         }
         if (item.done) {
@@ -1086,6 +1092,7 @@ export class LlmRuntime extends TypertRemoteService {
         }
         // End the adapter-owned try before yielding: consumer/middleware
         // failures resumed into this generator must remain thrown.
+        delivered += 1
         yield item.value
       }
     } finally {
@@ -1124,9 +1131,18 @@ export class LlmRuntime extends TypertRemoteService {
   }
 }
 
-/** Convert one adapter throw into the stream protocol's terminal outcome. */
-function adapterFailureChunk(error: unknown, signal?: AbortSignal): StreamChunk {
-  const failure = normalizeLlmFailure(error)
+/**
+ * Convert one adapter throw into the stream protocol's terminal outcome.
+ * @param error - what the adapter threw.
+ * @param signal - the request's cancellation, which turns any throw into an abort.
+ * @param midStream - whether chunks had already arrived, which makes an unclassified throw a `TRANSPORT` failure.
+ * @returns the terminal finish chunk.
+ */
+function adapterFailureChunk(error: unknown, signal?: AbortSignal, midStream = false): StreamChunk {
+  const normalized = normalizeLlmFailure(error)
+  const failure = midStream && !(error instanceof LlmError) && normalized.code === 'UNKNOWN'
+    ? { ...normalized, code: 'TRANSPORT' }
+    : normalized
   return {
     type: 'finish',
     reason: signal?.aborted || failure.code === 'ABORTED'

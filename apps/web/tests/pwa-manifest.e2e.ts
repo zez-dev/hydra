@@ -12,11 +12,13 @@ it('ships install metadata with the built web application', async () => {
   const manifest: unknown = JSON.parse(await readFile(join(DIST_ROOT, 'manifest.webmanifest'), 'utf8'))
   expect(manifest).toEqual({
     id: '/',
-    name: 'DeepSeek Harness',
-    short_name: 'DSH',
+    name: 'Hydra',
+    short_name: 'Hydra',
     start_url: '/',
     scope: '/',
     display: 'fullscreen',
+    theme_color: '#b91c1c',
+    background_color: '#ffffff',
     icons: [{
       src: '/favicon.svg',
       sizes: 'any',
@@ -28,8 +30,8 @@ it('ships install metadata with the built web application', async () => {
 
 it('ships a favicon that switches to a light mark under dark color scheme', async () => {
   const favicon = await readFile(join(DIST_ROOT, 'favicon.svg'), 'utf8')
-  // The light fill must live inside the dark-scheme media query, so the icon
-  // stays black in light mode and only turns white under a dark scheme.
-  expect(favicon).toMatch(/@media \(prefers-color-scheme: dark\)\s*{\s*path\s*{[^}]*fill:\s*#fff/i)
-  expect(favicon).toContain('fill="#000"')
+  // The light fill must live inside the dark-scheme media query, so the face
+  // stays dark red in light mode and only turns light red under a dark scheme.
+  expect(favicon).toMatch(/@media \(prefers-color-scheme: dark\)\s*{\s*\.face\s*{[^}]*fill:\s*#f87171/i)
+  expect(favicon).toContain('fill="#b91c1c"')
 })

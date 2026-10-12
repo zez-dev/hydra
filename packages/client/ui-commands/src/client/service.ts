@@ -65,7 +65,7 @@ interface LiveState {
 
 /** Command surface: session-keyed directory + '/' source + contribution registry + per-session popups. */
 export class CommandUiRuntime extends Service implements CommandUiContract {
-  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands']
+  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands', 'remote.subagents']
 
   private readonly directory: CommandDirectory
   private readonly live: LiveState = {
@@ -86,7 +86,14 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     if (locale === undefined) throw new Error('ui-commands: locale service unavailable')
     this.t = locale.bind('command')
     this.directory = new CommandDirectory(async (sessionId) => {
-      if (this.sessions().subagentAddress(sessionId) !== undefined) return []
+      const address = this.sessions().subagentAddress(sessionId)
+      if (address !== undefined) {
+        // A one-shot child takes no input; a continuable child resolves its
+        // own commands through its parent's address, while it is resident.
+        if (address.mode !== 'continuable') return []
+        const listed = await ctx.remote.subagents.commands(address.parentSessionId, address.childSessionId)
+        return listed.ok ? listed.value : []
+      }
       const result = await ctx.remote.commands.list(sessionId)
       if (!result.ok) throw new Error(`command.list failed: ${result.error.code}: ${result.error.message}`)
       return result.value
@@ -384,7 +391,13 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     line: string,
     attachments: readonly SubmitAttachment[] = [],
   ): Promise<SubmitOutcome> {
-    const result = await this.ctx.remote.commands.execute(session.sessionId, line, attachments)
+    const address = this.sessions().subagentAddress(session.sessionId)
+    if (address !== undefined && attachments.length > 0) {
+      return { kind: 'error', text: 'commands in a subagent session take no attachments' }
+    }
+    const result = address === undefined
+      ? await this.ctx.remote.commands.execute(session.sessionId, line, attachments)
+      : await this.ctx.remote.subagents.command(address.parentSessionId, address.childSessionId, line)
     if (!result.ok) throw new Error(`command.execute failed: ${result.error.code}: ${result.error.message}`)
     if (result.value === undefined) return { kind: 'error', text: `unknown or malformed command: ${line}` }
     this.notifyExecuted(session.sessionId, submittedCommandName(line), result.value.result)

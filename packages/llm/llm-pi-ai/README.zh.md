@@ -33,7 +33,7 @@ kind: "package-reference"
 
 ### 配置提供方路由
 
-每个 profile 都可以设置 `retryPolicy`；省略时使用 normal mode、最多重试五次。`apiKeyEnv` 是按请求经 harness 凭据 seam 解析的凭据引用，因此配置文件绝不包含密钥；解析为空的引用会让请求以 `MISSING_CREDENTIAL` 失败。省略它会让路由保持已配置但无密钥（configured-but-keyless）状态，对已安装目录路由而言即交由 pi-ai 提供方原生的环境发现。
+每个 profile 都可以设置 `retryPolicy`；省略时使用 normal mode、最多重试五次。`apiKeyEnv` 是按请求经 harness 凭据 seam 解析的凭据引用，因此配置文件绝不包含密钥；解析为空的引用会让请求以 `MISSING_CREDENTIAL` 失败。省略它会让路由保持已配置但无密钥（configured-but-keyless）状态，对已安装目录路由而言即交由 pi-ai 提供方原生的环境发现。内联的 `apiKey`，以及本意为 `maxTokens` 却写成 `maxToken` 的模型字段，会在加载时被拒绝并点名正确的字段：二者正是旧 home 中手写 profile 会带上的内容，此前被静默丢弃，导致路由以无密钥、默认输出上限的状态挂载。
 
 ```yaml
 - name: '@deepseek-ai/dsh-llm-pi-ai'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BlockAssembler, ToolCallId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, streamText, ToolCallId, type FinishReason, type StreamChunk } from '@deepseek-ai/dsh-llm'
 
 describe('BlockAssembler', () => {
   it('assembles interleaved text, reasoning, and tool-call deltas', () => {
@@ -260,5 +260,67 @@ describe('BlockAssembler.interruptedBlocks', () => {
     assembler.push({ type: 'block-start', index: 1, blockType: 'mystery' } as unknown as StreamChunk)
     assembler.push({ type: 'block-start', index: 2, blockType: 'reasoning' })
     expect(assembler.interruptedBlocks()).toEqual([])
+  })
+})
+
+describe('streamText', () => {
+  async function* streamOf(chunks: readonly StreamChunk[]): AsyncGenerator<StreamChunk> {
+    for (const chunk of chunks) yield chunk
+  }
+  const errors = {
+    maxTokens: () => new Error('cut at the output cap'),
+    toolCalls: () => new Error('asked for a tool'),
+  }
+  const signal = new AbortController().signal
+
+  it('returns the text blocks of a clean stop, concatenated', async () => {
+    const text = await streamText(streamOf([
+      { type: 'block-start', index: 0, blockType: 'reasoning' },
+      { type: 'reasoning-delta', index: 0, text: 'thinking' },
+      { type: 'block-start', index: 1, blockType: 'text' },
+      { type: 'text-delta', index: 1, text: 'Hello' },
+      { type: 'block-start', index: 2, blockType: 'text' },
+      { type: 'text-delta', index: 2, text: ' world' },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ]), signal, errors)
+    expect(text).toBe('Hello world')
+  })
+
+  it('throws a failed or aborted request as an error with its message and code', async () => {
+    for (const kind of ['error', 'aborted'] as const) {
+      const reason: FinishReason = { kind, failure: { message: 'provider unavailable', code: 'RATE_LIMIT' } }
+      await expect(streamText(streamOf([{ type: 'finish', reason }]), signal, errors))
+        .rejects.toMatchObject({ message: 'provider unavailable', code: 'RATE_LIMIT' })
+    }
+  })
+
+  it('throws the caller\'s errors for truncated and tool-calling output', async () => {
+    await expect(streamText(streamOf([{ type: 'finish', reason: { kind: 'max-tokens' } }]), signal, errors))
+      .rejects.toThrow('cut at the output cap')
+    await expect(streamText(streamOf([{ type: 'finish', reason: { kind: 'tool-calls' } }]), signal, errors))
+      .rejects.toThrow('asked for a tool')
+  })
+
+  it('throws an error naming a finish reason it does not know', async () => {
+    const reason = { kind: 'content-filter' } as unknown as FinishReason
+    await expect(streamText(streamOf([{ type: 'finish', reason }]), signal, errors))
+      .rejects.toThrow('unsupported finish reason "content-filter"')
+  })
+
+  it('throws the abort reason at the first chunk after the signal aborts', async () => {
+    const controller = new AbortController()
+    const reason = new Error('deadline passed')
+    let pulled = 0
+    async function* stream(): AsyncGenerator<StreamChunk> {
+      pulled += 1
+      yield { type: 'text-delta', index: 0, text: 'a' }
+      controller.abort(reason)
+      pulled += 1
+      yield { type: 'text-delta', index: 0, text: 'b' }
+      pulled += 1
+      yield { type: 'finish', reason: { kind: 'stop' } }
+    }
+    await expect(streamText(stream(), controller.signal, errors)).rejects.toBe(reason)
+    expect(pulled).toBe(2)
   })
 })

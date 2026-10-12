@@ -24,10 +24,18 @@ export interface TokenMeasurement {
   readonly logRevision: SessionLogOffset
   /** Provider or heuristic anchor used for this measurement. */
   readonly baseline: TokenMeasurementBaseline
-  /** Signed repricing of current surface content relative to the baseline anchor. */
+  /** Signed heuristic repricing of current surface content relative to the baseline anchor, before density. */
   readonly surfaceDeltaTokens: number
+  /**
+   * Provider tokens per heuristic token on a route without image pricing:
+   * the densest of the newest usage anchors on this route (the current one
+   * included), applied to `surfaceDeltaTokens`; `1` otherwise.
+   */
+  readonly density: number
   /** Non-negative current request-and-response pressure. */
   readonly totalTokens: number
+  /** The whole current request (tool schemas and surface) priced by the fixed heuristic alone, whatever the anchor. */
+  readonly estimatedTokens: number
   /** Total route-priced request tokens across the current surface; equals the sum of the node prices. */
   readonly surfaceTokens: number
   /** Current surface nodes in positional head-to-tail order. */

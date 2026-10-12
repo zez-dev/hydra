@@ -34,6 +34,7 @@ import type {
   SessionWireEvent,
 } from './types.ts'
 import { SessionAssistantStreamAccumulator } from './assistant-stream.ts'
+import { slimAssistantStream } from './history-slim.ts'
 
 const DEFAULT_MAX_MESSAGES = 50
 const MESSAGE_TYPES = new Set(['user/message', 'assistant/message'])
@@ -415,10 +416,18 @@ function wireHeader(header: SessionHeader): SessionWireHeader {
 }
 
 function entryFor(event: SessionEvent): SessionEventEntry {
+  // A settled message carries its token stream cut to its timing: the Client
+  // reads the message content and usage, and the trajectory the first-token
+  // times, never the deltas, which are most of a long settlement's bytes. A
+  // failed attempt has no message; its stream is the only record of what the
+  // provider sent before the failure, so it travels whole.
+  const wire: SessionEvent = event.type === 'assistant/message' && Array.isArray(event.data.stream)
+    ? { ...event, data: { ...event.data, stream: slimAssistantStream(event.data.stream) } }
+    : event
   return {
     type: 'event',
     // Session.append validates and freezes event data as JSON before publication.
-    event: event as unknown as SessionWireEvent,
+    event: wire as unknown as SessionWireEvent,
   }
 }
 
