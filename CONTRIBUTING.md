@@ -10,7 +10,7 @@ Open an issue with what you ran, what you expected, and what happened. Include t
 
 A problem that also happens in unmodified DeepSeek Harness belongs upstream, in [its discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
 
-Do not post the details of a security problem in a public issue. Open an issue that asks for a private contact instead, and share the details there.
+Do not post a security problem in a public issue; report it privately as described in [SECURITY.md](SECURITY.md).
 
 Hydra is developed and tested on Linux. Reports from macOS and Windows are especially welcome, because those platforms are not tested yet.
 
