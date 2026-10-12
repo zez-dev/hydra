@@ -6,6 +6,20 @@ Hydra is an unofficial community fork of [DeepSeek Harness](https://github.com/d
 
 Hydra is built on DeepSeek Harness. It is not affiliated with, endorsed by, or supported by DeepSeek. "DeepSeek Harness" is a trademark of DeepSeek and is used here only to describe what Hydra is built on.
 
+![The Hydra Web UI answering "What files are in this project?" with a Bash tool call and its output](.github/assets/hydra-web-ui.png)
+
+## Quick start
+
+On Linux or macOS with Node.js 22.19 or newer (or 24 or newer), Git, and a C compiler:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zez-dev/hydra/main/scripts/install.sh | bash
+cd ~/my-project
+node ~/hydra/apps/cli/lib/bin.js web
+```
+
+The script clones Hydra into `~/hydra` (or updates it), builds it, and prints the start command; you can [read it first](scripts/install.sh). Open the printed link and add a model under **Settings → Models**. The [Run](#run) section has the same steps by hand.
+
 ## Credits
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), Copyright (c) 2026 DeepSeek, released under the [MIT License](LICENSE). This repository keeps the upstream history: every upstream commit is here, and Hydra's changes sit on top of it.
@@ -164,6 +178,8 @@ Use the model id exactly as the server lists it (`ollama list`, or LM Studio's m
 There is no Hydra Mac app (`.dmg`) yet. On a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. These macOS steps follow upstream but have not been tested on a Mac yet, so please report how they work for you. The desktop app under `apps/desktop` is upstream's: packaging it needs an Apple Developer ID, and its update checks go to DeepSeek's servers, so Hydra does not ship it.
 
 ## Updating
+
+Run the [Quick start](#quick-start) script again: it pulls the new version into `~/hydra` and rebuilds. By hand:
 
 ```sh
 cd ~/hydra
