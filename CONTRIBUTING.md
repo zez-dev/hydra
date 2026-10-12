@@ -30,3 +30,18 @@ Hydra and DeepSeek Harness are built to be extended. A plugin can live in its ow
 ## Learn the code
 
 Start with the [development guide](docs/development.md) and the [architecture documentation](docs/architecture.md).
+
+## For maintainers
+
+### Take an upstream release
+
+The `master` branch mirrors DeepSeek Harness; `main` is Hydra.
+
+1. Bring `master` up to date: `gh repo sync zez-dev/hydra --branch master`, or **Sync fork** on GitHub while viewing `master`.
+2. On a new branch from `main`, merge `master` and resolve the conflicts. Regenerate what the checks name as stale; `pnpm run check:ci:static` lists every generated file that is out of date (translation pairing is expected to fail).
+3. Open a pull request. The Hydra check must pass before it is merged.
+
+### Publish a release
+
+1. Raise `HYDRA_VERSION` in [packages/boot/doctor/src/checks.ts](packages/boot/doctor/src/checks.ts); `/doctor` prints it first.
+2. Merge that change, then tag the merge with the same version (`v<version>`) and publish release notes that list what changed and the known limits.
