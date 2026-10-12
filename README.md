@@ -161,7 +161,7 @@ Use the model id exactly as the server lists it (`ollama list`, or LM Studio's m
 
 ## Mac app
 
-There is no Hydra Mac app (`.dmg`) yet. On a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. The desktop app under `apps/desktop` is upstream's: packaging it needs an Apple Developer ID, and its update checks go to DeepSeek's servers, so Hydra does not ship it.
+There is no Hydra Mac app (`.dmg`) yet. On a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. These macOS steps follow upstream but have not been tested on a Mac yet, so please report how they work for you. The desktop app under `apps/desktop` is upstream's: packaging it needs an Apple Developer ID, and its update checks go to DeepSeek's servers, so Hydra does not ship it.
 
 ## Updating
 

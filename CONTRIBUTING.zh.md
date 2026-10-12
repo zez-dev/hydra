@@ -2,6 +2,8 @@
 
 [English](CONTRIBUTING.md) | 中文
 
+> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支。Hydra 接受议题（issue）和拉取请求（pull request），说明见[英文贡献指南](CONTRIBUTING.md)。以下为上游 DeepSeek Harness 的原始说明。
+
 感谢你愿意为 DeepSeek Harness 作出贡献！
 
 我们深信开源社区的力量，这份信念从项目最初就塑造着 DeepSeek Harness。

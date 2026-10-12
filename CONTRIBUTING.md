@@ -1,23 +1,32 @@
-# Contributing
+# Contributing to Hydra
 
 English | [中文](CONTRIBUTING.zh.md)
 
-Thank you for your interest in contributing to DeepSeek Harness!
+Hydra is an unofficial community fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Unlike upstream, Hydra accepts issues and pull requests in this repository.
 
-We deeply believe in the power of open source communities, and that belief has shaped this project from the very beginning.
+## Report a problem
 
-DeepSeek Harness is still at an early stage and under active development. We are sorry that we cannot accept external pull requests at the moment. However, contributing code to this repository is far from the only way to help. There are many other ways to get involved:
+Open an issue with what you ran, what you expected, and what happened. Include the output of `/doctor`, your operating system, and the model provider you use. Never paste API keys or the contents of a `.env` file.
 
-- Identify and report issues or bugs in GitHub Discussions:
-  - Upvote discussions that you would like to bring to the team's attention. We are a very small team and may not be able to reply to every post, but we monitor them and consider them when allocating resources.
-- Contribute to the ecosystem:
-  - Create a plugin that excites you and share it with others:
-    - Associate your GitHub project with the `dsh-plugin` topic to help others discover your plugin.
-  - Write blog posts and how-to guides about DeepSeek Harness.
-  - Answer questions and help other members of the community.
+A problem that also happens in unmodified DeepSeek Harness belongs upstream, in [its discussions](https://github.com/deepseek-ai/deepseek-harness/discussions).
 
-DeepSeek Harness is designed to be deeply customizable. We do not believe that packages in the official repository are inherently more important than packages created by the community. You may consider this repository an idea, an official showcase, and a source of inspiration, but not a mandate from us.
+Do not post the details of a security problem in a public issue. Open an issue that asks for a private contact instead, and share the details there.
 
-We have already seen exciting projects emerge from the community, and we hope to see the ecosystem continue to grow in its own directions.
+Hydra is developed and tested on Linux. Reports from macOS and Windows are especially welcome, because those platforms are not tested yet.
 
-Into the unknown.
+## Send a pull request
+
+- Keep each pull request to one change, and add or update tests for any change in behavior.
+- Before opening it, run `pnpm run typecheck`, `pnpm run lint`, and the tests of the packages you changed, for example `pnpm exec vitest run packages/learning/memory`.
+- Follow the conventions in [AGENTS.md](AGENTS.md); coding agents read the same file.
+- Hydra does not maintain the Chinese translations of its documentation, so the translation-pairing check is expected to fail. Every other check should pass.
+
+Contributions are released under the [MIT License](LICENSE), the same license as DeepSeek Harness.
+
+## Build a plugin
+
+Hydra and DeepSeek Harness are built to be extended. A plugin can live in its own repository; add the `dsh-plugin` topic to it so others can find it.
+
+## Learn the code
+
+Start with the [development guide](docs/development.md) and the [architecture documentation](docs/architecture.md).
