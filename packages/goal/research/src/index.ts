@@ -418,8 +418,11 @@ export function apply(ctx: Context, config: Config): void {
     handler: executeResearch,
   }))
 
-  // Every step of a research session sees the journal digest; every goal round
-  // also gets the research instruction after the driver's own round message.
+  // A step that starts work (the user's message, a goal round) and any step
+  // while no digest is in view (as after a compaction) sees the current journal
+  // digest; within a turn the model sees its own journal changes in the results
+  // of the tool calls that made them. Every goal round also gets the research
+  // instruction after the driver's own round message.
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind === 'reject') return decision
@@ -438,8 +441,10 @@ export function apply(ctx: Context, config: Config): void {
       related: relatedBreakthroughs(ctx.get('memory'), active.slug, config.relatedBreakthroughs ?? 5),
     })
     const digest = digestRecall(text)
+    const visible = recallHistory(agent).visibleDigest
+    const startsWork = decision.messages.some(message => message.source.kind !== 'plugin')
     let messages = decision.messages
-    if (recallHistory(agent).visibleDigest === digest) {
+    if (visible === digest || (visible !== undefined && !startsWork)) {
       messages = pending === undefined ? messages : withoutPending()
     } else if (pending === undefined || digestRecall(recallText(pending)) !== digest) {
       const recall = createRecallMessage(text)

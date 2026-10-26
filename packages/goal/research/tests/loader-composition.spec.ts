@@ -230,15 +230,17 @@ describe('research goal real Loader composition through cordis.yml', () => {
     const firstRequest = messagesText(adapter.requests[0]!.messages)
     expect(firstRequest).toContain('Role: researcher')
     expect(firstRequest).toContain('<research_journal>')
-    const laterRequests = adapter.requests.slice(4).filter(request => request.purpose === undefined)
-    expect(laterRequests.length).toBeGreaterThan(0)
-    expect(messagesText(laterRequests[0]!.messages)).toContain('Scaling law holds at depth 5')
+    // A later round starts from the journal with the breakthrough recorded in round 1.
+    const laterRounds = adapter.requests.filter(request => request.purpose === undefined
+      && request.messages.filter(message => message.role === 'user' && message.source.kind === 'goal').length >= 2)
+    expect(laterRounds.length).toBeGreaterThan(0)
+    expect(messagesText(laterRounds[0]!.messages)).toContain('Scaling law holds at depth 5')
     // The measured experiment landed with its metric, and the scoring request re-ranked the hypothesis.
     expect(store.get('scaling')?.experiments[0]).toMatchObject({ title: 'baseline', metrics: { loss: 0.25 }, source: 'model' })
     expect(adapter.requests.filter(request => request.purpose === 'research-score')[0]).toMatchObject({ model: 'score-mock' })
     expect(store.get('scaling')?.hypotheses[0]).toMatchObject({ text: 'Depth matters', score: 0.9, scoreReason: 'loss fell to 0.25' })
     // The round after the scoring request ranks the hypothesis by its new score.
-    expect(laterRequests.some(request => messagesText(request.messages).includes('score 0.9: loss fell to 0.25'))).toBe(true)
+    expect(laterRounds.some(request => messagesText(request.messages).includes('score 0.9: loss fell to 0.25'))).toBe(true)
     expect(store.get('scaling')?.deadEnds[0]).toMatchObject({ text: 'Dropout above 0.5 diverges', source: 'auto' })
 
     const second = await ctx.agentLoop.create(SessionId('research-second'), { provider: 'mock', model: 'mock' }, { cwd: root! })

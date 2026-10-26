@@ -270,7 +270,7 @@ describe('/research command and goal', () => {
     }
   })
 
-  it('injects the journal recall once, replaces it when the journal changes, and appends the round instruction on goal rounds', async () => {
+  it('injects the journal recall while none is in view and on a step that starts work after a change, and appends the round instruction on goal rounds', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
@@ -283,8 +283,11 @@ describe('/research command and goal', () => {
     if (first.kind === 'enter') for (const message of first.messages) agent.session.append('user/message', message, { surfaceOp: 'append' })
     const again = await preStep(ctx, agent, [])
     expect(text(again)).not.toContain('<research_journal>')
+    // A change made within the turn reached the model through the tool result that made it.
     await store.addBreakthrough('opt', 'Second law', 'model')
-    const changed = await preStep(ctx, agent, [])
+    expect(text(await preStep(ctx, agent, []))).not.toContain('<research_journal>')
+    const ask = createUserMessage({ content: [{ type: 'text', text: 'what next?' }], source: { kind: 'user' } })
+    const changed = await preStep(ctx, agent, [ask])
     expect(text(changed)).toContain('Second law')
     const goal = ctx.goals.get(agent)!
     const round = createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'goal', goalId: goal.id, revision: goal.revision, round: 1 } })

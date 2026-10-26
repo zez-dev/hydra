@@ -78,11 +78,11 @@ One `user/message` per research session, sourced `{ kind: 'plugin', plugin: 'dsh
 
 #### Token effect
 
-Capped by `maxRecallBytes`; re-sent only when the journal changed, a related breakthrough changed, or the previous copy left the surface.
+Capped by `maxRecallBytes`; re-sent on a step that starts work (the user's message, a goal round) when the journal or a related breakthrough changed, and on any step once the previous copy left the surface. A step within a turn never re-sends it: the model sees the changes it made in the results of the `journal` and `run_experiment` calls that made them.
 
 #### KV Cache effect
 
-Replacing: a changed journal replaces the recall message at the next step, which invalidates the prefix after it; an unchanged journal preserves it.
+Append-only: a changed journal appends a new recall message at the next step that starts work, after the existing history; earlier request prefixes stay reusable.
 
 ### Round instruction
 
