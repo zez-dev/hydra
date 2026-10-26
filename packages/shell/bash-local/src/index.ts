@@ -20,12 +20,16 @@ import { clampTimeout, deadline, MAX_TIMER_DELAY_MS, timeoutOf } from '@deepseek
 /**
  * Model-friendly environment overrides: disable colors, pagers, and
  * interactive terminal features that would garble tool output (the same set
- * Codex hardcodes; Claude Code achieves it via TERM=dumb). Bash-tool policy —
- * merged first into the spawn's explicit env, so a trusted caller's own entry
- * still wins; the subprocess service applies its credential scrub independently.
+ * Codex hardcodes; Claude Code achieves it via TERM=dumb). `FORCE_COLOR: '0'`
+ * cancels a `FORCE_COLOR` inherited from the launching shell or CI, which
+ * otherwise outranks `NO_COLOR` in Node and makes every Node child print ANSI
+ * codes and a conflict warning. Bash-tool policy — merged first into the
+ * spawn's explicit env, so a trusted caller's own entry still wins; the
+ * subprocess service applies its credential scrub independently.
  */
 export const ENV_OVERRIDES = {
   NO_COLOR: '1',
+  FORCE_COLOR: '0',
   TERM: 'dumb',
   PAGER: 'cat',
   GIT_PAGER: 'cat',
