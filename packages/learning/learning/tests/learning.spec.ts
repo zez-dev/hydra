@@ -323,7 +323,15 @@ describe('extraction on turn/end', () => {
     const system = adapter.requests[0]?.system ?? ''
     expect(system).toContain('an approach that failed and why')
     expect(system).toContain('name its situation')
-    expect(system).toContain('Do not keep plans or progress reports')
+    // Selective by default: most turns file nothing, and common knowledge or a restated task never qualifies.
+    expect(system).toContain('Most turns teach nothing new; then answer []')
+    expect(system).toContain('Never keep general programming knowledge')
+    expect(system).toContain('a restatement of the task')
+    expect(system).toContain('with no explanation before or after it')
+    expect(system).toContain('never two items that say the same thing')
+    // The request line asks for a review, not for extraction, so it never contradicts "answer []".
+    const prompt = adapter.requests[0]?.messages.map(message => message.content.map(block => block.type === 'text' ? block.text : '').join('')).join('') ?? ''
+    expect(prompt.startsWith('Review this turn transcript:\n')).toBe(true)
     expect(ctx.memory.list().map(entry => [entry.text, entry.tags])).toEqual([[lesson, ['lesson', workspaceTag('/work/alpha')]]])
   })
 

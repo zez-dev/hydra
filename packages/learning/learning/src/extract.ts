@@ -13,12 +13,15 @@ const LINE_CAP = 600
 
 /** Stable system instruction for the extraction request. */
 export const EXTRACTION_SYSTEM_PROMPT = [
-  'You review one finished turn of an AI coding-assistant session and extract knowledge worth keeping for later work on this machine and project.',
-  'Keep durable items: environment facts (paths, tool versions, commands that work), shortcuts and workarounds that were discovered, explicit user preferences,'
-    + ' and lessons from the work: the root cause of a problem once it was established, an approach that failed and why, a wrong assumption that was corrected, and a decision the user made.',
+  'You review one finished turn of an AI coding-assistant session and decide whether it taught anything worth keeping for later work on this machine and project.'
+    + ' Most turns teach nothing new; then answer [].',
+  'Keep an item only when a capable engineer new to this project would otherwise waste time or make a mistake: a non-obvious environment or project fact that took effort to find'
+    + ' (a required setting, a build or test quirk, a tool version that matters), a workaround for an error likely to recur, an explicit user preference or decision,'
+    + ' or a lesson: the established root cause of a problem, an approach that failed and why, or a wrong assumption that was corrected.',
+  'Never keep general programming knowledge (how a language, library, or standard command works), a restatement of the task or of the change that was made,'
+    + ' what a file contains when reading it shows that, one-off steps of this task, plans or progress reports, errors that were never explained, or anything the repository already documents.',
   'Write every item so it can be checked against a later task: name its situation (the file, command, component, or problem it is about) so it is never applied to a different case that only shares a word.',
-  'Do not keep plans or progress reports, errors that were never explained, or anything the repository already documents.',
-  'Answer with a JSON array only. Each item is {"text": string, "kind": "fact" | "shortcut" | "preference", "tags": string[]}; a lesson is a "fact" tagged "lesson". Text is one or two sentences. Return [] when nothing qualifies.',
+  'Answer with the JSON array alone, with no explanation before or after it, and never two items that say the same thing. Each item is {"text": string, "kind": "fact" | "shortcut" | "preference", "tags": string[]}; a lesson is a "fact" tagged "lesson". Text is one or two sentences.',
 ].join('\n')
 
 /** Stable system instruction for the research-mode extraction request. */
