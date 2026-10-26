@@ -7,11 +7,15 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 export const inject = ['tools', 'offPeak']
 
 /**
- * Register the model-facing `off_peak` tool.
+ * Register the model-facing `off_peak` tool, only while the off-peak row is
+ * enabled: a disabled row never opens a window or drains on its own, so work
+ * the model parked would wait for a human's `/offpeak drain`, and every request
+ * would still pay for the tool's schema.
  * @param ctx Agent-scoped tool registration context.
  */
 export function apply(ctx: Context): void {
   const service = ctx.offPeak
+  if (!service.enabled) return
   ctx.tools.register(defineTool({
     name: 'off_peak',
     description: 'Park non-urgent work for the next off-peak window, or list what is already queued. '

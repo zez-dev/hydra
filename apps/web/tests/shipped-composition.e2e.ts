@@ -459,6 +459,8 @@ function assertLeanChildRecord(agent: Agent, mode: 'one-shot' | 'continuable'): 
  * gaps: the `cordis_*` toolset executes model-written JavaScript that no
  * sandbox row confines, `mcp_*` servers spawn outside `ctx.shell`, and `ralph`
  * runs unsupervised rounds whose completion is a worker self-report.
+ * `off_peak` registers only while the off-peak row is enabled, which the
+ * shipped composition leaves off.
  * `web_fetch` is present because public-address enforcement and one-shot
  * approval now confine its model-selected request target. The composition
  * Agent Note owns the rationale and its sources.
@@ -479,7 +481,6 @@ const EXPECTED_TOOLS = [
   'knowledge_add',
   'list_agents',
   'memory',
-  'off_peak',
   'present',
   'read',
   'read_image',

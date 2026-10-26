@@ -402,30 +402,6 @@
       }
     },
     {
-      "name": "off_peak",
-      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "description": "queue (park a task) | list (what is queued)",
-            "enum": [
-              "queue",
-              "list"
-            ]
-          },
-          "task": {
-            "type": "string",
-            "description": "What to do when the window opens; required for `queue`."
-          }
-        },
-        "required": [
-          "action"
-        ]
-      }
-    },
-    {
       "name": "plugin_manager",
       "description": "List plugins or bundles in the current profile, enable or disable them, install a bundle, or remove an installed bundle. Every action requires danger-full-access permission or approval for this call. Approval does not change the session permission mode. Changes affect every session in this profile. List first to obtain exact identifiers. Package installation can execute allowed build scripts. Live profiles apply changes immediately; startup profiles require restart.",
       "parameters": {
@@ -1339,30 +1315,6 @@
             "id": {
               "type": "string",
               "description": "forget: the entry id."
-            }
-          },
-          "required": [
-            "action"
-          ]
-        }
-      },
-      {
-        "name": "off_peak",
-        "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "action": {
-              "type": "string",
-              "description": "queue (park a task) | list (what is queued)",
-              "enum": [
-                "queue",
-                "list"
-              ]
-            },
-            "task": {
-              "type": "string",
-              "description": "What to do when the window opens; required for `queue`."
             }
           },
           "required": [

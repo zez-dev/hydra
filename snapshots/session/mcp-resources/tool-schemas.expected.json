@@ -442,30 +442,6 @@
       }
     },
     {
-      "name": "off_peak",
-      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "description": "queue (park a task) | list (what is queued)",
-            "enum": [
-              "queue",
-              "list"
-            ]
-          },
-          "task": {
-            "type": "string",
-            "description": "What to do when the window opens; required for `queue`."
-          }
-        },
-        "required": [
-          "action"
-        ]
-      }
-    },
-    {
       "name": "read",
       "description": "Read a UTF-8 text file and return line-numbered content.",
       "parameters": {

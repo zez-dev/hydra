@@ -45,7 +45,7 @@ From any session:
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | required (`false` in `dsh-base`) | Whether deferral and draining run at all; `false` leaves every round alone and keeps `/offpeak` available for inspection |
+| `enabled` | required (`false` in `dsh-base`) | Whether deferral, draining, and the `off_peak` tool exist at all; `false` leaves every round alone and keeps `/offpeak` available for inspection |
 | `windows` | `[]` | Local wall-clock `HH:MM` pairs in which deferred work runs; a `start` later than its `end` wraps past midnight |
 | `maxConcurrent` | required (`2` in `dsh-base`) | Sessions resumed at once when a window opens; the rest wait for the next drain |
 | `finishRoundInFlight` | `false` | Whether a round already running when the window closes may run to its end instead of pausing |
@@ -106,11 +106,11 @@ Independent: the session's prefix is unchanged, but a queue that waits hours cro
 
 #### What the model sees
 
-Two actions, `queue` and `list`, and a result carrying whether a window is open and the queued entries' id, state, and task. The tool ships as the `./tools` entry (`@deepseek-ai/dsh-off-peak/tools`), mounted separately from the service, so a surface that hides it keeps deferral, draining, and `/offpeak`.
+Two actions, `queue` and `list`, and a result carrying whether a window is open and the queued entries' id, state, and task. The tool ships as the `./tools` entry (`@deepseek-ai/dsh-off-peak/tools`), mounted separately from the service, so a surface that hides it keeps deferral, draining, and `/offpeak`. It is registered only while the service row's `enabled` is on: a disabled row opens no window and drains nothing on its own, so a task the model parked would wait for a person's `/offpeak drain`.
 
 #### Token effect
 
-Fixed: the tool schema once per request, plus a result proportional to the queue length.
+Fixed while the row is enabled: the tool schema once per request, plus a result proportional to the queue length. None while it is disabled.
 
 #### KV Cache effect
 

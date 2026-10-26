@@ -186,13 +186,6 @@ interface ToolArgsMap {
     /** forget: the entry id. */
     id?: string;
   } & Record<string, JsonValue>;
-  /** Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens. */
-  off_peak: {
-    /** queue (park a task) | list (what is queued) */
-    action: "queue" | "list";
-    /** What to do when the window opens; required for `queue`. */
-    task?: string;
-  } & Record<string, JsonValue>;
   /** Read a UTF-8 text file and return line-numbered content. */
   read: {
     /** Path to read, resolved by the filesystem backend. */
@@ -472,14 +465,6 @@ interface ToolOutputMap {
     depth?: number;
   })[];
   memory: JsonValue;
-  off_peak: {
-    open: boolean;
-    entries: {
-      id: string;
-      state: string;
-      task: string;
-    }[];
-  };
   read: {
     path: string;
     offset: number;

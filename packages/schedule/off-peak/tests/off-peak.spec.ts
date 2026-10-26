@@ -742,6 +742,12 @@ describe('/offpeak', () => {
 })
 
 describe('the off_peak tool', () => {
+  it('is not offered while the row is disabled, since nothing would run what it parks', async () => {
+    const test = await harness({ ...NIGHT, enabled: false })
+    expect(test.ctx.offPeak.enabled).toBe(false)
+    expect(test.ctx.tools.get('off_peak')).toBeUndefined()
+  })
+
   it('queues a task for the model and lists what is waiting', async () => {
     const test = await harness()
     const queued = await test.ctx.tools.execute({

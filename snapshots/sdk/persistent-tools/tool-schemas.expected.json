@@ -159,30 +159,6 @@
       }
     },
     {
-      "name": "off_peak",
-      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "description": "queue (park a task) | list (what is queued)",
-            "enum": [
-              "queue",
-              "list"
-            ]
-          },
-          "task": {
-            "type": "string",
-            "description": "What to do when the window opens; required for `queue`."
-          }
-        },
-        "required": [
-          "action"
-        ]
-      }
-    },
-    {
       "name": "run_experiment",
       "description": "Run one research experiment as a shell command in the workspace and record it in the research journal: the command, exit code, metrics read from the output with your regular expressions, deltas against the previous run with the same `title`, and an output excerpt. Use it instead of `bash` for experiments so results are never lost. Requires an active research goal in this session (start one with /research).",
       "parameters": {

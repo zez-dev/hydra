@@ -206,13 +206,6 @@ interface ToolArgsMap {
     /** forget: the entry id. */
     id?: string;
   } & Record<string, JsonValue>;
-  /** Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens. */
-  off_peak: {
-    /** queue (park a task) | list (what is queued) */
-    action: "queue" | "list";
-    /** What to do when the window opens; required for `queue`. */
-    task?: string;
-  } & Record<string, JsonValue>;
   /** Declare existing files accessible through the Session filesystem as final deliverables. When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. Mentioning its path in your reply does not replace this call. The files must already exist. The user opens the current source files; their contents are not copied or preserved. */
   present: {
     files: {
@@ -481,14 +474,6 @@ interface ToolOutputMap {
     depth?: number;
   })[];
   memory: JsonValue;
-  off_peak: {
-    open: boolean;
-    entries: {
-      id: string;
-      state: string;
-      task: string;
-    }[];
-  };
   present: {
     turn: number;
     files: {

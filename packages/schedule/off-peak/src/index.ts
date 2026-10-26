@@ -310,6 +310,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
 
   const service: OffPeakService = {
+    enabled: config.enabled,
     isOpen,
     list: () => rows().map(toEntry),
     queue: input => record({ sessionId: input.sessionId, kind: 'manual', objective: input.objective, ...input.cwd === undefined ? {} : { cwd: input.cwd } }),

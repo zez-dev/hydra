@@ -53,6 +53,12 @@ export interface OffPeakDrainSummary {
 /** The `ctx.offPeak` service. */
 export interface OffPeakService {
   /**
+   * Whether the row's `enabled` config is on. While it is off no window ever
+   * opens and nothing drains the queue on its own, so only `/offpeak drain`
+   * runs queued work.
+   */
+  readonly enabled: boolean
+  /**
    * Whether a window is open right now.
    * @returns true while the clock lies inside a configured window, and always
    *   true when the plugin is disabled, so callers need no separate check.
