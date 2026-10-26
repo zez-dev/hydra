@@ -15,14 +15,14 @@ import { brandString } from '@deepseek-ai/dsh-brand'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { messageText } from '@deepseek-ai/dsh-llm'
 import { DomainMemoryStore, memoryDomainSpec } from './store.ts'
-import { createRecallMessage, digestRecall, isRecallMessage, recallText, renderRecallDetailed } from './recall.ts'
+import { createRecallMessage, digestRecall, isRecallMessage, recalledIds, recallText, renderRecallDetailed } from './recall.ts'
 import { rankEntries } from './rank.ts'
 import { visibleTags } from './workspace.ts'
 import type { MemoryCurationPolicy, MemoryEntry, MemoryEntryId, MemoryEntryKind, MemoryEntryStatus, MemoryStore } from './types.ts'
 
 export type * from './types.ts'
 export { memoryDomainSpec, normalizeMemoryText } from './store.ts'
-export { createRecallMessage, digestRecall, isRecallMessage, MEMORY_PLUGIN, recallText, renderRecall, renderRecallDetailed } from './recall.ts'
+export { createRecallMessage, digestRecall, isRecallMessage, MEMORY_PLUGIN, recalledIds, recallText, renderRecall, renderRecallDetailed } from './recall.ts'
 export { rankEntries } from './rank.ts'
 export type { RankOptions } from './rank.ts'
 export { isWorkspaceTag, visibleTags, workspaceTag } from './workspace.ts'
@@ -124,27 +124,44 @@ function resolvePolicy(config: Config): MemoryCurationPolicy | undefined {
   }
 }
 
+/** What the agent's model-visible surface holds for recall. */
+interface RecallView {
+  /** Digest of the newest recall block in view; absent while none is. */
+  readonly visibleDigest?: string
+  /** Ids of the entries every recall block in view carries. */
+  readonly visibleIds: ReadonlySet<MemoryEntryId>
+  /** The latest request and reply, which a step without new work matches entries against; empty while a recall block is in view. */
+  readonly context: string
+}
+
 /**
- * What the agent's model-visible surface holds for recall: the digest of the
- * recall block in view, and otherwise the latest request and reply, which a
- * step without new work matches entries against.
+ * What the agent's model-visible surface holds for recall: the recall blocks
+ * in view and the entries they carry, and otherwise the latest request and reply.
  * @param agent - the stepping agent.
- * @returns the visible digest when a recall is in view; the context text when none is.
+ * @returns the newest visible digest and every visible entry id, or the context text when no block is in view.
  */
-function recallHistory(agent: Agent): { visibleDigest?: string; context: string } {
+function recallHistory(agent: Agent): RecallView {
   let request: string | undefined
   let reply: string | undefined
+  let visibleDigest: string | undefined
+  const visibleIds = new Set<MemoryEntryId>()
   for (const seq of [...agent.session.surface.nodes].reverse()) {
     // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
     const event = agent.session.eventAt(seq)
     if (event?.type === 'user/message') {
-      if (isRecallMessage(event.data)) return { visibleDigest: digestRecall(recallText(event.data)), context: '' }
-      if (request === undefined && event.data.source.kind === 'user') request = messageText(event.data)
+      if (isRecallMessage(event.data)) {
+        const text = recallText(event.data)
+        visibleDigest ??= digestRecall(text)
+        for (const id of recalledIds(text)) visibleIds.add(id)
+      } else if (request === undefined && event.data.source.kind === 'user') {
+        request = messageText(event.data)
+      }
     } else if (event?.type === 'assistant/message' && reply === undefined) {
       reply = messageText(event.data.message)
     }
   }
-  return { context: [request, reply].map(text => (text ?? '').slice(-CONTEXT_CHARS)).join('\n').trim() }
+  if (visibleDigest !== undefined) return { visibleDigest, visibleIds, context: '' }
+  return { visibleIds, context: [request, reply].map(text => (text ?? '').slice(-CONTEXT_CHARS)).join('\n').trim() }
 }
 
 /**
@@ -166,10 +183,11 @@ function workText(messages: readonly UserMessage[]): string {
  * Register recall injection: on a step that starts work (the user's request,
  * a goal round, a webhook), and on any step while no recall block is in view
  * (as after a compaction condensed it), the approved entries of the
- * always-recalled kinds plus the ones most related to the work are added as
- * one recall message, unless the visible recall already carries the same
- * block. Related entries share at least `recallMinMatchedTerms` words with the
- * work or have `recallNoteCoverage` of their own words matched, score within
+ * always-recalled kinds plus the ones most related to the work that no recall
+ * block in view already carries are added as one recall message; the rules
+ * head only a block added while none is in view. Related entries share at
+ * least `recallMinMatchedTerms` words with the work or have
+ * `recallNoteCoverage` of their own words matched, score within
  * `recallScoreFloor` of the best, and rank the session's own workspace first.
  * @param ctx - plugin context.
  * @param store - the memory store.
@@ -206,11 +224,11 @@ function installRecall(
         minCoverage: config.recallNoteCoverage ?? DEFAULT_NOTE_COVERAGE,
         scoreFloor: config.recallScoreFloor ?? DEFAULT_SCORE_FLOOR,
       }),
-    ]
-    const { text, ids } = renderRecallDetailed(selected, config.maxRecallBytes)
+    ].filter(entry => !view.visibleIds.has(entry.id))
+    // An entry already in view is never sent again, and a later block points at the rules the first one states.
+    const { text, ids } = renderRecallDetailed(selected, config.maxRecallBytes, view.visibleDigest !== undefined)
     if (text.length === 0) return withoutPending()
     const digest = digestRecall(text)
-    if (view.visibleDigest === digest) return withoutPending()
     if (pending !== undefined && digestRecall(recallText(pending)) === digest) return decision
     const recall = createRecallMessage(text)
     const recalledAt = new Date().toISOString()
