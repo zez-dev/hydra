@@ -1699,6 +1699,7 @@ describe('plugin registration and config', () => {
 
     expect(ctx.llm.providerRetryPolicy('deepseek-official')).toEqual({
       mode: 'always',
+      emptyResponseRetries: 1,
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0.2,

@@ -47,7 +47,7 @@ Choose it when a composition runs the agent loop and wants durable request recov
 - name: '@deepseek-ai/dsh-llm-retry'
 ```
 
-Omission of `retryPolicy` uses normal mode: twelve retries for `EMPTY_RESPONSE`, `RATE_LIMIT`, `SERVER`, `STREAM_CLOSED` (a stream closed before its terminal event), `TIMEOUT`, and `TRANSPORT`, with bounded exponential backoff from 500 ms to 10 seconds and 10 percent jitter, about eighty-five seconds of provider trouble before a step fails; a stream that throws after chunks arrived, without a classified failure, counts as `TRANSPORT`. Normal mode can change its finite budget, eligible codes, and backoff; always mode asks downstream recovery first, then retries every model-request failure without an attempt limit, stopping only on success, cancellation, or plugin disposal.
+Omission of `retryPolicy` uses normal mode: twelve retries for `EMPTY_RESPONSE`, `RATE_LIMIT`, `SERVER`, `STREAM_CLOSED` (a stream closed before its terminal event), `TIMEOUT`, and `TRANSPORT`, with bounded exponential backoff from 500 ms to 10 seconds and 10 percent jitter, about eighty-five seconds of provider trouble before a step fails; a stream that throws after chunks arrived, without a classified failure, counts as `TRANSPORT`. Normal mode can change its finite budget, eligible codes, and backoff; always mode asks downstream recovery first, then retries every model-request failure without an attempt limit, stopping only on success, cancellation, or plugin disposal. In both modes `emptyResponseRetries` (default 1) bounds an empty answer: an `EMPTY_RESPONSE` failure is retried only while the step's retry chain is shorter than it. One retry recovers a provider's transient empty completion, while a model that answers the same request with no content again (such as a Claude model that considers its turn finished after a tool result) would only repeat it.
 
 ### What you can observe
 
@@ -55,7 +55,7 @@ Each scheduled retry is durable before its wait: the plugin appends a non-surfac
 
 ### Failures and recovery
 
-A failure before any final adapter is selected has no provider policy and delegates downstream unchanged. In normal mode, a failure code outside the eligible set, or an exhausted budget, delegates; in always mode, an over-cap provider delay uses the configured local backoff so the policy cannot terminate on that instruction. Nothing here is model-visible: no retry event, delay, provider error, or failed partial output reaches the model or derived messages.
+A failure before any final adapter is selected has no provider policy and delegates downstream unchanged. In normal mode, a failure code outside the eligible set, or an exhausted budget, delegates; in always mode, an over-cap provider delay uses the configured local backoff so the policy cannot terminate on that instruction. An `EMPTY_RESPONSE` past `emptyResponseRetries` delegates in normal mode and ends the step in always mode, whose downstream recovery has already declined. Nothing here is model-visible: no retry event, delay, provider error, or failed partial output reaches the model or derived messages.
 
 -----
 
@@ -116,7 +116,7 @@ No retry event, delay, provider error, or failed partial output is model-visible
 
 #### Token effect
 
-Each retry is a new provider request and may repeat input-token billing. Normal mode has a finite budget; always mode can consume unbounded requests until success or cancellation. `llm/retry` itself contributes no tokens.
+Each retry is a new provider request and may repeat input-token billing. Normal mode has a finite budget; always mode can consume unbounded requests until success or cancellation, except that a repeated empty answer stops after `emptyResponseRetries`. `llm/retry` itself contributes no tokens.
 
 #### KV Cache effect
 

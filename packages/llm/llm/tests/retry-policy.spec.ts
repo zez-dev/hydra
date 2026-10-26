@@ -14,6 +14,7 @@ describe('provider retry policy', () => {
       mode: 'normal',
       maxRetries: 12,
       retryableCodes: ['EMPTY_RESPONSE', 'RATE_LIMIT', 'SERVER', 'STREAM_CLOSED', 'TIMEOUT', 'TRANSPORT'],
+      emptyResponseRetries: 1,
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
@@ -30,6 +31,7 @@ describe('provider retry policy', () => {
       mode: 'normal',
       maxRetries: 4,
       retryableCodes,
+      emptyResponseRetries: 3,
       backoff: {
         initialDelayMs: 25,
         maxDelayMs: 100,
@@ -44,6 +46,7 @@ describe('provider retry policy', () => {
       mode: 'normal',
       maxRetries: 4,
       retryableCodes: ['BUSY'],
+      emptyResponseRetries: 3,
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0,
@@ -54,6 +57,7 @@ describe('provider retry policy', () => {
   it('resolves always mode with default backoff', () => {
     expect(resolveRetryPolicy({ mode: 'always' }, 'provider.retryPolicy')).toEqual({
       mode: 'always',
+      emptyResponseRetries: 1,
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
@@ -71,6 +75,7 @@ describe('provider retry policy', () => {
 
     expect(resolveRetryPolicy(layered, 'provider.retryPolicy')).toEqual({
       mode: 'always',
+      emptyResponseRetries: 1,
       initialDelayMs: 500,
       maxDelayMs: 10_000,
       jitterRatio: 0.1,
@@ -82,6 +87,8 @@ describe('provider retry policy', () => {
     [{ mode: 'normal', maxRetries: -1 }, /maxRetries/],
     [{ mode: 'normal', maxRetries: 1.5 }, /maxRetries/],
     [{ mode: 'normal', maxRetries: Number.MAX_SAFE_INTEGER + 1 }, /maxRetries/],
+    [{ mode: 'normal', emptyResponseRetries: -1 }, /emptyResponseRetries/],
+    [{ mode: 'always', emptyResponseRetries: 0.5 }, /emptyResponseRetries/],
     [{ mode: 'always', backoff: { initialDelayMs: 0 } }, /initialDelayMs/],
     [{ mode: 'normal', backoff: { maxDelayMs: Number.POSITIVE_INFINITY } }, /maxDelayMs/],
     [{ mode: 'normal', backoff: { initialDelayMs: MAX_TIMER_DELAY_MS + 1 } }, /initialDelayMs/],
