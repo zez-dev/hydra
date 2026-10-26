@@ -60,6 +60,8 @@ jobs:
         run: pnpm run build:native-system && pnpm run build:lib && pnpm run build:web
 
       # The free 4-core runner is far slower than upstream's 16-core machines,
-      # so a test that passes there can exceed the default 5 s limit here.
+      # so a test that passes there can exceed the default 5 s limit here. The
+      # flag follows the script name without `--`: pnpm forwards a `--` to the
+      # script, and vitest then ignores every flag after it.
       - name: Unit tests
-        run: pnpm run test -- --testTimeout=30000
+        run: pnpm run test --testTimeout=30000
