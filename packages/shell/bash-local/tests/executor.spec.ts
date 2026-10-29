@@ -154,6 +154,21 @@ describe('LocalBashExecutor.run', () => {
     expect(result.stdout.text).toBe('piped\n[env-ok][dsh-ok]\n')
   })
 
+  it('turns off an inherited FORCE_COLOR, so tools print plain text without the NO_COLOR conflict warning', async () => {
+    const { bash } = await setup()
+    const inherited = process.env['FORCE_COLOR']
+    process.env['FORCE_COLOR'] = '3'
+    try {
+      const script = "process.stdout.write(require('node:util').styleText('red', 'x'))"
+      const result = await bash.run(bash.resolve({ command: `echo "[$FORCE_COLOR][$NO_COLOR]"; "${process.execPath}" -e "${script}"` }))
+      expect(result.stdout.text).toBe('[0][1]\nx')
+      expect(result.stderr.text).toBe('')
+    } finally {
+      if (inherited === undefined) delete process.env['FORCE_COLOR']
+      else process.env['FORCE_COLOR'] = inherited
+    }
+  })
+
   it('resolve() omits stdin/env/dshEnv when the request supplies none', async () => {
     const { bash } = await setup()
     const spec = bash.resolve({ command: 'true' })

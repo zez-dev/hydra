@@ -465,30 +465,6 @@
       }
     },
     {
-      "name": "off_peak",
-      "description": "Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "description": "queue (park a task) | list (what is queued)",
-            "enum": [
-              "queue",
-              "list"
-            ]
-          },
-          "task": {
-            "type": "string",
-            "description": "What to do when the window opens; required for `queue`."
-          }
-        },
-        "required": [
-          "action"
-        ]
-      }
-    },
-    {
       "name": "present",
       "description": "Declare existing files accessible through the Session filesystem as final deliverables. When a file you create or update is an output the user asked to receive, you must call present after writing it and before your final response, including files created through Bash or code execution. Mentioning its path in your reply does not replace this call. The files must already exist. The user opens the current source files; their contents are not copied or preserved.",
       "parameters": {

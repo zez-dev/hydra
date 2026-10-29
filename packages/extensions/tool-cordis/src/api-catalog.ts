@@ -2036,6 +2036,11 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'The `ctx.offPeak` service.',
     methods: [
       {
+        signature: 'readonly enabled: boolean',
+        description: 'Whether the row\'s `enabled` config is on. While it is off no window ever opens and nothing drains the queue on its own, so only `/offpeak drain` runs queued work.',
+        parameters: [],
+      },
+      {
         signature: 'isOpen(): boolean',
         description: 'Whether a window is open right now.',
         parameters: [],

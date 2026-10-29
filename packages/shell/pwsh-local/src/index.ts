@@ -29,10 +29,13 @@ import { resolvePwshPath } from './resolve.ts'
 /**
  * Model-friendly environment overrides for PowerShell: disable colors and
  * pagers that would garble tool output. `TERM=dumb` is a POSIX concept and is
- * deliberately absent; `NO_COLOR` is honored by modern pwsh renderers.
+ * deliberately absent; `NO_COLOR` is honored by modern pwsh renderers, and
+ * `FORCE_COLOR: '0'` cancels an inherited `FORCE_COLOR` that Node children
+ * would otherwise rank above `NO_COLOR`.
  */
 export const ENV_OVERRIDES = {
   NO_COLOR: '1',
+  FORCE_COLOR: '0',
   PAGER: 'cat',
   GIT_PAGER: 'cat',
 } as const

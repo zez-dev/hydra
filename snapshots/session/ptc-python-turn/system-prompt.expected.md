@@ -322,22 +322,6 @@ class MemoryArgs(TypedDict):
     id: NotRequired[str]
     # Additional keys beyond those declared are allowed.
 
-class OffPeakArgs(TypedDict):
-    # queue (park a task) | list (what is queued)
-    action: Literal["queue", "list"]
-    # What to do when the window opens; required for `queue`.
-    task: NotRequired[str]
-    # Additional keys beyond those declared are allowed.
-
-class OffPeakOutputEntries(TypedDict):
-    id: str
-    state: str
-    task: str
-
-class OffPeakOutput(TypedDict):
-    open: bool
-    entries: list[OffPeakOutputEntries]
-
 class ReadArgs(TypedDict):
     # Path to read, resolved by the filesystem backend.
     file_path: str
@@ -624,8 +608,6 @@ class Tools(Protocol):
         """List your continuable background subagents by durable id and label. Use it to recall which ones you started, not to poll for completion — you are told when one finishes. Status comes from the live registry: running means the agent is working right now, idle means it is loaded but between turns (it may be waiting on agents it started), and ready means it exists only in storage — resumable, not terminal, and not a result waiting to be collected; a `send_message` steers a running child at its nearest step boundary or starts a turn for an idle or ready child, and a direct child remains a `send_message` candidate in every status. The snapshot is not a delivery promise — `send_message` performs the authoritative check and may still fail. Children that could not be read are reported as diagnostics instead of being silently dropped. Scope `descendants` walks the whole tree below you in stable pre-order, annotating each entry with its durable direct-parent session id and depth. You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only."""
     async def memory(self, args: MemoryArgs) -> Any:
         """Long-term memory across sessions. `remember` stores a durable fact, shortcut, or preference, or a lesson (a root cause found, an approach that failed and why, a corrected assumption) the user would want later work to know; `search` finds stored entries; `forget` deletes one by id. Entries related to the current work appear in <retrieved_memory>; use one only when its situation matches. Write each entry so it names its situation (the file, command, or component). Never remember plans or progress reports."""
-    async def off_peak(self, args: OffPeakArgs) -> OffPeakOutput:
-        """Park non-urgent work for the next off-peak window, or list what is already queued. Use `queue` when a task is worth doing but not now; the session resumes it when the window opens."""
     async def read(self, args: ReadArgs) -> ReadOutput:
         """Read a UTF-8 text file and return line-numbered content."""
     async def read_image(self, args: ReadImageArgs) -> ReadImageOutput:

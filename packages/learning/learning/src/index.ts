@@ -252,7 +252,7 @@ async function extractTurn(
   }
   const candidates = await requestCandidates(ctx, config, session, route, {
     system: EXTRACTION_SYSTEM_PROMPT,
-    prompt: `Extract reusable knowledge from this turn transcript:\n${transcript.text}`,
+    prompt: `Review this turn transcript:\n${transcript.text}`,
     log: { turn },
     signal,
     deadlineFor,

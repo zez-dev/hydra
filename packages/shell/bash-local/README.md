@@ -52,7 +52,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Running commands
 
-Run a command with `run` and read its output from the result. A nonzero exit, a timeout, or a cancellation resolves with a descriptive result — only infrastructure failures reject. Per-call `timeoutMs` overrides are capped by the configuration, while `workdir` falls back to the configured default when unset; a trusted foreground caller can also raise the stdout capture budget for one call, while stderr and background runs keep `maxOutputBytes`. The environment is model-friendly by default: `NO_COLOR=1 TERM=dumb PAGER=cat GIT_PAGER=cat` keep pagers and ANSI colors from garbling output, and an explicit caller-provided entry still wins.
+Run a command with `run` and read its output from the result. A nonzero exit, a timeout, or a cancellation resolves with a descriptive result — only infrastructure failures reject. Per-call `timeoutMs` overrides are capped by the configuration, while `workdir` falls back to the configured default when unset; a trusted foreground caller can also raise the stdout capture budget for one call, while stderr and background runs keep `maxOutputBytes`. The environment is model-friendly by default: `NO_COLOR=1 FORCE_COLOR=0 TERM=dumb PAGER=cat GIT_PAGER=cat` keep pagers and ANSI colors from garbling output (`FORCE_COLOR=0` cancels one inherited from the launching shell, which Node tools would otherwise rank above `NO_COLOR`), and an explicit caller-provided entry still wins.
 
 ```text
 const result = await ctx.shell.run(ctx.shell.resolve({ command: 'ls -la' }))

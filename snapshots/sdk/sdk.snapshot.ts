@@ -152,7 +152,6 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
       journal: ['action'],
       knowledge_add: ['path'],
       memory: ['action'],
-      off_peak: ['action'],
       run_experiment: ['title', 'command'],
       str_replace_editor: ['command', 'path'],
       usage: [],
