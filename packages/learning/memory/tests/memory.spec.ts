@@ -18,7 +18,7 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import * as Memory from '@deepseek-ai/dsh-memory'
 import * as MemoryTools from '@deepseek-ai/dsh-memory/tools'
 import { createMessage } from '@deepseek-ai/dsh-llm'
-import { digestRecall, isRecallMessage, rankEntries, renderRecall, workspaceTag } from '@deepseek-ai/dsh-memory'
+import { digestRecall, isRecallMessage, rankEntries, recalledIds, renderRecall, workspaceTag } from '@deepseek-ai/dsh-memory'
 import type { MemoryEntry } from '@deepseek-ai/dsh-memory'
 
 let root: string | undefined
@@ -170,6 +170,15 @@ describe('recall rendering', () => {
     expect(text).not.toContain('entry number 49')
   })
 
+  it('reads back the ids of the entries a rendered block carries', () => {
+    const text = renderRecall([
+      { id: 'a1b2c3d4' as never, text: 'one (with a parenthesis)', kind: 'fact', tags: ['x'], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 },
+      { id: 'e5f6a7b8' as never, text: 'two', kind: 'preference', tags: [], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 },
+    ], 6000)
+    expect(recalledIds(text)).toEqual(['a1b2c3d4', 'e5f6a7b8'])
+    expect(recalledIds('no block here')).toEqual([])
+  })
+
   it('identifies recall messages by their plugin source form and digests their text', () => {
     const message = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' } })
     expect(isRecallMessage(message)).toBe(true)
@@ -220,14 +229,41 @@ describe('recall injection on agent/pre-step', () => {
     expect(recalledText(await preStep(ctx, agent, [ask('Write a haiku about autumn.')]))).toBeUndefined()
   })
 
-  it('carries approved preferences with every request', async () => {
+  it('carries approved preferences into the first block in view, and not again while it stays in view', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
     await seed(ctx)
     await ctx.memory.add({ text: 'answer in short paragraphs', kind: 'preference', tags: [] }, 'approved')
-    const text = recalledText(await preStep(ctx, agent, [ask('Write a haiku about autumn.')]))
+    const first = await preStep(ctx, agent, [ask('Write a haiku about autumn.')])
+    const text = recalledText(first)
     expect(text).toContain('short paragraphs')
     expect(text).not.toContain('vitest')
+    agent.session.append('user/message', (first.kind === 'enter' ? first.messages : []).find(isRecallMessage)!, { surfaceOp: 'append' })
+    expect(recalledText(await preStep(ctx, agent, [ask('Write another haiku about winter.')]))).toBeUndefined()
+  })
+
+  it('sends only notes not already in view, with the rules stated once per view', async () => {
+    const ctx = await setup()
+    const agent = await fakeAgent(ctx)
+    await seed(ctx)
+    const first = await preStep(ctx, agent, [ask('How do I run the tests, and how do deployments reach staging?')])
+    const firstText = recalledText(first)
+    expect(firstText).toContain('vitest')
+    expect(firstText).toContain('docker compose')
+    expect(firstText).toContain('Use a note only when its situation matches the current one')
+    agent.session.append('user/message', (first.kind === 'enter' ? first.messages : []).find(isRecallMessage)!, { surfaceOp: 'append' })
+    // Every related note is already in view, so nothing is sent again.
+    expect(recalledText(await preStep(ctx, agent, [ask('How do deployments reach staging?')]))).toBeUndefined()
+    // A newly related note comes alone, pointing at the rules already in view.
+    const second = await preStep(ctx, agent, [ask('Where is the bash workspace?')])
+    const later = recalledText(second)
+    expect(later).toContain('/home/user/dsh-work')
+    expect(later).not.toContain('vitest')
+    expect(later).not.toContain('Use a note only when its situation matches the current one')
+    expect(later).toContain('the rules of the earlier <retrieved_memory> block apply')
+    // Notes from every block in view count, not only the newest block's.
+    agent.session.append('user/message', (second.kind === 'enter' ? second.messages : []).find(isRecallMessage)!, { surfaceOp: 'append' })
+    expect(recalledText(await preStep(ctx, agent, [ask('Run the tests from the bash workspace before deployments reach staging')]))).toBeUndefined()
   })
 
   it('tells the model to use a note only in the same situation, to check a matching one before acting, and to keep the request as asked', async () => {

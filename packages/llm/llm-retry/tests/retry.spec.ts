@@ -260,6 +260,28 @@ describe('provider-routed retry policy', () => {
     })
   })
 
+  it.each([
+    ['the default normal policy', undefined, 2],
+    ['an always policy', alwaysConfig(), 2],
+    ['a policy that never retries an empty answer', normalConfig({ emptyResponseRetries: 0 }), 1],
+  ] as const)('stops asking again once %s has retried an empty answer emptyResponseRetries times', async (_name, policy, attempts) => {
+    vi.useFakeTimers()
+    const adapter = new ScriptedAdapter([emptyCompletion(), emptyCompletion(), emptyCompletion(), emptyCompletion()])
+    ;({ ctx: context } = await harness(adapter, policy === undefined ? undefined : { mock: policy }))
+    const agent = await context.agentLoop.create(SessionId('retry-empty-twice'), { provider: 'mock', model: 'mock' })
+    const idle = waitForIdle(context, agent)
+    agent.followup(createUserMessage({ content: [{ type: 'text', text: 'go' }], source: { kind: 'user' } }))
+    await vi.advanceTimersByTimeAsync(60_000)
+    await idle
+    // The same request answered with no content again is a finished or broken turn, not an outage.
+    expect(adapter.requests).toHaveLength(attempts)
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'llm/retry')).toHaveLength(attempts - 1)
+    expect(agent.session.snapshotEvents().at(-1)).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: { code: EMPTY_RESPONSE_CODE } } },
+    })
+  })
+
   it('leaves partial failed chunks on their step without committing a message or tool side effect', async () => {
     vi.useFakeTimers()
     const adapter = new ScriptedAdapter([

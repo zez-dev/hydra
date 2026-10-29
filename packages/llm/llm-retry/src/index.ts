@@ -10,6 +10,7 @@ import type { Context, Events } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { z as zod } from 'zod'
 import type { Agent, RequestErrorAction } from '@deepseek-ai/dsh-agent'
+import { EMPTY_RESPONSE_CODE } from '@deepseek-ai/dsh-llm'
 import type { LlmFailure, ResolvedRetryPolicy } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { RetryId } from './brand.ts'
@@ -220,6 +221,12 @@ export function apply(ctx: Context, config: Config = {}, internals: RetryInterna
     const retryState = ctx.sessionProjections.stateOf(agent.session, 'llmRetry') as LlmRetryState
     const previous = retryState[retryStateKey(provider, policyKey)]
     const previousRetry = previous?.retry ?? 0
+    // The same request answered with no content again is a finished or broken
+    // turn, not an outage: asking once more only repeats the answer. An always
+    // policy has already let the downstream decide above.
+    if (failure.code === EMPTY_RESPONSE_CODE && previousRetry >= policy.emptyResponseRetries) {
+      return policy.mode === 'normal' ? next() : undefined
+    }
     if (policy.mode === 'normal' && previousRetry >= policy.maxRetries) return next()
     const retry = previousRetry + 1
     const retryId = previous?.retryId ?? RetryId(randomUUID())

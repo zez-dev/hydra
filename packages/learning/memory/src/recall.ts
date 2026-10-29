@@ -6,6 +6,7 @@
  */
 
 import { createHash } from 'node:crypto'
+import { brandString } from '@deepseek-ai/dsh-brand'
 import { createPluginRecallMessage, isPluginRecallMessage, messageText } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { MemoryEntry, MemoryEntryId } from './types.ts'
@@ -23,7 +24,16 @@ const HEAD = [
     + ' What you observe now takes precedence over any note; when the evidence shows a note is wrong or outdated, say so and correct or remove it with the `memory` tool.',
   '',
 ].join('\n')
+/** Head of a block added while an earlier block, and the rules it states, is still in view. */
+const MORE_HEAD = [
+  '<retrieved_memory>',
+  'More notes from earlier work, retrieved for the latest request; the rules of the earlier <retrieved_memory> block apply.',
+  '',
+].join('\n')
 const TAIL = '\n</retrieved_memory>'
+
+/** One rendered entry line; {@link recalledIds} reads the id back from it. */
+const ENTRY_LINE = /^- \([a-z]+, id ([^)\s]+)\)/gmu
 
 /**
  * Render recalled entries into one block, dropping trailing entries once the
@@ -46,13 +56,16 @@ export interface RenderedRecall {
  * Like {@link renderRecall}, also reporting which entries made it into the block.
  * @param entries - the entries to show, in order.
  * @param maxBytes - byte cap on the complete block.
+ * @param continued - whether an earlier block, and the rules it states, is still in view; the block
+ *   then opens with a one-line pointer to those rules instead of repeating them.
  * @returns the block text and the included ids; both empty when nothing fits.
  */
-export function renderRecallDetailed(entries: readonly MemoryEntry[], maxBytes: number): RenderedRecall {
+export function renderRecallDetailed(entries: readonly MemoryEntry[], maxBytes: number, continued = false): RenderedRecall {
   if (entries.length === 0) return { text: '', ids: [] }
+  const head = continued ? MORE_HEAD : HEAD
   const lines: string[] = []
   const ids: MemoryEntryId[] = []
-  let bytes = Buffer.byteLength(HEAD) + Buffer.byteLength(TAIL)
+  let bytes = Buffer.byteLength(head) + Buffer.byteLength(TAIL)
   for (const entry of entries) {
     const shown = visibleTags(entry.tags)
     const tags = shown.length === 0 ? '' : ` [${shown.join(', ')}]`
@@ -64,7 +77,16 @@ export function renderRecallDetailed(entries: readonly MemoryEntry[], maxBytes: 
     ids.push(entry.id)
   }
   if (lines.length === 0) return { text: '', ids: [] }
-  return { text: `${HEAD}${lines.join('\n')}${TAIL}`, ids }
+  return { text: `${head}${lines.join('\n')}${TAIL}`, ids }
+}
+
+/**
+ * The ids of the entries a rendered block carries, in block order.
+ * @param text - a block from {@link renderRecallDetailed}.
+ * @returns the ids its entry lines name; empty for text without entry lines.
+ */
+export function recalledIds(text: string): MemoryEntryId[] {
+  return Array.from(text.matchAll(ENTRY_LINE), match => brandString<MemoryEntryId>(String(match[1])))
 }
 
 /**

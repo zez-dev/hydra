@@ -40,7 +40,7 @@ Mount it after the storage stack (`dsh-storage`, a backend, `dsh-storage-domain`
 |---|---|---|
 | `maxRecallBytes` | required | UTF-8 byte cap on the recalled block; trailing entries are dropped |
 | `recallLimit` | `5` | The most entries retrieved for one request by relevance to its text |
-| `alwaysRecallKinds` | `['preference']` | Entry kinds recalled with every request whatever its text, ahead of the retrieved entries |
+| `alwaysRecallKinds` | `['preference']` | Entry kinds recalled whatever the request's text, ahead of the retrieved entries, while no recall block in view carries them |
 | `recallMinMatchedTerms` | `2` | Distinct words of the current work a retrieved entry must share (capped at the work's own word count) |
 | `recallNoteCoverage` | `0.3` | Fraction of an entry's own words that, once matched, retrieves it with fewer shared words: a short note about the word stays, a long note that mentions it in passing does not |
 | `recallScoreFloor` | `0.5` | Fraction of the best retrieved entry's score below which an entry is left out |
@@ -76,7 +76,7 @@ When `staleAfterDays` or `archiveAfterDays` is set, the curator runs at activati
 | [`src/rank.ts`](src/rank.ts) | Full-text relevance ranking (MiniSearch, fuzzy and prefix matching) shared by retrieval and `search` |
 | [`src/types.ts`](src/types.ts) | Entry, status, kind, and `MemoryStore` types |
 
-Recall runs on `agent/pre-step` after the loop's own decision. A step that admits a message from any source but a plugin's (the user, a goal round, a webhook) ranks entries against that message's text; any other step recalls only while no recall block is on the model-visible surface, as after a compaction condensed it, and ranks against the latest user request and the latest reply on the surface. Ranking is full-text matching over each entry's text and visible tags; a match must share `recallMinMatchedTerms` words with the work or cover `recallNoteCoverage` of the entry's own words, and score within `recallScoreFloor` of the best match; an entry tagged with the session's workspace scores double and one tagged with another workspace scores half. The top `recallLimit` matches follow every entry of an `alwaysRecallKinds` kind; the block is rendered and digested, and an equal digest to the recall in view adds nothing (and drops a stale pending recall), a different one appends a new recall message or replaces a pending one. The workspace tag (`workspace:<directory>`, from `workspaceTag`) is added by the `memory` tool and by `dsh-learning`; it is never matched and never shown in the block, `/memory`, or tool results. The message carries `source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' }`, so the loop logs it as an ordinary `user/message` and replay reconstructs it.
+Recall runs on `agent/pre-step` after the loop's own decision. A step that admits a message from any source but a plugin's (the user, a goal round, a webhook) ranks entries against that message's text; any other step recalls only while no recall block is on the model-visible surface, as after a compaction condensed it, and ranks against the latest user request and the latest reply on the surface. Ranking is full-text matching over each entry's text and visible tags; a match must share `recallMinMatchedTerms` words with the work or cover `recallNoteCoverage` of the entry's own words, and score within `recallScoreFloor` of the best match; an entry tagged with the session's workspace scores double and one tagged with another workspace scores half. The top `recallLimit` matches follow every entry of an `alwaysRecallKinds` kind, and every entry a recall block in view already carries is dropped: it is still before the model. When nothing remains, the step adds nothing (and drops a stale pending recall); otherwise the remaining entries are rendered, the block appends a new recall message or replaces a pending one with a different digest. Only a block added while no recall block is in view opens with the rules for using notes; a later block opens with a one-line pointer to them. The workspace tag (`workspace:<directory>`, from `workspaceTag`) is added by the `memory` tool and by `dsh-learning`; it is never matched and never shown in the block, `/memory`, or tool results. The message carries `source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' }`, so the loop logs it as an ordinary `user/message` and replay reconstructs it.
 
 No invariant companion is published because entries have one writer, the storage domain the plugin opens, and the recall message is an ordinary logged `user/message` that replay reconstructs without a second source.
 
@@ -89,7 +89,7 @@ No invariant companion is published because entries have one writer, the storage
 
 #### What the model sees
 
-One user-role message whose text is the `<retrieved_memory>` block: the fixed header below, then one line per retrieved entry in the form `- (<kind>, id <id>) [tags] <text>` (workspace tags omitted).
+One user-role message whose text is the `<retrieved_memory>` block: the fixed header below, then one line per retrieved entry in the form `- (<kind>, id <id>) [tags] <text>` (workspace tags omitted). A block added while an earlier one is still in view opens instead with `More notes from earlier work, retrieved for the latest request; the rules of the earlier <retrieved_memory> block apply.`
 
 ##### Verbatim header
 
@@ -99,11 +99,11 @@ Notes from earlier work, retrieved because they share words with the current tas
 
 #### Token effect
 
-Conditional: present on a step that starts work and relates to at least one approved entry (or when a preference is approved), and on the first step after the block left the surface; bounded by `recallLimit` entries and `maxRecallBytes`, and not re-sent while an identical block is visible.
+Conditional: present on a step that starts work and relates to at least one approved entry that no block in view carries (or when an approved preference is not in view), and on the first step after the blocks left the surface; bounded by `recallLimit` entries and `maxRecallBytes`. Each entry and the header are sent once per view: until a compaction condenses the blocks, a later block carries only new entries under the one-line head.
 
 #### KV Cache effect
 
-Append-only: a request that retrieves a different set appends a new recall message after the existing history; earlier request prefixes stay reusable.
+Append-only: a request that retrieves entries not yet in view appends a new recall message after the existing history; earlier request prefixes stay reusable.
 
 ### `memory` tool schema
 

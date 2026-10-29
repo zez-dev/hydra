@@ -1,9 +1,10 @@
 /**
  * Recall rendering: the `<research_journal>` block the model sees on every
- * step of a research session, its digest, and the message identity test the
- * pre-step listener uses to add, keep, or replace exactly one recall message.
- * Re-injecting the digest each step is what makes the journal survive
- * compaction: a compacted history still starts from the current breakthroughs.
+ * step of a research session that starts work or has no block in view, its
+ * digest, and the message identity test the pre-step listener uses to add,
+ * keep, or replace exactly one recall message. Re-injecting the digest once no
+ * block is in view is what makes the journal survive compaction: a compacted
+ * history still starts from the current breakthroughs.
  * @module
  */
 

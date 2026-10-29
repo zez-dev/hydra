@@ -267,6 +267,7 @@ describe('request-level dynamic profiles', () => {
     })
     expect(ctx.llm.providerRetryPolicy('openai')).toEqual({
       mode: 'always',
+      emptyResponseRetries: 1,
       initialDelayMs: 25,
       maxDelayMs: 100,
       jitterRatio: 0.2,

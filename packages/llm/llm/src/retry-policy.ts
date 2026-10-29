@@ -13,6 +13,12 @@ import { EMPTY_RESPONSE_CODE } from './error.ts'
 
 /** Twelve retries under the default backoff wait out about eighty-five seconds of provider trouble before a step fails. */
 const DEFAULT_MAX_RETRIES = 12
+/**
+ * One retry recovers a provider's transient empty completion; a second empty
+ * answer to the same request means the model ended its turn or the route is
+ * broken, and asking again only repeats the answer.
+ */
+const DEFAULT_EMPTY_RESPONSE_RETRIES = 1
 const DEFAULT_INITIAL_DELAY_MS = 500
 const DEFAULT_MAX_DELAY_MS = 10_000
 const DEFAULT_JITTER_RATIO = 0.1
@@ -52,14 +58,24 @@ export interface NormalRetryPolicyConfig {
   maxRetries?: number
   /** Stable failure codes eligible for this policy. */
   retryableCodes?: string[]
+  /**
+   * Retries a step may spend before an `EMPTY_RESPONSE` failure ends it (default 1):
+   * an empty answer is asked again only while the step's retry chain is shorter than this.
+   */
+  emptyResponseRetries?: number
   /** Local exponential-backoff and jitter configuration. */
   backoff?: BackoffConfig
 }
 
 /** Unbounded retry behavior for every model-request failure on one provider route. */
 export interface AlwaysRetryPolicyConfig {
-  /** Retry every model-request failure until success, cancellation, or disposal. */
+  /** Retry every model-request failure until success, cancellation, or disposal, except a repeated empty answer. */
   mode: 'always'
+  /**
+   * Retries a step may spend before an `EMPTY_RESPONSE` failure ends it (default 1):
+   * an empty answer is asked again only while the step's retry chain is shorter than this.
+   */
+  emptyResponseRetries?: number
   /** Local exponential-backoff and jitter configuration. */
   backoff?: BackoffConfig
 }
@@ -81,11 +97,15 @@ export interface ResolvedNormalRetryPolicy extends ResolvedRetryBackoff {
   readonly mode: 'normal'
   readonly maxRetries: number
   readonly retryableCodes: readonly string[]
+  /** Retries a step may spend before an empty answer ends it. */
+  readonly emptyResponseRetries: number
 }
 
 /** Fully resolved unbounded retry policy. */
 export interface ResolvedAlwaysRetryPolicy extends ResolvedRetryBackoff {
   readonly mode: 'always'
+  /** Retries a step may spend before an empty answer ends it. */
+  readonly emptyResponseRetries: number
 }
 
 /** Immutable provider policy captured when its adapter route is registered. */
@@ -102,11 +122,13 @@ const normalPolicySchema: z<NormalRetryPolicyConfig> = z.object({
   mode: z.const('normal').required(),
   maxRetries: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_RETRIES),
   retryableCodes: z.array(z.string()).default([...DEFAULT_RETRYABLE_CODES]),
+  emptyResponseRetries: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_EMPTY_RESPONSE_RETRIES),
   backoff: backoffSchema,
 })
 
 const alwaysPolicySchema: z<AlwaysRetryPolicyConfig> = z.object({
   mode: z.const('always').required(),
+  emptyResponseRetries: z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_EMPTY_RESPONSE_RETRIES),
   backoff: backoffSchema,
 })
 
@@ -117,12 +139,12 @@ export const RetryPolicySchema: z<RetryPolicyConfig> = z.union([
 ])
 
 const NORMAL_POLICY_KEYS: ReadonlySet<string> = new Set([
-  'mode', 'maxRetries', 'retryableCodes', 'backoff',
+  'mode', 'maxRetries', 'retryableCodes', 'emptyResponseRetries', 'backoff',
 ])
 // Layered configuration can retain normal-only fields after switching modes;
 // always mode ignores those inactive values while still rejecting unknown keys.
 const ALWAYS_POLICY_KEYS: ReadonlySet<string> = new Set([
-  'mode', 'maxRetries', 'retryableCodes', 'backoff',
+  'mode', 'maxRetries', 'retryableCodes', 'emptyResponseRetries', 'backoff',
 ])
 const BACKOFF_KEYS: ReadonlySet<string> = new Set(['initialDelayMs', 'maxDelayMs', 'jitterRatio', 'maxProviderDelayMs'])
 
@@ -130,6 +152,14 @@ function validateKeys(value: object, allowed: ReadonlySet<string>, path: string)
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) throw new Error(`${path}: unknown key "${key}"`)
   }
+}
+
+function resolveEmptyResponseRetries(value: number | undefined, path: string): number {
+  const retries = value ?? DEFAULT_EMPTY_RESPONSE_RETRIES
+  if (!Number.isSafeInteger(retries) || retries < 0) {
+    throw new Error(`${path}.emptyResponseRetries must be a non-negative safe integer`)
+  }
+  return retries
 }
 
 function resolveBackoff(config: BackoffConfig | undefined, path: string): ResolvedRetryBackoff {
@@ -173,6 +203,7 @@ export function resolveRetryPolicy(
       mode: 'normal',
       maxRetries: DEFAULT_MAX_RETRIES,
       retryableCodes: DEFAULT_RETRYABLE_CODES,
+      emptyResponseRetries: DEFAULT_EMPTY_RESPONSE_RETRIES,
       ...resolveBackoff(undefined, `${path}.backoff`),
     })
   }
@@ -198,6 +229,7 @@ export function resolveRetryPolicy(
         mode: 'normal',
         maxRetries,
         retryableCodes: Object.freeze([...retryableCodes]),
+        emptyResponseRetries: resolveEmptyResponseRetries(config.emptyResponseRetries, path),
         ...resolveBackoff(config.backoff, `${path}.backoff`),
       })
     }
@@ -205,6 +237,7 @@ export function resolveRetryPolicy(
       validateKeys(config, ALWAYS_POLICY_KEYS, path)
       return Object.freeze({
         mode: 'always',
+        emptyResponseRetries: resolveEmptyResponseRetries(config.emptyResponseRetries, path),
         ...resolveBackoff(config.backoff, `${path}.backoff`),
       })
     default:
