@@ -39,8 +39,11 @@ class ScriptedAdapter extends LlmAdapter {
 /** An adapter that never answers and, like a real one, fails with the abort reason once cancelled. */
 class HangingAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
+  /** Resolves when the first request arrives, so a test can act while it is in flight. */
+  readonly requested = Promise.withResolvers<undefined>()
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
+    this.requested.resolve(undefined)
     await new Promise<never>((_, reject) => {
       options.signal?.addEventListener('abort', () => { reject(options.signal?.reason as Error) }, { once: true })
     })
@@ -214,8 +217,19 @@ async function withJobs(ctx: Context): Promise<void> {
   await ctx.plugin({ inject: ['jobs'], apply(pluginCtx: Context) { pluginCtx.jobs.attachController('test-controller') } })
 }
 
-async function settled(): Promise<void> {
-  for (let index = 0; index < 20; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+/**
+ * Resolve once the owner's next job settles, as the registry reports it. The
+ * registry commits the terminal status before it emits `settled`, and
+ * observing the event, unlike `ctx.jobs.wait`, never marks the job awaited.
+ */
+function nextJobSettlement(ctx: Context, owner: SessionId): Promise<undefined> {
+  const settled = Promise.withResolvers<undefined>()
+  const stop = ctx.jobs.events.subscribe({ owner }, (event) => {
+    if (event.type !== 'settled') return
+    stop()
+    settled.resolve(undefined)
+  })
+  return settled.promise
 }
 
 describe('research mode', () => {
@@ -230,7 +244,7 @@ describe('research mode', () => {
     } as never)
     const { agent, session } = await liveAgent(ctx)
     recordTurn(session, 1, 2)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(adapter.requests[0]?.system).toBe(RESEARCH_SYSTEM_PROMPT)
     expect(recorded).toEqual([
@@ -259,7 +273,7 @@ describe('research mode', () => {
       return task(new AbortController().signal)
     }
     recordTurn(session, 1, 1)
-    for (let index = 0; index < 60; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
   })
 })
@@ -312,7 +326,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 1)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(0)
     expect(ctx.memory.list()).toHaveLength(0)
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
@@ -324,7 +338,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx, 'project-agent', '/work/alpha')
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     const system = adapter.requests[0]?.system ?? ''
     expect(system).toContain('an approach that failed and why')
     expect(system).toContain('name its situation')
@@ -345,7 +359,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { fileAs: 'approved' })
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(ctx.memory.list({ status: 'candidate' })).toHaveLength(0)
     expect(ctx.memory.list({ status: 'approved' }).map(entry => entry.text)).toEqual(['Echo prints its arguments.'])
     const reviews = session.snapshotEvents().filter(event => event.type === 'session/learning-review')
@@ -357,7 +371,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { reviewTurns: false })
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(0)
     expect(ctx.memory.list()).toHaveLength(0)
     expect(session.snapshotEvents().filter(event => event.type === 'session/learning-request')).toHaveLength(0)
@@ -368,7 +382,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(adapter.requests[0]).toMatchObject({ provider: 'mock', model: 'mock', purpose: 'learning-extract', sessionId: session.id })
     const candidates = ctx.memory.list({ status: 'candidate' })
@@ -389,7 +403,7 @@ describe('extraction on turn/end', () => {
     // oxlint-disable-next-line prefer-promise-reject-errors -- mirrors the loop's cancel reason
     agent.runMaintenance = () => Promise.reject({ kind: 'disposed' })
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(0)
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
@@ -404,7 +418,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(ctx.memory.list()).toHaveLength(0)
     const reviews = session.snapshotEvents().filter(event => event.type === 'session/learning-review')
     expect(reviews.map(event => event.data)).toEqual([
@@ -417,7 +431,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     const reviews = session.snapshotEvents().filter(event => event.type === 'session/learning-review')
     expect(reviews.map(event => event.data)).toEqual([
       { turn: 1, outcome: { kind: 'failed', code: 'UNKNOWN', message: 'learning: extraction model unexpectedly requested a tool' } },
@@ -429,7 +443,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { timeoutMs: 20 })
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(ctx.memory.list()).toHaveLength(0)
     const reviews = session.snapshotEvents().filter(event => event.type === 'session/learning-review')
@@ -445,8 +459,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { timeoutMs: 30 })
     const { session } = await liveAgent(ctx)
     await recordSlowTurn(session, 1, 120)
-    for (let index = 0; index < 100 && adapter.requests.length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
-    await new Promise(resolve => setTimeout(resolve, 400))
+    await ctx.learning.settled(session.id)
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
     expect(session.snapshotEvents().filter(event => event.type === 'session/learning-review').map(event => event.data))
       .toEqual([{ turn: 1, outcome: { kind: 'candidates', count: 1 } }])
@@ -460,13 +473,15 @@ describe('extraction on turn/end', () => {
     agent.whenIdle = () => new Promise(() => {})
     agent.runMaintenance = () => Promise.reject(new Error('maintenance must not be used when jobs are composed'))
     const settlements: [string, boolean][] = []
+    const jobSettled = Promise.withResolvers<undefined>()
     ctx.jobs.events.subscribe({ owner: agent.session.id }, (event) => {
-      if (event.type === 'settled') settlements.push([event.job.kind, event.awaited])
+      if (event.type !== 'settled') return
+      settlements.push([event.job.kind, event.awaited])
+      jobSettled.resolve(undefined)
     })
     recordTurn(session, 1, 3)
-    for (let index = 0; index < 200 && ctx.memory.list().length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+    await jobSettled.promise
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
-    await settled()
     const jobs = ctx.jobs.list(agent.session.id)
     expect(jobs.map(job => [job.kind, job.status, job.owner]))
       .toEqual([['learning-review', 'completed', agent.session.id]])
@@ -480,7 +495,7 @@ describe('extraction on turn/end', () => {
     await withJobs(ctx)
     const { agent, session } = await liveAgent(ctx)
     recordTurn(session, 1, 1)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(ctx.jobs.list(agent.session.id)).toEqual([])
     expect(adapter.requests).toHaveLength(0)
   })
@@ -519,7 +534,7 @@ describe('extraction on turn/end', () => {
       parentSession: SessionId('parent-agent'), origin: 'subagent', delegationDepth: 1,
     })
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(ctx.jobs.list(agent.session.id)).toEqual([])
     expect(adapter.requests).toHaveLength(0)
     expect(ctx.memory.list()).toHaveLength(0)
@@ -531,7 +546,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx, 'fork-agent', undefined, { parentSession: SessionId('source-agent') })
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
   })
@@ -541,7 +556,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['minimal'])
     const requests = session.snapshotEvents().filter(event => event.type === 'session/learning-request')
     expect(requests.map(event => event.data.reasoningEffort)).toEqual(['minimal'])
@@ -552,10 +567,10 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
     recordTurn(session, 2, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['off', undefined, undefined])
     const requests = session.snapshotEvents().filter(event => event.type === 'session/learning-request')
     expect(requests.map(event => event.data.reasoningEffort)).toEqual(['off', undefined, undefined])
@@ -566,7 +581,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     const reviews = session.snapshotEvents().flatMap(event => event.type === 'session/learning-review' ? [event.data] : [])
     expect(reviews).toEqual([{
       turn: 1,
@@ -574,7 +589,7 @@ describe('extraction on turn/end', () => {
     }])
     // The default effort did not help, so the next review still asks the lowest first.
     recordTurn(session, 2, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['off', undefined, 'off', undefined])
   })
 
@@ -583,7 +598,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(adapter.requests[0]).not.toHaveProperty('reasoningEffort')
     const requests = session.snapshotEvents().filter(event => event.type === 'session/learning-request')
@@ -598,8 +613,7 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { timeoutMs: 30, reviewTimeoutFactor: 1 })
     const { session } = await liveAgent(ctx)
     await recordSlowTurn(session, 1, 100, 100)
-    for (let index = 0; index < 100 && adapter.requests.length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
-    await new Promise(resolve => setTimeout(resolve, 600))
+    await ctx.learning.settled(session.id)
     expect(session.snapshotEvents().filter(event => event.type === 'session/learning-review').map(event => event.data))
       .toEqual([{ turn: 1, outcome: { kind: 'candidates', count: 1 } }])
   })
@@ -610,10 +624,11 @@ describe('extraction on turn/end', () => {
     await withJobs(ctx)
     const { agent, session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    for (let index = 0; index < 200 && adapter.requests.length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+    await adapter.requested.promise
     expect(adapter.requests).toHaveLength(1)
+    const yielded = nextJobSettlement(ctx, agent.session.id)
     session.append('turn/start', { turn: 2 })
-    await settled()
+    await yielded
     expect(ctx.jobs.list(agent.session.id).map(job => [job.status, job.detail])).toEqual([['killed', 'review yielded to the next turn']])
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
@@ -626,7 +641,7 @@ describe('extraction on turn/end', () => {
     recordTurn(session, 1, 3)
     // A queued message starts the next turn in the same tick the previous one ended.
     session.append('turn/start', { turn: 2 })
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(0)
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
@@ -637,10 +652,11 @@ describe('extraction on turn/end', () => {
     await withJobs(ctx)
     const { agent, session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    for (let index = 0; index < 200 && adapter.requests.length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
+    await adapter.requested.promise
     expect(adapter.requests).toHaveLength(1)
+    const cancelled = nextJobSettlement(ctx, agent.session.id)
     await ctx.parallel('agent/disposed', { agent })
-    await settled()
+    await cancelled
     expect(ctx.jobs.list(agent.session.id).map(job => job.status)).toEqual(['killed'])
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
@@ -651,12 +667,12 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter, { maxOutputTokens: 512 })
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests.map(request => request.maxTokens)).toEqual([512, 2048, 8192])
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
     expect(session.snapshotEvents().filter(event => event.type === 'session/learning-request').map(event => event.data.maxTokens)).toEqual([512, 2048, 8192])
     recordTurn(session, 2, 3)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests.map(request => request.maxTokens)).toEqual([512, 2048, 8192, 8192])
   })
 
@@ -665,9 +681,9 @@ describe('extraction on turn/end', () => {
     const ctx = await setup(adapter)
     const { session } = await liveAgent(ctx)
     recordTurn(session, 1, 2)
-    await settled()
+    await ctx.learning.settled(session.id)
     session.append('turn/end', { turn: 1, reason: 'completed' } as never)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(ctx.memory.list()).toHaveLength(0)
   })
@@ -678,7 +694,7 @@ describe('extraction on turn/end', () => {
     const { session } = await liveAgent(ctx)
     session.append('request/header', { reason: 'initial', header: { config: { provider: 'mock', model: 'mock' } } } as never)
     recordTurn(session, 1, 2)
-    await settled()
+    await ctx.learning.settled(session.id)
     expect(adapter.requests).toHaveLength(1)
     expect(ctx.memory.list({ status: 'candidate' }).map(entry => entry.text)).toEqual(['routed'])
   })
