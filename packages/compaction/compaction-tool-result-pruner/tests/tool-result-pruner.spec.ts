@@ -128,7 +128,7 @@ describe('tool-result pruning configuration', () => {
   })
 
   it('names the removed amount and, for a span the model has not read, how to see it', () => {
-    expect(pruneMarker(25, true)).toBe('\n\n[... 25 characters cut from the middle to save context ...]\n\n')
+    expect(pruneMarker(25, true)).toBe('\n\n[... 25 characters cut from the middle to save context; you read them in full earlier ...]\n\n')
     expect(pruneMarker(25, false)).toBe('\n\n[... 25 characters cut from the middle before you read them; '
       + 'repeat the call with a narrower range to see them ...]\n\n')
   })

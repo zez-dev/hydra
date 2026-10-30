@@ -113,7 +113,7 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-一旦满足压缩触发条件，后续请求看到的将是保留的头部、一个标记和保留的尾部，而非被移除的文本。对于模型已读过的结果，标记为 `\n\n[... N characters cut from the middle to save context ...]\n\n`；对于尚未读过的结果，标记为 `\n\n[... N characters cut from the middle before you read them; repeat the call with a narrower range to see them ...]\n\n`，其中 `N` 为删去的码点数。富内容块保持原有顺序。模型不会看到原文的第二份副本。
+一旦满足压缩触发条件，后续请求看到的将是保留的头部、一个标记和保留的尾部，而非被移除的文本。对于模型已读过的结果，标记为 `\n\n[... N characters cut from the middle to save context; you read them in full earlier ...]\n\n`；对于尚未读过的结果，标记为 `\n\n[... N characters cut from the middle before you read them; repeat the call with a narrower range to see them ...]\n\n`，其中 `N` 为删去的码点数。富内容块保持原有顺序。模型不会看到原文的第二份副本。
 
 #### Token 影响
 
