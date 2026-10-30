@@ -90,7 +90,9 @@ export function withContinuableReturnGuidance(
         + `send_message({ agent_id: ${encodedParentId}, message: "<self-contained result>" }). The parent shares `
         + 'your workspace but does not automatically receive your transcript, tool output, or reasoning. Send '
         + 'earlier messages as well when a finding changes what the parent should do next; sending a message '
-        + 'does not end your turn.',
+        + 'does not end your turn. If your closing text follows your last message to the parent with no tool '
+        + 'call or new input in between, the parent does not receive it, so end with one short line saying you sent '
+        + 'the result, without repeating or summarizing it.',
     },
   ]
 }

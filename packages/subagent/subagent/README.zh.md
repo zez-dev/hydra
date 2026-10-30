@@ -68,6 +68,10 @@ kind: "package-reference"
 
 每个确切在线 Agent 都可以对直接可继续 child 使用 `sendMessage()`；驻留的可继续 child 还可以对自己的直接 parent 使用它。正在工作的目标通过 Steer 在最近 step 接收 Agent 消息；空闲目标启动轮次，且只有直接 child 可以冷恢复。parent 也可以随时中断正在运行的后代或列举自己的子级。浏览器发出的继续执行 prompt 会独立选择 Queue 或 Steer，并且可以携带图片部分：Host 先通过附件存储完成整批图片的准入与持久化，子级 inbox 才接受这条消息；当子级声明的模型不接受图片输入时拒绝投递。 直接子级发现读取 parent 自有的 `subagentCatalog` projection。`listChildren(parentSessionId, signal?)` 持有一次优先实时来源的 Session 观察，异步返回目录，不读取子级日志。它转发取消信号，并在物化后释放观察。物化以 O(D) 时间保留 D 条事实的父日志事件顺序。外部条目是叶节点，不需要观察子 Session。后代发现按父事件顺序递归读取子级目录，每个可达 Session 观察一次。无法读取目录的分支会被跳过，并返回诊断；两条路径都不加载或恢复子级 Agent。
 
+### 在可继续子级上运行斜杠命令
+
+浏览器通过 `subagents.commands(parentSessionId, childSessionId)` 与 `subagents.command(parentSessionId, childSessionId, line)` 在可继续子级的会话中运行斜杠命令，二者使用与 `subagents.prompt` 相同的父级地址；普通的 `commands` Remote 会拒绝所有子级会话（`session/agent-busy`）。父级必须在线并拥有该子级。驻留子级就地运行命令；冷子级会在其投递锁下为该命令物化，命令结束后若未给它留下工作即被释放，因此对已完成的子级执行 `/compact` 会压缩其日志而不启动轮次。命令自身的生命周期（`command/run`、`command/done`）及其效果写入子级日志。子级中的命令不接受附件，一次性子级则完全不接受命令。
+
 ### 失败与恢复
 
 缺少 `agents` 服务时，启动请求以 `CONTINUATION_UNAVAILABLE` 拒绝；运行时可用但父级缺失或被替换时，以 `UNAUTHORIZED` 拒绝。未实现任何执行方法的提供方会在注册时以 `UNSUPPORTED_CAPABILITY` 被拒绝；请求不受支持的能力会以同一码使创建失败。调用方信号仅取消尚未发布的工作；发布后通过 `dispose()` 取消该次 activation，并等待其后代（包括正在启动的后代）及其资源清理完成。`result` 在清理与通知结束后完成，携带输出、可选结构化数据与停止原因；结果捕获故障在清理后使其拒绝。清理失败使 `dispose()` 拒绝，并将生命周期结束事件标记为失败；结果 promise 与父级通知保留已捕获的执行结果。
@@ -159,6 +163,26 @@ kind: "package-reference"
 
 <a id="model-experience"></a>
 ## 模型体验
+
+### 子级返回指引
+
+#### 模型看到什么
+
+父级投递时，若子级的 `send_message` 工具是相邻 Agent 消息工具，管理器会把下方文本块追加到子级的初始任务中。`"<parent-id>"` 代表编码为 JSON 字符串的父级会话 ID；`<self-contained result>` 是字面文本。最后一句陈述结算通知的省略规则。
+
+##### 返回指引
+
+```markdown
+Your parent agent id is "<parent-id>". Before you finish, send your result to that agent with send_message({ agent_id: "<parent-id>", message: "<self-contained result>" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. If your closing text follows your last message to the parent with no tool call or new input in between, the parent does not receive it, so end with one short line saying you sent the result, without repeating or summarizing it.
+```
+
+#### Token 影响
+
+每个此类子级的初始任务中一个文本块；父级请求中没有任何新增。子级在结果消息之后只以一行简短文字收尾时，不会为父级永远收不到的结果副本花费输出 token。
+
+#### KV Cache 影响
+
+子级内部前缀稳定：该文本块在子级生命周期内绝不变化，因此只写入子级初始任务一次。父级侧没有影响：父级请求从不携带它。
 
 ### 结算通知
 

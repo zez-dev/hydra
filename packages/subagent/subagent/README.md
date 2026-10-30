@@ -164,6 +164,26 @@ Read these pages when the package-level contract is not enough. They move from t
 <a id="model-experience"></a>
 ## Model Experience
 
+### Child return guidance
+
+#### What the model sees
+
+Under parent delivery, when the child's `send_message` tool is the adjacent-Agent messaging tool, the manager appends the block below to the child's initial task. `"<parent-id>"` stands for the parent session id encoded as a JSON string; `<self-contained result>` is literal text. The last sentence states the omission rule of the settlement notice.
+
+##### Return guidance
+
+```markdown
+Your parent agent id is "<parent-id>". Before you finish, send your result to that agent with send_message({ agent_id: "<parent-id>", message: "<self-contained result>" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. If your closing text follows your last message to the parent with no tool call or new input in between, the parent does not receive it, so end with one short line saying you sent the result, without repeating or summarizing it.
+```
+
+#### Token effect
+
+One block in each such child's initial task; the parent's requests carry none. A child that ends with one short line after its result message spends no output tokens on a copy of the result that the parent never receives.
+
+#### KV Cache effect
+
+Prefix-stable within a child: the block never changes during the child's lifetime, so it is written once into the child's initial task. Parent-side, no effect: the parent's requests never carry it.
+
 ### Settlement notice
 
 #### What the model sees

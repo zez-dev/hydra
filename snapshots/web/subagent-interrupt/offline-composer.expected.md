@@ -10,11 +10,12 @@
     - tab "Chat" [selected]
     - tab "Trajectory"
   - button "More conversation views"
-- text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
+- text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. If your closing text follows your last message to the parent with no tool call or new input in between, the parent does not receive it, so end with one short line saying you sent the result, without repeating or summarizing it. {{clock}}"
 - button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - paragraph: partial
-- status: Deep diving
-- text: Deep diving for {{duration}} ···
+- status: The dragon is thinking…
+- text: The dragon is thinking for {{duration}} ···
 - list:
   - listitem:
     - text: Keep working until I stop you again.

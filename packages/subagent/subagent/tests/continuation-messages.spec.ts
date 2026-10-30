@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ToolCallId, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { createSettlementMessage } from '../src/continuation-messages.ts'
+import { createSettlementMessage, withContinuableReturnGuidance } from '../src/continuation-messages.ts'
 
 const childId = SessionId('settled-child')
 const summary = { type: 'text', text: `Background subagent ${childId} finished and will do no further work unless you send it more.` }
@@ -77,5 +77,23 @@ it('omits the closing text after the child messaged its parent, keeping structur
     { type: 'text', text: 'It sent you a message just before finishing, so its closing message is omitted.' },
     { type: 'text', text: 'Structured result: {"answer":42}' },
     { type: 'text', text: 'safe diagnostic' },
+  ])
+})
+
+it('appends return guidance naming the parent after the task blocks', () => {
+  const task: ContentBlock[] = [{ type: 'text', text: 'Review the diff.' }]
+
+  expect(withContinuableReturnGuidance(SessionId('parent-session'), task)).toEqual([
+    ...task,
+    {
+      type: 'text',
+      text: 'Your parent agent id is "parent-session". Before you finish, send your result to that agent with '
+        + 'send_message({ agent_id: "parent-session", message: "<self-contained result>" }). The parent shares '
+        + 'your workspace but does not automatically receive your transcript, tool output, or reasoning. Send '
+        + 'earlier messages as well when a finding changes what the parent should do next; sending a message '
+        + 'does not end your turn. If your closing text follows your last message to the parent with no tool '
+        + 'call or new input in between, the parent does not receive it, so end with one short line saying you sent '
+        + 'the result, without repeating or summarizing it.',
+    },
   ])
 })
