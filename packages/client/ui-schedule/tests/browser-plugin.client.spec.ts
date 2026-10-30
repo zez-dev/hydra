@@ -23,6 +23,7 @@ import { ScheduleTaskTab, type ScheduleTaskBindingInjected, type ScheduleTaskCat
 import { ScheduleTaskTabTitle } from '../src/client/ScheduleTaskTabTitle.tsx'
 import type { TaskManagerInjected } from '../src/client/TaskManagerPage.tsx'
 import { ScheduleCatalogAction } from '../src/client/ScheduleCatalogAction.tsx'
+import { SendLaterAction, type SendLaterInjected } from '../src/client/SendLaterAction.tsx'
 import { SessionScheduleHover } from '../src/client/SessionScheduleHover.tsx'
 import { SessionScheduleMark } from '../src/client/SessionScheduleMark.tsx'
 import { ScheduleTurnCard, type ScheduleTurnCardInjected } from '../src/client/ScheduleTurnCard.tsx'
@@ -381,6 +382,36 @@ describe('ui-schedule browser half', () => {
       )
     } finally {
       await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('creates Send later tasks in the composer Session and opens them beside it', async () => {
+    const sessionId = 'composer-session' as SessionId
+    const id = 'sent-later' as ScheduleId
+    const create = vi.fn().mockResolvedValue({ ok: true, value: { id } })
+    const sidebar = sidebarStubs()
+    const ctx = await baseContext({ schedule: { create }, $on: () => () => {} }, sidebar)
+    const seat = ctx.slots.register({
+      name: 'root',
+      children: { 'conversation.input.right': { kind: 'list', scope: 'session' } },
+    } as never, Empty)
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    try {
+      const entry = ctx.slots.entries('conversation.input.right')[0]!
+      expect(entry.component).toBe(SendLaterAction)
+      expect(entry.options).toMatchObject({ id: 'schedule-send-later', order: 0 })
+      const face = injectedFace(entry, sessionId as never) as SendLaterInjected
+      const request = { prompt: 'Ship it', title: 'Ship it', after_seconds: 18_000 }
+      expect(await face.createTask(request)).toEqual({ ok: true, value: { id } })
+      expect(create).toHaveBeenCalledExactlyOnceWith({ ...request, sessionId })
+      face.openTaskDetail(id)
+      expect(sidebar.openTab).toHaveBeenCalledExactlyOnceWith(SCHEDULE_TASK_KIND, { params: { sessionId, id } })
+    } finally {
+      await fiber.dispose()
+      expect(ctx.slots.entries('conversation.input.right')).toEqual([])
+      seat()
       await ctx.fiber.dispose()
     }
   })

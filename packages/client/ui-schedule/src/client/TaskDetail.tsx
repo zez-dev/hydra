@@ -24,7 +24,9 @@ import type { CatalogDeleteOutcome, CatalogSnapshot } from './catalog-source.ts'
 import { draftZone, secondPrecision, slashDate, timingDraft, timingError, timingSnapshot, zonedWallClock } from './task-timing.ts'
 import type { TaskTimingInjected, TimingDraft } from './task-timing.ts'
 import { useRelativeClock } from './relative-clock.ts'
-import { formatScheduleFrequency, nextRunParts, recordTimeZone, zoneChoices, zoneLabel, zoneName } from './schedule-format.ts'
+import {
+  TITLE_MAX_LENGTH, formatScheduleFrequency, nextRunParts, recordTimeZone, zoneChoices, zoneLabel, zoneName,
+} from './schedule-format.ts'
 import type { FrequencyZone } from './schedule-format.ts'
 import { cronPreview, cronShapeExpression, parseCronExpression, recognizeCronShape } from './task-cron.ts'
 import type { CronBuilderState } from './task-cron.ts'
@@ -1093,12 +1095,6 @@ function ruleChange(
 }
 
 /**
- * Longest task name the Host accepts. The browser-safe Schedule entry exports
- * types only, so the client repeats the limit its local validation uses.
- */
-const RULE_TITLE_MAX_LENGTH = 120
-
-/**
  * Whether a staged one-shot date is a real ISO calendar date.
  *
  * The control is a text field, so the value can be anything the reader types;
@@ -1120,7 +1116,7 @@ function validIsoDate(value: string): boolean {
  */
 function draftError(shown: RuleShown): TaskManagerKey | undefined {
   const title = shown.title.trim()
-  if (title.length === 0 || title.length > RULE_TITLE_MAX_LENGTH) return 'rule.invalidTitle'
+  if (title.length === 0 || title.length > TITLE_MAX_LENGTH) return 'rule.invalidTitle'
   if (shown.prompt.trim().length === 0) return 'rule.invalidPrompt'
   if (shown.kind === 'every') {
     return /^\d+$/.test(shown.draft.seconds) && Number(shown.draft.seconds) >= MIN_INTERVAL_SECONDS
@@ -1227,16 +1223,16 @@ function ruleError(code: Extract<ScheduleUpdateResult, { code: string }>['code']
 }
 
 /**
- * Close an open dropdown on Escape before the page's own Escape handler sees
- * the key, so dismissing a menu never closes the whole task detail. Stopping
- * the key's propagation withholds it from the menu's own document listener,
- * which the page's handler honors; this guard covers a dropdown whose listener
- * stands down before that.
+ * Close an open dropdown on Escape before the enclosing surface's own Escape
+ * handler sees the key, so dismissing a menu never closes the whole task
+ * detail or dialog. Stopping the key's propagation withholds it from the
+ * menu's own document listener, which the page's handler honors; this guard
+ * covers a dropdown whose listener stands down before that.
  * @param event - keydown from the wrapper around that menu.
  * @param open - whether this wrapper's menu is showing.
  * @param close - dismiss that menu and return focus to its trigger.
  */
-function guardMenuEscape(event: KeyboardEvent<HTMLElement>, open: boolean, close: () => void): void {
+export function guardMenuEscape(event: KeyboardEvent<HTMLElement>, open: boolean, close: () => void): void {
   if (event.key !== 'Escape') return
   if (!open) return
   event.stopPropagation()

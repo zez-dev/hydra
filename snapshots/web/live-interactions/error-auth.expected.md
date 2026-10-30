@@ -9,6 +9,7 @@
   - button "More conversation views"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - status: Failed
 - button "Failed" [disabled]
 - status:

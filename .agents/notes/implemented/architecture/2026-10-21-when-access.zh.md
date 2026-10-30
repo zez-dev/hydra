@@ -56,7 +56,7 @@ export interface WhenAccess {
 
 | 插件 | 改法 | action |
 |---|---|---|
-| ui-schedule | 任务列表数据源、删除提示浮层、右栏任务 tab 与标题、主面板、侧栏入口、turn 尾部卡片、会话头部提醒、会话行标记与悬浮列表包进 `remoteAccess.whenAccess`；会话头部提醒读取按会话判定的 `schedule.list`，组件另在会话作用域里用 `useAccess` 决定是否渲染；任务 tab 类型与 turn 定义的注册留在外面 | `schedule/catalog`、`schedule/list` |
+| ui-schedule | 任务列表数据源、删除提示浮层、右栏任务 tab 与标题、主面板、侧栏入口、turn 尾部卡片、会话头部提醒、会话行标记与悬浮列表包进 `remoteAccess.whenAccess`，输入框的「稍后发送」控件也在其中注册；会话头部提醒读取按会话判定的 `schedule.list`，「稍后发送」调用 `schedule.create`，各组件另在会话作用域里用 `useAccess` 决定是否渲染；任务 tab 类型与 turn 定义的注册留在外面 | `schedule/catalog`、`schedule/list`、`schedule/create` |
 | ui-plugin-manager | Host 变更订阅、刷新提示浮层、主面板（含 `pluginNavigation`）、侧栏入口包进 `remoteAccess.whenAccess`，每次授权时刷新已加载过的列表；controller 与 `pluginChanges` 留在外面，撤权期间 `pluginChanges` 不更新。依赖 `pluginNavigation` 的 ui-entry-customization 与 voice-input 改为可选使用：服务不在时隐藏「浏览插件」与「打开 / 查看详情」按钮，插件照常启动 | `pluginManager/listBundles` |
 | ui-settings-general | 设置外壳 `sidebar.settings` 与 `settings.open` 快捷键包进 `remoteAccess.whenAccess` | `settings/describe` |
 | ui-settings-account | 账号状态流（含默认模型初始化）、额度提醒、设置启动器、账号设置分区与 `settings.models.sign-in` 包进 `remoteAccess.whenAccess`。撤权时账号流的 disposer 同步作废这一轮发出的账号读取，关闭待授权的浏览器标签页，清空账号视图、详情、头像与登录对话框状态，结束本轮奖励提示（提示由该流的帧开始），再关闭流；撤权前已交付但尚未处理的帧被丢弃。提示控制器留在外面，下次授权时重新开始；账号分区等新流的第一帧到达后才出现 | `account/watch` |

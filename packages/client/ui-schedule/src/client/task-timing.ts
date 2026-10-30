@@ -65,8 +65,11 @@ export function timingSnapshot(record: ScheduleRecord): ScheduleRecord {
  */
 const FALLBACK_ZONE = 'UTC'
 
-/** IANA id the runtime reports for this device, or the explicit fallback. */
-function deviceZone(): string {
+/**
+ * IANA id the runtime reports for this device.
+ * @returns the device zone, or the explicit fallback when the runtime names none.
+ */
+export function deviceZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || FALLBACK_ZONE
 }
 

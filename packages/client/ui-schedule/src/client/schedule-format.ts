@@ -80,6 +80,13 @@ export function taskName(record: ScheduleRecord): string {
   return record.title
 }
 
+/**
+ * Longest task name the Host accepts, counted in UTF-16 code units. The
+ * browser-safe Schedule entry exports types only, so the client repeats the
+ * limit its local validation uses.
+ */
+export const TITLE_MAX_LENGTH = 120
+
 /** Localized clock text that omits fractional seconds and zero seconds. */
 function clockLabel(time: string): string {
   return time.replace(/\.\d+$/, '').replace(/:00$/, '')
@@ -97,8 +104,13 @@ export function formatWeekdays(weekdays: readonly number[], t: FrequencyTranslat
     .join(t('frequency.weekday.join'))
 }
 
-/** UTC offset, in minutes, of one IANA zone at the current instant. */
-function zoneOffset(zone: string, at: number): number | undefined {
+/**
+ * UTC offset of one IANA zone at one instant.
+ * @param zone - IANA zone.
+ * @param at - epoch milliseconds the offset applies at.
+ * @returns minutes east of UTC, or undefined when the runtime cannot resolve the zone.
+ */
+export function zoneOffset(zone: string, at: number): number | undefined {
   try {
     const value = new Intl.DateTimeFormat('en-US', {
       timeZone: zone, timeZoneName: 'longOffset',

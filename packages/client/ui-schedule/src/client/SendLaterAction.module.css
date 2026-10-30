@@ -1,0 +1,44 @@
+/* The trigger takes the composer toolbar's 28px icon-button geometry, as the
+   voice input trigger does; the span keeps the tooltip reachable while the
+   button is disabled. */
+.anchor {
+  display: inline-flex;
+  flex: none;
+}
+
+.trigger {
+  width: 28px;
+  padding: 0;
+  flex: none;
+}
+
+/* Wide enough for a preset name and its full target stamp on one line. */
+.menu {
+  min-width: 280px;
+}
+
+.preset {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.when {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The dialog is narrower than the task detail, so the zone name wraps instead of
+   truncating, at the Date and Time values' size and inset. */
+.zone {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 8px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  text-align: right;
+}

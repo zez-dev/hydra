@@ -20,6 +20,11 @@
  * stays with ui-tool's generic keyed tool view, so this package registers no
  * `tool.call.toolview` entry for the wire name.
  *
+ * The composer's `conversation.input.right` list seat carries Send later, which
+ * schedules the draft as a one-time task bound to the composer's Session
+ * through `schedule.create`; its confirmation opens the same right-Sidebar
+ * detail, where the task can be deleted before it is sent.
+ *
  * Two ambient surfaces read the ONE Host catalog the page owns: ui-workspace's
  * `sidebar.session.row.leading` seat marks an idle row whose Session has an
  * active task, and its `sidebar.session.row.hover` seat lists those tasks
@@ -48,6 +53,7 @@ import { createClearEnded } from './clear-ended.ts'
 import { createDeleteToastSource, ScheduleDeleteToast } from './DeleteToast.tsx'
 import { SCHEDULE_TASK_ID, SCHEDULE_TASK_KIND, scheduleTaskDefinition } from './definition.ts'
 import { ScheduleCatalogAction } from './ScheduleCatalogAction.tsx'
+import { SendLaterAction, type SendLaterInjected } from './SendLaterAction.tsx'
 import { ScheduleTurnCard, type ScheduleTurnCardInjected } from './ScheduleTurnCard.tsx'
 import { scheduleTurnDefinition } from './schedule-turn.ts'
 import { ScheduleTaskTab, type ScheduleTaskBindingInjected, type ScheduleTaskCatalogInjected, type ScheduleTaskTabInjected } from './ScheduleTaskTab.tsx'
@@ -256,6 +262,20 @@ export function apply(ctx: ClientContext): void {
         },
       }, ScheduleCatalogAction),
     )
+    // The composer's Send later control creates its task in the composer's own
+    // Session, and its confirmation opens the detail the header entry opens.
+    yield ctx.slots.inject('conversation.input.right', () => ctx.slots.register({
+      name: 'conversation.input.right',
+      id: 'schedule-send-later',
+      order: 0,
+      locale: MANAGER_NS,
+      inject: (sessionId: SessionId): SendLaterInjected => ({
+        createTask: request => ctx.remote.schedule.create({ ...request, sessionId }),
+        openTaskDetail: (id) => {
+          ctx.sidebarRight.openTab(SCHEDULE_TASK_KIND, { params: { sessionId, id } })
+        },
+      }),
+    }, SendLaterAction))
     yield ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
       name: 'sidebar.session.row.leading',
       id: 'schedule-mark',

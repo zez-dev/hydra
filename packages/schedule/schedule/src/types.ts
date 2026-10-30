@@ -398,6 +398,15 @@ export interface ScheduleListRequest {
   sessionId: SessionId
 }
 
+/** Remote creation request: the Session the reminder is bound to, plus the creation selector. */
+export interface ScheduleCreateTaskRequest extends ScheduleListRequest, ScheduleCreateRequest {}
+
+/** Stable input error a Remote creation returns instead of a stored record. */
+export type ScheduleCreateError = Exclude<ScheduleToolError, InternalScheduleError>
+
+/** Remote creation outcome: the stored record, or the input error that kept it from being stored. */
+export type ScheduleCreateResult = ScheduleRecord | ScheduleCreateError
+
 /** Delete request identifying a task within its original Session binding. */
 export interface ScheduleDeleteRequest extends ScheduleListRequest {
   /** Task to remove. */

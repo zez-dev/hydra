@@ -1,0 +1,13 @@
+- menu:
+  - text: Send later
+  - menuitem "In 5 hours {{target:1}}":
+    - text: In 5 hours
+    - time: {{target:1}}
+  - menuitem "Tomorrow {{target:2}}":
+    - text: Tomorrow
+    - time: {{target:2}}
+  - menuitem "In 2 days {{target:3}}":
+    - text: In 2 days
+    - time: {{target:3}}
+  - separator
+  - menuitem "Custom date and time…"

@@ -449,6 +449,21 @@
     },
     {
       "doc": "docs/subsystems/schedule.md",
+      "symbol": "ScheduleCreateTaskRequest",
+      "source": "packages/schedule/schedule/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/schedule.md",
+      "symbol": "ScheduleCreateError",
+      "source": "packages/schedule/schedule/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/schedule.md",
+      "symbol": "ScheduleCreateResult",
+      "source": "packages/schedule/schedule/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/schedule.md",
       "symbol": "ScheduleDeleteResult",
       "source": "packages/schedule/schedule/src/types.ts"
     },

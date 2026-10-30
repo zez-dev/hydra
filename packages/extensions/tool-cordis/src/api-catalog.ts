@@ -3227,6 +3227,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'The durably stored schedule. Cancellation does not roll back an in-flight write.',
       },
       {
+        signature: '@Remote(\'create\') async remoteExportCreate(request: ScheduleCreateTaskRequest, signal?: AbortSignal): Promise<ScheduleCreateResult>',
+        description: 'Create one reminder through the Remote boundary, bound to the Session the request names.\n\nCreation follows ScheduleService.create. An input failure it reports as `ScheduleInputError` returns as a value, so a browser caller can localize it by `code`; storage and lifecycle failures reject.',
+        parameters: [{ name: 'request', description: 'Session binding, required title, prompt, and exactly one selector.' }, { name: 'signal', description: 'Optional cancellation checked before persistence begins, including after FIFO waits.' }],
+        returns: 'The durably stored record, or the stable input error. Cancellation does not roll back an in-flight write.',
+      },
+      {
         signature: '@Remote(\'list\') async list(request: ScheduleListRequest): Promise<ScheduleRecord[]>',
         description: 'Read the selected Session\'s active tasks without resuming its Agent.',
         parameters: [{ name: 'request', description: 'Session whose task list is requested.' }],
@@ -9208,8 +9214,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type ScheduleCatalogEntry = ScheduleRecord & {\n    readonly sessionId: SessionId;\n    readonly status: \'active\' | \'inactive\';\n    readonly lastDelivery?: ScheduleDeliveryReceipt;\n};',
   },
   {
+    name: 'ScheduleCreateError',
+    declaration: 'export type ScheduleCreateError = Exclude<ScheduleToolError, InternalScheduleError>;',
+  },
+  {
     name: 'ScheduleCreateRequest',
     declaration: 'export interface ScheduleCreateRequest {\n    prompt: string;\n    title: string;\n    after_seconds?: number;\n    at?: AtInput;\n    every_seconds?: number;\n    daily?: DailyInput;\n    weekly?: WeeklyInput;\n    cron?: CronInput;\n}',
+  },
+  {
+    name: 'ScheduleCreateResult',
+    declaration: 'export type ScheduleCreateResult = ScheduleRecord | ScheduleCreateError;',
+  },
+  {
+    name: 'ScheduleCreateTaskRequest',
+    declaration: 'export interface ScheduleCreateTaskRequest extends ScheduleListRequest, ScheduleCreateRequest {\n}',
   },
   {
     name: 'ScheduleDeleteInactiveResult',

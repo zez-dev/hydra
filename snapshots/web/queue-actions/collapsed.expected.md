@@ -9,9 +9,10 @@
   - button "More conversation views"
 - text: Reply with a one-sentence description of event sourcing, then stop. {{clock}}
 - button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - paragraph: partial
-- status: Deep diving
-- text: Deep diving for {{duration}} ···
+- status: The dragon is thinking…
+- text: The dragon is thinking for {{duration}} ···
 - button "2 queued messages"
 - textbox "Cmd/Ctrl+Enter steers all queued messages"
 - button "Add files or run commands"

@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { DailyScheduleRecord, ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule'
+import type { AfterScheduleRecord, DailyScheduleRecord, ScheduleCatalogEntry } from '@deepseek-ai/dsh-schedule'
 import { expect, it } from 'vitest'
 import { withDefaultWeb, webGet, webRequest } from './default-web-process.ts'
 
@@ -93,6 +93,24 @@ it('edits a retained task through built Remote bindings and preserves its identi
     } })).toEqual({ ok: true, value: { id, updated: false, record: updated } })
     expect(await readFile(taskPath(root), 'utf8')).toBe(persisted)
   }, { prepare: root => seed(root, persisted) })
+})
+
+it('creates a task through the built Remote binding and returns an input refusal as a value', async (test) => {
+  await withDefaultWeb(test, async ({ root, url }) => {
+    const rpc = await connect(url, test.signal)
+    const prompt = 'Summarize the open pull requests\nand list the blockers'
+    const created = await rpc('schedule/create', { request: {
+      sessionId, title: 'Summarize the open pull requests', prompt, after_seconds: 18_000,
+    } }) as { readonly ok: true; readonly value: AfterScheduleRecord }
+    expect(created).toMatchObject({
+      ok: true, value: { kind: 'after', title: 'Summarize the open pull requests', prompt, afterSeconds: 18_000 },
+    })
+    const stored = JSON.parse(await readFile(taskPath(root), 'utf8')) as { tables: { tasks: Record<string, object> } }
+    expect(stored.tables.tasks[created.value.id]).toMatchObject({ sessionId, record: created.value, status: 'active' })
+    expect(await rpc('schedule/create', { request: { sessionId, title: 'Late', prompt: 'Late', at: '2000-01-01T00:00:00Z' } }))
+      .toEqual({ ok: true, value: { code: 'not_future', message: 'The scheduled time must be strictly in the future.' } })
+    expect(Object.keys((JSON.parse(await readFile(taskPath(root), 'utf8')) as typeof stored).tables.tasks)).toEqual([created.value.id])
+  })
 })
 
 it('creates and idempotently adopts the explicit Session id bound to seeded task data without touching its task file', async (test) => {

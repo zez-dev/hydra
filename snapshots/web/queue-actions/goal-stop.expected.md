@@ -12,7 +12,7 @@
   - button "Jump to turn 2"
   - button "Jump to turn 3"
 - group "Command input": /goal Keep working after Stop
-- 'button "goal Goal created Status: active Objective: Keep working after Stop Rounds: 0/256 Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"'
+- 'button "goal Goal created Status: active Objective: Keep working after Stop Rounds: 0/unlimited Activation: armed Commands: /goal edit <objective>, /goal pause, /goal clear"'
 - button "Continuing goal {{clock}}":
   - text: Continuing goal
   - time: {{clock}}
@@ -26,6 +26,7 @@
 - button "Branch into a new conversation"
 - text: {{clock}} Queue item to remove {{clock}}
 - button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - status: Stopped
 - button "Stopped" [disabled]
 - paragraph: partial
@@ -36,6 +37,7 @@
 - button "Branch into a new conversation"
 - text: {{clock}} Wake the preserved queue {{clock}}
 - button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - status: Completed
 - button "Completed in {{duration}}"
 - paragraph: Event sourcing is a pattern where all changes to an application's state are stored as an immutable, append-only sequence of events, rather than persisting only the current state, enabling full auditability, temporal queries, and event-driven architectures.

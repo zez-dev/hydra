@@ -19,9 +19,10 @@ import {
   scheduleTitle,
 } from './domain.ts'
 import type {
-  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleDeleteInactiveResult,
-  ScheduleDeleteRequest, ScheduleDeleteResult, ScheduleDeliveryHistoryRequest, ScheduleDeliveryHistoryResult,
-  ScheduleListRequest, ScheduleRecord, ScheduleUpdateRequest, ScheduleUpdateResult, SubagentSessionError,
+  DeliveryRetentionBounds, ScheduleCatalogEntry, ScheduleCreateRequest, ScheduleCreateResult, ScheduleCreateTaskRequest,
+  ScheduleDeleteInactiveResult, ScheduleDeleteRequest, ScheduleDeleteResult, ScheduleDeliveryHistoryRequest,
+  ScheduleDeliveryHistoryResult, ScheduleListRequest, ScheduleRecord, ScheduleUpdateRequest, ScheduleUpdateResult,
+  SubagentSessionError,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -288,6 +289,27 @@ export class ScheduleService extends TypertRemoteService {
       this.runtime?.requestDrive()
       return record
     })
+  }
+
+  /**
+   * Create one reminder through the Remote boundary, bound to the Session the request names.
+   *
+   * Creation follows {@link ScheduleService.create}. An input failure it reports as
+   * `ScheduleInputError` returns as a value, so a browser caller can localize it by `code`;
+   * storage and lifecycle failures reject.
+   * @param request - Session binding, required title, prompt, and exactly one selector.
+   * @param signal - Optional cancellation checked before persistence begins, including after FIFO waits.
+   * @returns The durably stored record, or the stable input error. Cancellation does not roll back an in-flight write.
+   */
+  @Remote('create')
+  async remoteExportCreate(request: ScheduleCreateTaskRequest, signal?: AbortSignal): Promise<ScheduleCreateResult> {
+    const { sessionId, ...create } = request
+    try {
+      return await this.create(sessionId, create, signal)
+    } catch (error: unknown) {
+      if (error instanceof ScheduleInputError) return { code: error.code, message: error.message }
+      throw error
+    }
   }
 
   /**

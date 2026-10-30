@@ -262,7 +262,7 @@ type ScheduleView = ScheduleRecord & {
 }
 ```
 
-The [tool catalog](../tool-catalog.md#deepseek-aidsh-tool-schedule) owns schemas for `schedule_create`, `schedule_list`, `schedule_delete`, and `schedule_update`, which [`@deepseek-ai/dsh-tool-schedule`](../../packages/schedule/tool-schedule/README.md) contributes to each preset that mounts it; the Host service owns storage and delivery. Create, delete, and update acknowledge the storage-domain write. A Host-wide queue serializes these mutations against due delivery; deleting a task does not remove an already queued message. Model tools address the current Session, while the shared Host create, list, update, and delete methods accept an explicit Session binding. `create` and `update` refuse a Session a delegated child owns with `subagent_session` when its delegation depth is above zero, and delivery cannot reach such a Session. The four model tools refuse a delegated caller in the tool layer, while `list`, `catalog`, `history`, and `delete` still serve that Session. Creation requires a `title` that must be non-empty after trimming and at most 120 characters; a missing, blank, or over-long title is rejected with `invalid_prompt`, and creation never derives one from the instruction. Create and list views carry the stored `title` alongside the instruction, and a stored record whose `title` is missing or invalid is rejected at decode.
+The [tool catalog](../tool-catalog.md#deepseek-aidsh-tool-schedule) owns schemas for `schedule_create`, `schedule_list`, `schedule_delete`, and `schedule_update`, which [`@deepseek-ai/dsh-tool-schedule`](../../packages/schedule/tool-schedule/README.md) contributes to each preset that mounts it; the Host service owns storage and delivery. Create, delete, and update acknowledge the storage-domain write. A Host-wide queue serializes these mutations against due delivery; deleting a task does not remove an already queued message. Model tools address the current Session, while the shared Host create, list, update, and delete methods accept an explicit Session binding. The Remote `schedule.create` endpoint carries that binding inside a `ScheduleCreateTaskRequest` and returns an input refusal as a `ScheduleCreateError` value instead of rejecting, so a browser caller can localize it by `code`; storage failures reject. `create` and `update` refuse a Session a delegated child owns with `subagent_session` when its delegation depth is above zero, and delivery cannot reach such a Session. The four model tools refuse a delegated caller in the tool layer, while `list`, `catalog`, `history`, and `delete` still serve that Session. Creation requires a `title` that must be non-empty after trimming and at most 120 characters; a missing, blank, or over-long title is rejected with `invalid_prompt`, and creation never derives one from the instruction. Create and list views carry the stored `title` alongside the instruction, and a stored record whose `title` is missing or invalid is rejected at decode.
 
 ```ts type-equiv
 /** Reminder creation selector, shared by the model consumer and Host service. */
@@ -300,6 +300,21 @@ interface ScheduleDeleteRequest extends ScheduleListRequest {
   /** Task to remove. */
   id: ScheduleId
 }
+```
+
+```ts type-equiv
+/** Remote creation request: the Session the reminder is bound to, plus the creation selector. */
+interface ScheduleCreateTaskRequest extends ScheduleListRequest, ScheduleCreateRequest {}
+```
+
+```ts type-equiv
+/** Stable input error a Remote creation returns instead of a stored record. */
+type ScheduleCreateError = Exclude<ScheduleToolError, InternalScheduleError>
+```
+
+```ts type-equiv
+/** Remote creation outcome: the stored record, or the input error that kept it from being stored. */
+type ScheduleCreateResult = ScheduleRecord | ScheduleCreateError
 ```
 
 ```ts type-equiv
@@ -478,6 +493,18 @@ Shared management service; reads, deletion, and timing edits never activate a Se
  * @returns The durably stored schedule. Cancellation does not roll back an in-flight write.
  */
 async create(sessionId: SessionId, request: ScheduleCreateRequest, signal?: AbortSignal): Promise<ScheduleRecord>
+
+/**
+ * Create one reminder through the Remote boundary, bound to the Session the request names.
+ *
+ * Creation follows {@link ScheduleService.create}. An input failure it reports as
+ * `ScheduleInputError` returns as a value, so a browser caller can localize it by `code`;
+ * storage and lifecycle failures reject.
+ * @param request - Session binding, required title, prompt, and exactly one selector.
+ * @param signal - Optional cancellation checked before persistence begins, including after FIFO waits.
+ * @returns The durably stored record, or the stable input error. Cancellation does not roll back an in-flight write.
+ */
+@Remote('create') async remoteExportCreate(request: ScheduleCreateTaskRequest, signal?: AbortSignal): Promise<ScheduleCreateResult>
 
 /**
  * Read the selected Session's active tasks without resuming its Agent.

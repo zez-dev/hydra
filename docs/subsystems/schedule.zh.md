@@ -262,7 +262,7 @@ type ScheduleView = ScheduleRecord & {
 }
 ```
 
-[工具目录](../tool-catalog.zh.md#deepseek-aidsh-tool-schedule) 负责 `schedule_create`、`schedule_list`、`schedule_delete` 和 `schedule_update` 的 schema，这四个工具由 [`@deepseek-ai/dsh-tool-schedule`](../../packages/schedule/tool-schedule/README.zh.md) 在挂载它的每个 preset 中贡献；宿主服务拥有存储与投递。创建、删除和更新在 storage domain 写入确认后返回成功。宿主级队列将这些变更与到期投递串行化；删除任务不会移除已入队消息。模型工具操作当前 Session，共享宿主的 create、list、update 和 delete 方法接受显式 Session 绑定。`create` 与 `update` 在其委派深度大于零时以 `subagent_session` 拒绝被委派子 agent 拥有的 Session，且投递无法到达这样的 Session。四个模型工具在工具层拒绝被委派的调用方，而 `list`、`catalog`、`history` 与 `delete` 仍服务该 Session。创建必须提供 `title`，其去除首尾空白后必须非空且不超过 120 个字符；缺失、空白或过长的标题以 `invalid_prompt` 拒绝，且创建过程绝不从指令派生标题。create 和 list 视图在指令之外同时携带已存储的 `title`，且 `title` 缺失或非法的已存储记录在解码时被拒绝。
+[工具目录](../tool-catalog.zh.md#deepseek-aidsh-tool-schedule) 负责 `schedule_create`、`schedule_list`、`schedule_delete` 和 `schedule_update` 的 schema，这四个工具由 [`@deepseek-ai/dsh-tool-schedule`](../../packages/schedule/tool-schedule/README.zh.md) 在挂载它的每个 preset 中贡献；宿主服务拥有存储与投递。创建、删除和更新在 storage domain 写入确认后返回成功。宿主级队列将这些变更与到期投递串行化；删除任务不会移除已入队消息。模型工具操作当前 Session，共享宿主的 create、list、update 和 delete 方法接受显式 Session 绑定。Remote 端点 `schedule.create` 把该绑定放在 `ScheduleCreateTaskRequest` 中，并把输入拒绝作为 `ScheduleCreateError` 值返回而不是以拒绝结束，便于浏览器调用方按 `code` 本地化；存储失败仍以拒绝结束。`create` 与 `update` 在其委派深度大于零时以 `subagent_session` 拒绝被委派子 agent 拥有的 Session，且投递无法到达这样的 Session。四个模型工具在工具层拒绝被委派的调用方，而 `list`、`catalog`、`history` 与 `delete` 仍服务该 Session。创建必须提供 `title`，其去除首尾空白后必须非空且不超过 120 个字符；缺失、空白或过长的标题以 `invalid_prompt` 拒绝，且创建过程绝不从指令派生标题。create 和 list 视图在指令之外同时携带已存储的 `title`，且 `title` 缺失或非法的已存储记录在解码时被拒绝。
 
 ```ts type-equiv
 /** Reminder creation selector, shared by the model consumer and Host service. */
@@ -300,6 +300,21 @@ interface ScheduleDeleteRequest extends ScheduleListRequest {
   /** Task to remove. */
   id: ScheduleId
 }
+```
+
+```ts type-equiv
+/** Remote creation request: the Session the reminder is bound to, plus the creation selector. */
+interface ScheduleCreateTaskRequest extends ScheduleListRequest, ScheduleCreateRequest {}
+```
+
+```ts type-equiv
+/** Stable input error a Remote creation returns instead of a stored record. */
+type ScheduleCreateError = Exclude<ScheduleToolError, InternalScheduleError>
+```
+
+```ts type-equiv
+/** Remote creation outcome: the stored record, or the input error that kept it from being stored. */
+type ScheduleCreateResult = ScheduleRecord | ScheduleCreateError
 ```
 
 ```ts type-equiv
@@ -478,6 +493,18 @@ Shared management service; reads, deletion, and timing edits never activate a Se
  * @returns The durably stored schedule. Cancellation does not roll back an in-flight write.
  */
 async create(sessionId: SessionId, request: ScheduleCreateRequest, signal?: AbortSignal): Promise<ScheduleRecord>
+
+/**
+ * Create one reminder through the Remote boundary, bound to the Session the request names.
+ *
+ * Creation follows {@link ScheduleService.create}. An input failure it reports as
+ * `ScheduleInputError` returns as a value, so a browser caller can localize it by `code`;
+ * storage and lifecycle failures reject.
+ * @param request - Session binding, required title, prompt, and exactly one selector.
+ * @param signal - Optional cancellation checked before persistence begins, including after FIFO waits.
+ * @returns The durably stored record, or the stable input error. Cancellation does not roll back an in-flight write.
+ */
+@Remote('create') async remoteExportCreate(request: ScheduleCreateTaskRequest, signal?: AbortSignal): Promise<ScheduleCreateResult>
 
 /**
  * Read the selected Session's active tasks without resuming its Agent.
