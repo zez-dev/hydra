@@ -43,6 +43,18 @@ The script clones Hydra into `~/hydra` (or updates it), builds it, and prints th
 | Reports | `/digest` writes a daily report and `/digest week` a weekly review (`dsh-digest`). |
 | Optional, off by default | Off-peak scheduling (`dsh-off-peak`) and market data tools for research (`dsh-market-data`, `dsh-tool-market`). |
 
+## What Hydra leaves out
+
+Hydra's Web and desktop app ship these upstream features disabled, because they serve DeepSeek's own account and data collection:
+
+| Feature | Rows disabled |
+|---|---|
+| DeepSeek account sign-in and its credit display, and the desktop product analytics that needs the account | `llm-deepseek-account`, `account-controller`, `ui-settings-account`, `product-analytics` |
+| Like/Dislike and `/feedback`, whose submission also released a Session-log slice to DeepSeek's telemetry collector | `message-feedback`, `command-feedback`, `ui-message-feedback` |
+| Session-log upload with requests to the official DeepSeek API, and its Settings switch | `session-log-deepseek`, `ui-settings-session-log` |
+
+DeepSeek API keys still work through `llm-deepseek`. The CLI and SDK profiles keep these rows, and there the upload goes only with requests to DeepSeek's official API. A profile patch row with the row's `id` and `disabled: false` turns a feature back on.
+
 ## Developer preview
 
 DeepSeek Harness, and therefore Hydra, is in _developer preview_. **Expect compatibility-breaking changes.** Read the [safety notice](SAFETY.md) before running it: the agent runs commands and edits files in the folder you start it in.
