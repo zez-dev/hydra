@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Supervisor de metas",
+    "description": "Retoma na inicialização as sessões salvas com metas ativas, dentro de um limite de simultaneidade e de um orçamento diário de rodadas."
+  }
+}

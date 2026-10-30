@@ -114,7 +114,7 @@ export interface WeekSeries {
 }
 
 /** Everything the weekly review renders. */
-export interface WeeklyInput {
+export interface DigestWeeklyInput {
   /** ISO week label `YYYY-Www`. */
   readonly week: string
   /** First local date of the range. */
@@ -169,7 +169,7 @@ export interface DigestService {
    * @param at - the moment that defines the last day; defaults to now.
    * @returns the weekly review input.
    */
-  collectWeek(cwd: string, at?: Date): Promise<WeeklyInput>
+  collectWeek(cwd: string, at?: Date): Promise<DigestWeeklyInput>
   /**
    * Render and write the weekly review to `<cwd>/.dsh/reports/week-<YYYY-Www>.md`.
    * @param cwd - the workspace directory.

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Verificação do ambiente",
+    "description": "Verifica a pasta inicial, o espaço de trabalho, o sandbox, o git, os plugins e as credenciais desta instalação, com uma correção para cada problema."
+  }
+}

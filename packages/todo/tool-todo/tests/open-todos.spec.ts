@@ -195,7 +195,7 @@ describe('open tasks through the agent loop', () => {
     // Another plugin writes the list inside the open turn, so no model tool call carries it.
     ctx.on('agent/pre-step', async ({ agent: stepping }, next) => {
       const decision = await next()
-      if (stepping === agent && ctx.sessionProjections.stateOf(agent.session, 'todos') === null) {
+      if (stepping === agent && ctx.sessionProjections.snapshot(agent.session).values.todos === null) {
         agent.session.append('todo/write', { todos: [{ content: 'run the tests', status: 'pending' }] })
       }
       return decision
@@ -214,6 +214,6 @@ describe('open tasks through the agent loop', () => {
     await ctx.plugin(ToolTodo, { allowParallelInProgress: true })
     session.append('todo/write', { todos: [{ content: 'carried', status: 'pending' }] })
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
-    expect(ctx.sessionProjections.stateOf(session, 'todos')).toEqual([{ content: 'carried', status: 'pending' }])
+    expect(ctx.sessionProjections.snapshot(session).values.todos).toEqual([{ content: 'carried', status: 'pending' }])
   })
 })

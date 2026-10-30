@@ -1,4 +1,15 @@
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, Message } from '@deepseek-ai/dsh-llm'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The evaluation request this plugin sends beside the conversation. The kind
+     * is the name released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-goal-evaluator': { kind: 'plugin:dsh-goal-evaluator' } & ContextFormed
+  }
+}
 
 /** The evaluator's answer. */
 export interface GoalVerdict {

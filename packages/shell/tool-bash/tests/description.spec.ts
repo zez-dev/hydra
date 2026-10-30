@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -21,6 +23,7 @@ afterAll(() => {
 
 async function setup(config: ToolBash.Config = {}) {
   const ctx = new Context()
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(AgentRegistry)
@@ -40,14 +43,14 @@ describe('bash description parameter', () => {
   it('is required by default and a call without it is rejected', async () => {
     const ctx = await setup()
     expect(schemaOf(ctx).required).toContain('description')
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'bash', arguments: { command: 'echo hi' } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'bash', arguments: { command: 'echo hi' } })
     expect(result.isError).toBe(true)
   })
 
   it('becomes optional under requireDescription: false and the call runs without it', async () => {
     const ctx = await setup({ requireDescription: false })
     expect(schemaOf(ctx).required).not.toContain('description')
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'bash', arguments: { command: 'echo hi' } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'bash', arguments: { command: 'echo hi' } })
     expect(result.isError).toBe(false)
     expect(result.content.some(block => block.type === 'text' && block.text.includes('hi'))).toBe(true)
   })

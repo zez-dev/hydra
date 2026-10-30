@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Usage report",
+    "description": "Total the tokens spent across all sessions, by day and by model."
+  }
+}

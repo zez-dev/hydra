@@ -47,7 +47,7 @@ function continuations(agent: Agent): { text: string; turn: number }[] {
     if (event.type === 'turn/start') turn = event.data.turn
     if (event.type !== 'user/message') continue
     const source = event.data.source
-    if (source.kind !== 'plugin' || source.plugin !== 'dsh-auto-continue') continue
+    if (source.kind !== 'plugin:dsh-auto-continue') continue
     found.push({ text: event.data.content.map(block => block.type === 'text' ? block.text : '').join(''), turn })
   }
   return found
@@ -147,12 +147,41 @@ describe('auto-continue', () => {
   })
 
   it('keeps a choice made after a reasoning continuation instead of putting the old one back', async () => {
-    const { ctx, adapter, turn } = await chosenEffortSession('high')
+    const { adapter, agent, turn } = await chosenEffortSession('high')
     await turn('go')
-    // The newer choice reaches the chain inside auto-continue's listener, as a picker's selection does.
-    ctx.on('agent/request', async (_payload, next) => ({ ...await next(), reasoningEffort: ReasoningEffortId('low') }))
+    // A picker records the newer choice through the agent's model selection.
+    agent.model.select({ provider: 'mock', model: 'mock', reasoningEffort: ReasoningEffortId('low') })
     await turn('next')
     expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['high', 'minimal', 'low'])
+  })
+
+  it('keeps a choice made before the continuation runs instead of putting the old one back', async () => {
+    const { ctx, adapter, agent, turn } = await chosenEffortSession('high')
+    let choose = true
+    // Registered after the guard's listener, so the choice lands after the lowering and before the continuation step.
+    ctx.on('agent/turn-stopping', () => {
+      if (!choose) return
+      choose = false
+      agent.model.select({ provider: 'mock', model: 'mock', reasoningEffort: ReasoningEffortId('low') })
+    })
+    await turn('go')
+    await turn('next')
+    expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['high', 'low', 'low'])
+  })
+
+  it('puts the effort back when the turn is cancelled before its continuation runs', async () => {
+    const { ctx, adapter, agent, turn } = await chosenEffortSession('high', [maxTokensResponse('My'), textResponse('The next answer.')])
+    let cancel = true
+    // Registered after the guard's listener, so it cancels once the continuation is steered and its effort lowered.
+    ctx.on('agent/turn-stopping', () => {
+      if (!cancel) return
+      cancel = false
+      agent.cancel({ kind: 'user' })
+    })
+    await turn('go')
+    await turn('next')
+    expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['high', 'high'])
+    expect(continuations(agent)).toEqual([])
   })
 
   it('puts back the effort the first lowering replaced after two reasoning continuations in a row', async () => {

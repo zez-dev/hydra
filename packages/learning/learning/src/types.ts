@@ -1,5 +1,16 @@
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, Message } from '@deepseek-ai/dsh-llm'
 import type { MemoryEntryId, MemoryEntryKind } from '@deepseek-ai/dsh-memory'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The extraction request this plugin sends beside the conversation. The kind
+     * is the name released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-learning': { kind: 'plugin:dsh-learning' } & ContextFormed
+  }
+}
 
 /** One proposed memory entry parsed from the extraction model's answer. */
 export interface LearningCandidate {

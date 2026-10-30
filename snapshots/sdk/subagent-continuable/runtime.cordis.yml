@@ -1,0 +1,5 @@
+# This authored scenario's turn has enough tool calls for Hydra's learning
+# review, whose model request the script does not hold, so this scenario runs
+# without the learning plugin.
+- id: learning
+  disabled: true

@@ -7,13 +7,13 @@
 
 import { createHash } from 'node:crypto'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { createPluginRecallMessage, isPluginRecallMessage, messageText } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, messageText } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { MemoryEntry, MemoryEntryId } from './types.ts'
 import { visibleTags } from './workspace.ts'
 
-/** Plugin name recorded on every recall message source. */
-export const MEMORY_PLUGIN = 'dsh-memory'
+/** Source kind recorded on every recall message. */
+export const MEMORY_SOURCE_KIND = 'plugin:dsh-memory'
 
 const HEAD = [
   '<retrieved_memory>',
@@ -101,10 +101,10 @@ export function digestRecall(text: string): string {
 /**
  * Whether a message is this plugin's recall message.
  * @param message - any user-role message.
- * @returns true for a `dsh-memory` plugin source in `recall` form.
+ * @returns true for this plugin's source in `recall` form.
  */
 export function isRecallMessage(message: UserMessage): boolean {
-  return isPluginRecallMessage(message, MEMORY_PLUGIN)
+  return message.source.kind === MEMORY_SOURCE_KIND && message.source.form === 'recall'
 }
 
 /**
@@ -122,5 +122,5 @@ export function recallText(message: UserMessage): string {
  * @returns a user-role message sourced to this plugin in `recall` form.
  */
 export function createRecallMessage(text: string): UserMessage {
-  return createPluginRecallMessage(MEMORY_PLUGIN, text)
+  return createUserMessage({ content: [{ type: 'text', text }], source: { kind: MEMORY_SOURCE_KIND, form: 'recall' } })
 }

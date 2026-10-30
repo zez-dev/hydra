@@ -1,0 +1,5 @@
+# The scenario's model completes its goal with `update_goal`. Hydra's goal
+# evaluator would check that claim with a model request the authored script
+# does not hold, so this scenario runs without the evaluator.
+- id: goal-evaluator
+  disabled: true

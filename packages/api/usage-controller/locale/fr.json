@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "API d'utilisation",
+    "description": "Fournit au tableau de bord d'utilisation web le rapport de consommation de jetons de toutes les sessions."
+  }
+}

@@ -110,7 +110,7 @@ export async function evaluateGoal(
         'Is the objective achieved?',
       ].join('\n'),
     }],
-    source: { kind: 'plugin', plugin: 'dsh-goal-evaluator' },
+    source: { kind: 'plugin:dsh-goal-evaluator' },
   })]
   using callDeadline = deadline(signal, config.timeoutMs, GOAL_EVALUATION_TIMEOUT_CODE)
   const options: GenerateOptions = {

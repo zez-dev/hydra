@@ -12,12 +12,12 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SqliteSessionQueryEngine from '@deepseek-ai/dsh-session-query-sqlite'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService, { GoalId } from '@deepseek-ai/dsh-goal'
 import type { GoalChangeMeta, GoalRef } from '@deepseek-ai/dsh-goal'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { MockAdapter } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import * as Supervisor from '@deepseek-ai/dsh-goal-supervisor'
 import { activeGoalOf, localMidnight, planSupervision, roundsSince } from '@deepseek-ai/dsh-goal-supervisor'
@@ -53,9 +53,8 @@ function goalPause(objective: string, roundsStarted: number, time: number): Goal
   }
 }
 
-/** One stored goal round of goal `g1` revision 1 in its own turn, starting at `seq`. */
-function storedRound(seq: number, time: number, round: number): SessionEvent[] {
-  const turn = round + 1
+/** One stored goal round of goal `g1` revision 1 in its own turn `turn`, starting at `seq`. */
+function storedRound(seq: number, time: number, round: number, turn = round + 1): SessionEvent[] {
   return [
     { type: 'turn/start', seq: SessionSeq(seq), time, data: { turn } },
     {
@@ -83,10 +82,10 @@ function storedLog(objective: string, rounds = 0, time = Date.now(), phase: 'act
   return events
 }
 
-/** A stored log whose only goal round claims round 2, which the goal replay rules reject. */
+/** A stored log whose only goal round claims round 2 in turn 2: the session format reads it, the goal replay rules reject it. */
 function unreplayableLog(objective: string): SessionEvent[] {
   const events = storedLog(objective)
-  return [...events, ...storedRound(events.length, Date.now(), 2)]
+  return [...events, ...storedRound(events.length, Date.now(), 2, 2)]
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -543,7 +542,7 @@ describe('a goal log that stops replaying', () => {
 function stubAgent(ctx: Context, session: Session): Agent {
   const scope = ctx.plugin(() => {})
   return {
-    id: session.id, options: {}, session, inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
+    id: session.id, options: {}, session, model: unsupportedModel(), inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
     send: () => {}, followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
     whenIdle: () => Promise.resolve(),

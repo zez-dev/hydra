@@ -10,7 +10,7 @@ import SessionStore, { SessionId, type Session, type SessionEvent } from '@deeps
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
@@ -172,7 +172,7 @@ async function liveAgent(ctx: Context, id = 'learning-agent', cwd?: string): Pro
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), cwd === undefined ? undefined : { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -454,13 +454,30 @@ describe('extraction on turn/end', () => {
     const { agent, session } = await liveAgent(ctx)
     agent.whenIdle = () => new Promise(() => {})
     agent.runMaintenance = () => Promise.reject(new Error('maintenance must not be used when jobs are composed'))
+    const settlements: [string, boolean][] = []
+    ctx.jobs.events.subscribe({ owner: agent.session.id }, (event) => {
+      if (event.type === 'settled') settlements.push([event.job.kind, event.awaited])
+    })
     recordTurn(session, 1, 3)
     for (let index = 0; index < 200 && ctx.memory.list().length === 0; index += 1) await new Promise(resolve => setTimeout(resolve, 5))
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
     await settled()
-    const jobs = ctx.jobs.list(agent)
-    expect(jobs.map(job => [job.kind, job.status, job.ownerSession, job.reported]))
-      .toEqual([['learning-review', 'completed', agent.session.id, true]])
+    const jobs = ctx.jobs.list(agent.session.id)
+    expect(jobs.map(job => [job.kind, job.status, job.owner]))
+      .toEqual([['learning-review', 'completed', agent.session.id]])
+    // The plugin's own wait collected the settlement, so tool-jobs owes no completion notice.
+    expect(settlements).toEqual([['learning-review', true]])
+  })
+
+  it('starts no job for a turn below minToolCalls', async () => {
+    const adapter = new ScriptedAdapter(() => textChunks('[{"text":"never"}]'))
+    const ctx = await setup(adapter)
+    await withJobs(ctx)
+    const { agent, session } = await liveAgent(ctx)
+    recordTurn(session, 1, 1)
+    await settled()
+    expect(ctx.jobs.list(agent.session.id)).toEqual([])
+    expect(adapter.requests).toHaveLength(0)
   })
 
   it('asks a thinking route for its lowest reasoning effort so the cap goes to the answer', async () => {
@@ -541,7 +558,7 @@ describe('extraction on turn/end', () => {
     expect(adapter.requests).toHaveLength(1)
     session.append('turn/start', { turn: 2 })
     await settled()
-    expect(ctx.jobs.list(agent).map(job => [job.status, job.detail])).toEqual([['killed', 'review yielded to the next turn']])
+    expect(ctx.jobs.list(agent.session.id).map(job => [job.status, job.detail])).toEqual([['killed', 'review yielded to the next turn']])
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
 
@@ -568,7 +585,7 @@ describe('extraction on turn/end', () => {
     expect(adapter.requests).toHaveLength(1)
     await ctx.parallel('agent/disposed', { agent })
     await settled()
-    expect(ctx.jobs.list(agent).map(job => job.status)).toEqual(['killed'])
+    expect(ctx.jobs.list(agent.session.id).map(job => job.status)).toEqual(['killed'])
     expect(session.snapshotEvents().some(event => event.type === 'session/learning-review')).toBe(false)
   })
 

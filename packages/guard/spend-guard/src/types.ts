@@ -1,4 +1,16 @@
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The notice this plugin injects when a budget pauses a goal. The kind is
+     * the name released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-spend-guard': { kind: 'plugin:dsh-spend-guard' } & ContextFormed
+  }
+}
 
 /** What the guard does when a budget is crossed. */
 export type SpendAction = 'pause-goal' | 'stop'

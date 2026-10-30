@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Notificações",
+    "description": "Publica avisos de metas, erros e relatórios em canais de webhook, Telegram e Discord."
+  }
+}

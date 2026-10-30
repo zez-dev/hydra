@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workflow journal",
+    "description": "Record the finished subagent calls of each workflow run so a resumed run reuses them instead of running them again."
+  }
+}

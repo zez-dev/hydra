@@ -1,19 +1,28 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, createMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import type { ContentBlock, GenerateOptions, LlmResolvedModelInfo, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
-import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
-import * as AgentInvariant from '@deepseek-ai/dsh-agent/invariant'
-import * as AgentLoopInvariant from '@deepseek-ai/dsh-agent-loop/invariant'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import type { BasicCompactionConfig } from '@deepseek-ai/dsh-compaction-basic'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+
+/**
+ * Price one request message with the meter's heuristic; the summarizer's
+ * request-only instruction prices as the user message it stands for.
+ * @param ctx - context carrying the token meter.
+ * @param message - a durable message or a request-only user input.
+ * @returns the heuristic token count.
+ */
+function priceMessage(ctx: Context, message: RequestMessage): number {
+  return ctx.tokenMeter.estimateMessage(message.source === undefined
+    ? createUserMessage({ content: message.content, source: { kind: 'user' } })
+    : message)
+}
 
 /**
  * The provider's side of the context window: every request whose priced
@@ -78,7 +87,7 @@ class WindowEnforcingAdapter extends LlmAdapter {
   }
 
   private priced(options: GenerateOptions): number {
-    const estimated = options.messages.reduce((sum, message) => sum + this.ctx.tokenMeter.estimateMessage(message), 0)
+    const estimated = options.messages.reduce((sum, message) => sum + priceMessage(this.ctx, message), 0)
       + (this.countsTools && options.tools !== undefined && options.tools.length > 0
         ? Math.ceil(JSON.stringify(options.tools).length / 4)
         : 0)
@@ -163,10 +172,6 @@ async function harness(
 ): Promise<{ ctx: Context; adapter: WindowEnforcingAdapter }> {
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
-  await ctx.plugin(InvariantRegistry)
-  await ctx.plugin(SessionInvariant)
-  await ctx.plugin(AgentInvariant)
-  await ctx.plugin(AgentLoopInvariant)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TokenMeter)
   const adapter = adapterOf(ctx)
@@ -180,7 +185,9 @@ async function harness(
       return [{ type: 'text', text: `${'file content '.repeat(words)}line ${adapter.steps}` }]
     },
   }))
-  await ctx.plugin(BasicCompactionEngine, config)
+  // The default 65,536-token headroom leaves every window here no pressure
+  // budget; these cases pin the fit's own reply reserve and margin.
+  await ctx.plugin(BasicCompactionEngine, { headroomTokens: 0, ...config })
   return { ctx, adapter }
 }
 
@@ -335,7 +342,7 @@ describe('the harness never sends a request the window cannot hold', () => {
       expect(adapter.rejected).toEqual([])
       const [first] = adapter.conversationRequests
       if (first === undefined) throw new Error('no conversation request')
-      const input = first.messages.reduce((sum, message) => sum + ctx.tokenMeter.estimateMessage(message), 0)
+      const input = first.messages.reduce((sum, message) => sum + priceMessage(ctx, message), 0)
         + Math.ceil(JSON.stringify(first.tools).length / 4)
       // The configured cap would have been refused; the request asked for the room left.
       expect(input + 500).toBeGreaterThan(2000)
@@ -380,7 +387,7 @@ describe('the harness never sends a request the window cannot hold', () => {
       expect(adapter.rejected).toEqual([])
       const second = adapter.conversationRequests[1]
       if (second === undefined) throw new Error('no second request')
-      const input = second.messages.reduce((sum, message) => sum + ctx.tokenMeter.estimateMessage(message), 0)
+      const input = second.messages.reduce((sum, message) => sum + priceMessage(ctx, message), 0)
         + Math.ceil(JSON.stringify(second.tools).length / 4)
       expect(input + 500).toBeGreaterThan(2000)
       expect(second.maxTokens).toBeLessThan(500)
@@ -396,7 +403,7 @@ describe('the harness never sends a request the window cannot hold', () => {
     // 150K - 37.5K - 7.5K = 105K; a request above 42.5K asks for the room left.
     const { ctx, adapter } = await harness(
       c => new WindowEnforcingAdapter(c, 150_000, 100_000, 0),
-      { thresholdRatio: 0.8, retainRatio: 0.16 },
+      { thresholdRatio: 0.8, retainRatio: 0.16, maxTokens: 8192 },
       10,
     )
     try {

@@ -211,8 +211,9 @@ describe('idleWatchdog', () => {
     }
     await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 200 })
     expect(watchdog.signal.aborted).toBe(false)
-    // The signal only notifies; an iterator that ignores it still returns, but the deadline that elapsed is the idle one.
-    await expect(watchdog.next(iterator)).resolves.toEqual({ done: false, value: 200 })
+    // The deadline that ends the later read is the idle one, not the first-read budget.
+    const outcome = watchdog.next(iterator).catch((error: unknown) => error)
+    expect(await outcome).toBe(watchdog.signal.reason)
     expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')?.timeoutMs).toBe(60)
   })
 
@@ -259,10 +260,12 @@ describe('idleWatchdog', () => {
     expect(watchdog.signal).toBe(stableSignal)
 
     const secondNext = watchdog.next(iterator)
+    // Observe before advancing: the deadline rejects an iterator that never settles.
+    const secondOutcome = secondNext.catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(100)
     expect(timeoutOf(stableSignal, 'LLM_STREAM_IDLE_TIMEOUT')).toMatchObject({ timeoutMs: 100 })
     second.reject(stableSignal.reason)
-    await expect(secondNext).rejects.toBe(stableSignal.reason)
+    expect(await secondOutcome).toBe(stableSignal.reason)
   })
 
   it('rearms outstanding demand on an out-of-band activity pulse', async () => {
@@ -274,6 +277,7 @@ describe('idleWatchdog', () => {
     expect(watchdog.signal.aborted).toBe(false)
 
     const next = watchdog.next({ next: () => pending.promise })
+    const outcome = next.catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(99)
     watchdog.pulse()
     await vi.advanceTimersByTimeAsync(99)
@@ -281,7 +285,7 @@ describe('idleWatchdog', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')).toMatchObject({ timeoutMs: 100 })
     pending.reject(watchdog.signal.reason)
-    await expect(next).rejects.toBe(watchdog.signal.reason)
+    expect(await outcome).toBe(watchdog.signal.reason)
 
     watchdog[Symbol.dispose]()
     watchdog.pulse()
@@ -310,6 +314,18 @@ describe('idleWatchdog', () => {
     await expect(watchdog.next({ next: () => Promise.resolve({ done: true, value: undefined }) }))
       .rejects.toThrow(/disposed/)
     watchdog[Symbol.dispose]()
+  })
+
+  it('rejects an outstanding demand the iterator never settles', async () => {
+    vi.useFakeTimers()
+    using watchdog = idleWatchdog(undefined, 100, 'LLM_STREAM_IDLE_TIMEOUT')
+    // A transport can leave an aborted read pending forever; the deadline, not the
+    // iterator, decides when this demand ends.
+    const next = watchdog.next({ next: () => new Promise<IteratorResult<number>>(() => {}) })
+    const outcome = next.catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await outcome).toBe(watchdog.signal.reason)
+    expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')).toMatchObject({ timeoutMs: 100 })
   })
 
   it('rejects invalid bounds and concurrent iterator demand', async () => {

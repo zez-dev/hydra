@@ -2,7 +2,7 @@
 
 English | [中文](goal.zh.md)
 
-Types shared by the event-sourced goal service and its policy consumers. The [goal-domain Agent Note](../../.agents/notes/implemented/feature/2026-07-19-persisted-same-session-goal-domain.md) owns the persistence and activation decisions; this page records the exact fields and variants from [`packages/goal/goal/src/types.ts`](../../packages/goal/goal/src/types.ts).
+Types shared by the event-sourced goal service and its policy consumers. The [goal-domain reference](../../packages/goal/goal/README.md) owns the persistence and activation decisions; this page records the exact fields and variants from [`packages/goal/goal/src/types.ts`](../../packages/goal/goal/src/types.ts).
 
 ## Identity and lifecycle
 
@@ -200,7 +200,7 @@ write(cwd: string, at?: Date): Promise<DigestReport>
  * @param at - the moment that defines the last day; defaults to now.
  * @returns the weekly review input.
  */
-collectWeek(cwd: string, at?: Date): Promise<WeeklyInput>
+collectWeek(cwd: string, at?: Date): Promise<DigestWeeklyInput>
 
 /**
  * Render and write the weekly review to `<cwd>/.dsh/reports/week-<YYYY-Www>.md`.

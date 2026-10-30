@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Notifications",
+    "description": "Post goal, error, and report notices to webhook, Telegram, and Discord channels."
+  }
+}

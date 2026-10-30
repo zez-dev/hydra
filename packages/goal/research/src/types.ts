@@ -1,5 +1,17 @@
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, Message } from '@deepseek-ai/dsh-llm'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * Every message this plugin injects: the journal recall in `recall` form,
+     * the goal-round instruction, and the scoring request. The kind is the name
+     * released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-research': { kind: 'plugin:dsh-research' } & ContextFormed
+  }
+}
 
 /** Log-only record of one hypothesis-scoring request, appended before the request is sent. */
 export interface ResearchScoreEventData {

@@ -1,8 +1,6 @@
-# This authored scenario cuts its first answer after twenty-three characters to
-# exercise the continuation after a truncated tool-call stream. The guard's
-# default floor would read that as a reasoning-starved cap and stop, which is
-# the other behavior; the floor is lowered here so the continuation runs.
+# This authored scenario cuts its first answer at the output limit after
+# twenty-three characters, and its second user turn asks for the summary.
+# Hydra's auto-continue would continue the cut answer itself with a model
+# request the script does not hold, so this scenario runs without it.
 - id: auto-continue
-  config:
-    maxContinuationsPerTurn: 8
-    minVisibleChars: 1
+  disabled: true

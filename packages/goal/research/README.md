@@ -74,11 +74,11 @@ No invariant companion is published because the journal file is the only durable
 
 #### What the model sees
 
-One `user/message` per research session, sourced `{ kind: 'plugin', plugin: 'dsh-research', form: 'recall' }`, wrapping the journal digest in `<research_journal>` and `</research_journal>`: the objective and slug, one instruction line, the criteria under `Done when:`, the breakthroughs, the open hypotheses, the most recent experiments, the dead ends, and the next steps, each as one `- ` line with the entry id where one exists. When the block would exceed `maxRecallBytes`, sections are kept in priority order (next steps, dead ends, criteria, open hypotheses, recent experiments, breakthroughs, related breakthroughs), a section cut short keeps its newest lines, and one line such as `- (12 older in the journal file)` stands for the rest. After the journal's own breakthroughs, a "Related breakthroughs from other research" list carries up to `relatedBreakthroughs` approved memory entries tagged `breakthrough` whose `research:<slug>` tag names another journal, newest first, each as `[<slug>] <text>`. Those entries exist because `dsh-learning` mirrors every recorded breakthrough into `dsh-memory` as an approved `fact` (tags `research:<slug>` and `breakthrough`, deduplicated by normalized text), so ordinary sessions recall them through the memory block too.
+One `user/message` per research session, sourced `{ kind: 'plugin:dsh-research', form: 'recall' }`, wrapping the journal digest in `<research_journal>` and `</research_journal>`: the objective and slug, one instruction line, the criteria under `Done when:`, the breakthroughs, the open hypotheses, the most recent experiments, the dead ends, and the next steps, each as one `- ` line with the entry id where one exists. When the block would exceed `maxRecallBytes`, sections are kept in priority order (next steps, dead ends, criteria, open hypotheses, recent experiments, breakthroughs, related breakthroughs), a section cut short keeps its newest lines, and one line such as `- (12 older in the journal file)` stands for the rest. After the journal's own breakthroughs, a "Related breakthroughs from other research" list carries up to `relatedBreakthroughs` approved memory entries tagged `breakthrough` whose `research:<slug>` tag names another journal, newest first, each as `[<slug>] <text>`. Those entries exist because `dsh-learning` mirrors every recorded breakthrough into `dsh-memory` as an approved `fact` (tags `research:<slug>` and `breakthrough`, deduplicated by normalized text), so ordinary sessions recall them through the memory block too.
 
 #### Token effect
 
-Capped by `maxRecallBytes`; re-sent on a step that starts work (the user's message, a goal round) when the journal or a related breakthrough changed, and on any step once the previous copy left the surface. A step within a turn never re-sends it: the model sees the changes it made in the results of the `journal` and `run_experiment` calls that made them.
+Capped by `maxRecallBytes`; re-sent on a step that starts work (a user message, a goal round, a webhook delivery, or a scheduled follow-up) when the journal or a related breakthrough changed, and on any step once the previous copy left the surface. A step within a turn never re-sends it: the model sees the changes it made in the results of the `journal` and `run_experiment` calls that made them.
 
 #### KV Cache effect
 
@@ -88,7 +88,7 @@ Append-only: a changed journal appends a new recall message at the next step tha
 
 #### What the model sees
 
-On each goal round, one `user/message` sourced `{ kind: 'plugin', plugin: 'dsh-research' }` after the driver's round message: `Role: researcher`, the objective, the criteria, the six-step loop (read the journal, take the next step or form a hypothesis, run the experiment, record the outcome and dead ends, record a breakthrough at once, replace the next steps), and the rule that `update_goal` `complete` needs every criterion to hold.
+On each goal round, one `user/message` sourced `{ kind: 'plugin:dsh-research' }` after the driver's round message: `Role: researcher`, the objective, the criteria, the six-step loop (read the journal, take the next step or form a hypothesis, run the experiment, record the outcome and dead ends, record a breakthrough at once, replace the next steps), and the rule that `update_goal` `complete` needs every criterion to hold.
 
 #### Token effect
 

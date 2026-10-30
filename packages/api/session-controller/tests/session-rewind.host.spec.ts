@@ -6,13 +6,20 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
 import { AttachmentId } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, ContextFormed, MessageSource } from '@deepseek-ai/dsh-llm'
 import SessionStore from '@deepseek-ai/dsh-session'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 // Type-only: declares the `session/title` event a rename logs.
 import type {} from '@deepseek-ai/dsh-session-title'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import { createSessionTestRemote, installSessionReadTestServices } from './test-remote.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'scheduled-fixture': { kind: 'scheduled-fixture' } & ContextFormed
+  }
+}
 
 const sid = (id: string): SessionId => id as SessionId
 
@@ -20,6 +27,7 @@ async function composed(): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
   await ctx.plugin(SystemPrompt, { personaPrefix: '' })
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
   installSessionReadTestServices(ctx)
   ctx.provide('workspaceRegistry', { list: () => [] } as never)
@@ -85,7 +93,7 @@ const human = (text: string) => ({ content: [{ type: 'text' as const, text }], s
 
 const scheduled = (text: string) => ({
   content: [{ type: 'text' as const, text }],
-  source: { kind: 'plugin' as const, plugin: 'schedule' },
+  source: { kind: 'scheduled-fixture' as const },
 })
 
 const image: ContentBlock = {
@@ -113,7 +121,7 @@ describe('sessions.rewind', () => {
   it('forks at the boundary before the anchored turn and returns that turn\'s prompt', async () => {
     const ctx = await composed()
     const source = await liveAgent(ctx, 'session-source', 3)
-    const response = await remote(ctx).rewind({ sessionId: source.id, atSeq: userSeq(source, 3) })
+    const response = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: userSeq(source, 3) })
     expect(response.ok ? null : response.error).toBeNull()
     if (!response.ok) return
     expect(response.value.prompt).toBe('prompt 3')
@@ -131,7 +139,7 @@ describe('sessions.rewind', () => {
   it('rewinds to before an open tail turn, since the cut stays at a completed boundary', async () => {
     const ctx = await composed()
     const source = await liveAgent(ctx, 'session-open', 2, true)
-    const response = await remote(ctx).rewind({ sessionId: source.id, atSeq: userSeq(source, 3) })
+    const response = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: userSeq(source, 3) })
     expect(response.ok ? null : response.error).toBeNull()
     if (!response.ok) return
     expect(response.value.prompt).toBe('open prompt')
@@ -143,7 +151,7 @@ describe('sessions.rewind', () => {
   it('refuses the first turn, which has no completed boundary before it', async () => {
     const ctx = await composed()
     const source = await liveAgent(ctx, 'session-first', 2)
-    const response = await remote(ctx).rewind({ sessionId: source.id, atSeq: userSeq(source, 1) })
+    const response = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: userSeq(source, 1) })
     expect(response.ok).toBe(false)
     if (response.ok) return
     expect(response.error.code).toBe('session/rewind-unavailable')
@@ -153,9 +161,9 @@ describe('sessions.rewind', () => {
   it('refuses an anchor outside the log and a malformed anchor', async () => {
     const ctx = await composed()
     const source = await liveAgent(ctx, 'session-range', 1)
-    const past = await remote(ctx).rewind({ sessionId: source.id, atSeq: source.seq + 10 })
+    const past = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: source.seq + 10 })
     expect(past.ok ? null : past.error.code).toBe('session/rewind-unavailable')
-    const malformed = await remote(ctx).rewind({ sessionId: source.id, atSeq: -1 })
+    const malformed = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: -1 })
     expect(malformed.ok ? null : malformed.error.code).toBe('gateway/bad-request')
     await ctx.fiber.dispose()
   })
@@ -163,7 +171,7 @@ describe('sessions.rewind', () => {
   it('refuses a session that has logged nothing yet, and an anchor before its first turn', async () => {
     const ctx = await composed()
     const empty = await liveTurns(ctx, 'session-empty', [])
-    const nothing = await remote(ctx).rewind({ sessionId: empty.id, atSeq: 0 })
+    const nothing = await (await remote(ctx)).rewind({ sessionId: empty.id, atSeq: 0 })
     expect(nothing.ok ? null : nothing.error).toMatchObject({
       code: 'session/rewind-unavailable',
       message: expect.stringContaining('event 0 is past the end of the log') as string,
@@ -176,7 +184,7 @@ describe('sessions.rewind', () => {
     session.append('user/message', createUserMessage(human('prompt 1')), { surfaceOp: 'append' })
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
     await ctx.agents.register({ id: session.id, session, status: 'idle', ctx } as Agent)
-    const early = await remote(ctx).rewind({ sessionId: session.id, atSeq: 0 })
+    const early = await (await remote(ctx)).rewind({ sessionId: session.id, atSeq: 0 })
     expect(early.ok ? null : early.error).toMatchObject({
       code: 'session/rewind-unavailable',
       message: expect.stringContaining('event 0 belongs to no turn') as string,
@@ -193,7 +201,7 @@ describe('sessions.rewind', () => {
       [scheduled('scheduled wrap-up')],
     ])
     for (const turn of [2, 4]) {
-      const response = await remote(ctx).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, turn) })
+      const response = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, turn) })
       if (!response.ok) throw response.error
       expect(response.value).not.toHaveProperty('prompt')
       const child = ctx.sessions.get(response.value.sessionId)
@@ -209,10 +217,10 @@ describe('sessions.rewind', () => {
       [{ content: [image, { type: 'text', text: 'what is in this picture?' }], source: { kind: 'user' } }],
       [{ content: [image], source: { kind: 'user' } }],
     ])
-    const captioned = await remote(ctx).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, 2) })
+    const captioned = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, 2) })
     if (!captioned.ok) throw captioned.error
     expect(captioned.value.prompt).toBe('what is in this picture?')
-    const bare = await remote(ctx).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, 3) })
+    const bare = await (await remote(ctx)).rewind({ sessionId: source.id, atSeq: turnStartSeq(source, 3) })
     if (!bare.ok) throw bare.error
     expect(bare.value).not.toHaveProperty('prompt')
     await ctx.fiber.dispose()

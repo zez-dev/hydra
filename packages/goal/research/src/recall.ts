@@ -9,12 +9,12 @@
  */
 
 import { createHash } from 'node:crypto'
-import { createPluginRecallMessage, isPluginRecallMessage, messageText } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, messageText } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { Journal } from './types.ts'
 
-/** Plugin name recorded on every message this plugin injects. */
-export const RESEARCH_PLUGIN = 'dsh-research'
+/** Source kind recorded on every message this plugin injects. */
+export const RESEARCH_SOURCE_KIND = 'plugin:dsh-research'
 
 const HEAD = '<research_journal>\n'
 const TAIL = '\n</research_journal>'
@@ -128,10 +128,10 @@ export function digestRecall(text: string): string {
 /**
  * Whether a message is this plugin's recall message.
  * @param message - any user-role message.
- * @returns true for a `dsh-research` plugin source in `recall` form.
+ * @returns true for this plugin's source in `recall` form.
  */
 export function isRecallMessage(message: UserMessage): boolean {
-  return isPluginRecallMessage(message, RESEARCH_PLUGIN)
+  return message.source.kind === RESEARCH_SOURCE_KIND && message.source.form === 'recall'
 }
 
 /**
@@ -149,5 +149,5 @@ export function recallText(message: UserMessage): string {
  * @returns a user-role message sourced to this plugin in `recall` form.
  */
 export function createRecallMessage(text: string): UserMessage {
-  return createPluginRecallMessage(RESEARCH_PLUGIN, text)
+  return createUserMessage({ content: [{ type: 'text', text }], source: { kind: RESEARCH_SOURCE_KIND, form: 'recall' } })
 }

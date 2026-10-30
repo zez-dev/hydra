@@ -1,7 +1,7 @@
 // Real composition: the workflow engine, its storage, and the journal booted
 // from a cordis.yml through the Loader. Only the sandboxed PTC executor is
-// substituted — this host cannot always start one, and everything the journal
-// depends on stays real.
+// substituted — this host cannot always start one — and the subagent runtime's
+// working directory is a fixed fixture; everything the journal depends on stays real.
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +22,7 @@ import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import PtcWorkflowEngine from '@deepseek-ai/dsh-workflow-ptc'
 import * as WorkflowJournal from '@deepseek-ai/dsh-workflow-journal'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { ScriptedRuntime, scriptedProvider } from '../../workflow-ptc/tests/scripted-runtime.ts'
 
 const META = { name: 'audit', description: 'audit the changed files' }
@@ -48,6 +49,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-sandbox-policy'",
     '  config:',
     '    mode: read-only',
+    "- name: 'test:working-directory'",
     "- name: '@deepseek-ai/dsh-subagent'",
     "- name: 'test:scripted-ptc-runtime'",
     "- name: '@deepseek-ai/dsh-storage'",
@@ -77,6 +79,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
     ['@deepseek-ai/dsh-sandbox-policy', SandboxPolicy],
+    ['test:working-directory', { name: 'test-working-directory', apply: (child: Context) => { provideWorkingDirectoryFixture(child, home) } }],
     ['@deepseek-ai/dsh-subagent', SubagentRuntime],
     ['test:scripted-ptc-runtime', ScriptedRuntime],
     ['@deepseek-ai/dsh-storage', Storage],

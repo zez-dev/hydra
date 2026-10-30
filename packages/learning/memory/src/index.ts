@@ -22,7 +22,7 @@ import type { MemoryCurationPolicy, MemoryEntry, MemoryEntryId, MemoryEntryKind,
 
 export type * from './types.ts'
 export { memoryDomainSpec, normalizeMemoryText } from './store.ts'
-export { createRecallMessage, digestRecall, isRecallMessage, MEMORY_PLUGIN, recalledIds, recallText, renderRecall, renderRecallDetailed } from './recall.ts'
+export { createRecallMessage, digestRecall, isRecallMessage, MEMORY_SOURCE_KIND, recalledIds, recallText, renderRecall, renderRecallDetailed } from './recall.ts'
 export { rankEntries } from './rank.ts'
 export type { RankOptions } from './rank.ts'
 export { isWorkspaceTag, visibleTags, workspaceTag } from './workspace.ts'
@@ -164,16 +164,18 @@ function recallHistory(agent: Agent): RecallView {
   return { visibleIds, context: [request, reply].map(text => (text ?? '').slice(-CONTEXT_CHARS)).join('\n').trim() }
 }
 
+/** Source kinds of the messages that start work: the user's, a goal round's, a webhook's, a scheduled follow-up's. */
+const WORK_SOURCE_KINDS: ReadonlySet<string> = new Set(['user', 'goal', 'webhook', 'schedule'])
+
 /**
- * The text of the messages a step admits that start work: the user's own,
- * a goal round's, a webhook's, any source but a plugin's. Retrieval ranks
- * entries against it.
+ * The text of the messages a step admits that start work, leaving out context
+ * that plugins inject. Retrieval ranks entries against it.
  * @param messages - the step's messages.
  * @returns their text blocks joined by newlines; empty when the step carries no such message.
  */
 function workText(messages: readonly UserMessage[]): string {
   return messages
-    .filter(message => message.source.kind !== 'plugin')
+    .filter(message => WORK_SOURCE_KINDS.has(message.source.kind))
     .map(message => messageText(message))
     .join('\n')
     .trim()

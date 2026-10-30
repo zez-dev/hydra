@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Command gate",
+    "description": "Block shell commands that would destroy uncommitted work or change the machine before they run."
+  }
+}

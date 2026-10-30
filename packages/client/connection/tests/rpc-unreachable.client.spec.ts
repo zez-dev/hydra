@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { CONNECTION_UNREACHABLE_CODE, createWebConnectionRpc } from '../src/client/rpc.ts'
+import { CONNECTION_UNREACHABLE_CODE, createWebConnectionRpc, type RpcFetch } from '../src/client/rpc.ts'
 
 /** A carrier over a fetch stand-in, so each failure mode is produced on purpose. */
-function carrier(fetchImpl: (input: URL, init: RequestInit) => Promise<Response>) {
+function carrier(fetchImpl: RpcFetch) {
   return createWebConnectionRpc(fetchImpl)
 }
 

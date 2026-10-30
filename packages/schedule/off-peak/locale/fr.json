@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Exécution en heures creuses",
+    "description": "Reporte les tours d'objectifs et les tâches en file d'attente aux heures creuses configurées, éventuellement sur un modèle moins cher."
+  }
+}

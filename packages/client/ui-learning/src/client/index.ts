@@ -5,7 +5,7 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { LearningSettingsTab, type LearningSettingsTabInjected } from './LearningSettingsTab.tsx'
-import { en, zh, type LearningLocaleKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh, type LearningLocaleKey } from './locales.ts'
 
 export type { LearningSettingsTabInjected, LearningSettingsTabProps } from './LearningSettingsTab.tsx'
 export type { LearningLocaleKey } from './locales.ts'
@@ -31,7 +31,7 @@ function unwrap<T>(name: string, result: { ok: true; value: T } | { ok: false; e
 
 /** Contribute the lazy learning tab to the Plugins settings section. */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-learning: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-learning: dictionaries')
 
   const t = ctx.locale.bind(NS)
   const injected = (): LearningSettingsTabInjected => ({

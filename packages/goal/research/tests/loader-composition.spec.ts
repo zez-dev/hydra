@@ -20,6 +20,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as GoalRoundDriver from '@deepseek-ai/dsh-goal-round-driver'
@@ -80,6 +81,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     '  config:',
@@ -143,6 +145,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
@@ -232,7 +235,7 @@ describe('research goal real Loader composition through cordis.yml', () => {
     expect(firstRequest).toContain('<research_journal>')
     // A later round starts from the journal with the breakthrough recorded in round 1.
     const laterRounds = adapter.requests.filter(request => request.purpose === undefined
-      && request.messages.filter(message => message.role === 'user' && message.source.kind === 'goal').length >= 2)
+      && request.messages.filter(message => message.role === 'user' && message.source?.kind === 'goal').length >= 2)
     expect(laterRounds.length).toBeGreaterThan(0)
     expect(messagesText(laterRounds[0]!.messages)).toContain('Scaling law holds at depth 5')
     // The measured experiment landed with its metric, and the scoring request re-ranked the hypothesis.

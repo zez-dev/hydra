@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Geplante Sitzungen",
+    "description": "Startet neue Sitzungen nach einem Cron-Zeitplan, holt verpasste Läufe beim Start nach und protokolliert jedes Ergebnis."
+  }
+}

@@ -36,7 +36,7 @@
       "path": "../../interaction/commands"
     },
     {
-      "path": "../../preset/agent-presets"
+      "path": "../../preset/agent-preset-registry"
     },
     {
       "path": "../../core/agent-default-model"

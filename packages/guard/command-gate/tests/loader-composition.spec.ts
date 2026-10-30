@@ -17,7 +17,10 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import WorkingDirectoryService from '@deepseek-ai/dsh-working-directory'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
 import * as BashEnvPlugin from '@deepseek-ai/dsh-shell-env'
@@ -43,11 +46,14 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     '  config:',
     '    agents: []',
     "- name: '@deepseek-ai/dsh-commands'",
+    "- name: '@deepseek-ai/dsh-fs-local'",
+    "- name: '@deepseek-ai/dsh-working-directory'",
     "- name: '@deepseek-ai/dsh-subprocess-local'",
     "- name: '@deepseek-ai/dsh-shell-env'",
     "- name: '@deepseek-ai/dsh-bash-local'",
@@ -76,9 +82,12 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
+    ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
+    ['@deepseek-ai/dsh-working-directory', WorkingDirectoryService],
     ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessRuntime],
     ['@deepseek-ai/dsh-shell-env', BashEnvPlugin],
     ['@deepseek-ai/dsh-bash-local', LocalBashExecutor],
@@ -128,11 +137,10 @@ describe('command gate real Loader composition through cordis.yml', () => {
 
     const results = events.filter(event => event.type === 'tool/result')
     const [refused, ran] = results.map(event => event.data.message.content
-      .flatMap(block => block.type === 'tool-result' ? block.content : [])
       .map(block => block.type === 'text' ? block.text : '').join(''))
     expect(refused).toContain('outside the workspace')
-    expect(results[0]?.data.message.content[0]).toMatchObject({ isError: true })
-    expect(results[1]?.data.message.content[0]).toMatchObject({ isError: false })
+    expect(results[0]?.data.message).toMatchObject({ isError: true })
+    expect(results[1]?.data.message).toMatchObject({ isError: false })
     expect(ran).not.toContain('outside the workspace')
     // The refused command never reached a shell, so its target survives.
     expect(await readdir(outside)).toContain('keepme')

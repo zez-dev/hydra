@@ -1,18 +1,29 @@
 {
-  "id": "/",
   "name": "Hydra",
   "short_name": "Hydra",
-  "start_url": "/",
-  "scope": "/",
-  "display": "fullscreen",
-  "theme_color": "#b91c1c",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
   "background_color": "#ffffff",
+  "theme_color": "#b91c1c",
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "通知",
+    "description": "向 webhook、Telegram 和 Discord 频道发送目标、错误和报告通知。"
+  }
+}

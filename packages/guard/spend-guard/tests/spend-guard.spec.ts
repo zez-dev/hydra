@@ -15,6 +15,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Notify from '@deepseek-ai/dsh-notify'
@@ -54,6 +55,7 @@ async function setup(adapter: MockAdapter, config: Partial<Config> = {}): Promis
   ctx.llm.registerAdapter(['mock'], adapter)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
@@ -165,7 +167,7 @@ describe('spend guard', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(ctx.goals.get(agent)?.phase).toBe('paused')
     // The notice waits in the inbox for the next request rather than being logged now.
-    expect(agent.inbox.nextStep.some(message => message.source.kind === 'plugin')).toBe(true)
+    expect(agent.inbox.nextStep.some(message => message.source.kind === 'plugin:dsh-spend-guard')).toBe(true)
   })
 
   it('stops the turn under action: stop when the daily budget is crossed', async () => {
@@ -195,6 +197,7 @@ describe('spend guard', () => {
     await again.plugin(LlmRuntime)
     await again.plugin(SystemPrompt)
     await again.plugin(ToolRuntime)
+    await again.plugin(NativeToolExecutor)
     await again.plugin(SessionStore)
     await again.plugin(SessionProjectionRegistry)
     await again.plugin(AgentRegistry)
@@ -283,7 +286,7 @@ describe('spend guard enforcement edges', () => {
     await guard!.dispose()
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(ctx.goals.get(agent)?.phase).toBe('active')
-    expect(agent.inbox.nextStep.some(message => message.source.kind === 'plugin')).toBe(false)
+    expect(agent.inbox.nextStep.some(message => message.source.kind === 'plugin:dsh-spend-guard')).toBe(false)
   })
 
   it('forgets a disposed agent\'s session total, so a new agent on that session is budgeted afresh', async () => {
@@ -292,14 +295,14 @@ describe('spend guard enforcement edges', () => {
     const first = await ctx.agents.create({ sessionId: id, agentOptions: { provider: 'mock', model: 'mock' } })
     first.agent.followup(say('one'))
     await first.agent.whenIdle()
-    await until(() => first.agent.inbox.nextStep.some(message => message.source.kind === 'plugin'))
+    await until(() => first.agent.inbox.nextStep.some(message => message.source.kind === 'plugin:dsh-spend-guard'))
     await first.dispose()
     expect(ctx.spendGuard.sessionTokens(id)).toBe(0)
     expect(ctx.spendGuard.dayTokens()).toBe(13)
     const second = await ctx.agents.create({ sessionId: id, agentOptions: { provider: 'mock', model: 'mock' } })
     second.agent.followup(say('two'))
     await second.agent.whenIdle()
-    await until(() => second.agent.inbox.nextStep.some(message => message.source.kind === 'plugin'))
+    await until(() => second.agent.inbox.nextStep.some(message => message.source.kind === 'plugin:dsh-spend-guard'))
     expect(ctx.spendGuard.sessionTokens(id)).toBe(13)
   })
 

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Reanudar objetivos al abrir",
+    "description": "Reactiva el objetivo activo de una sesión al abrirla, tras preguntar o automáticamente."
+  }
+}

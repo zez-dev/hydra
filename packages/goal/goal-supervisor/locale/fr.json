@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Superviseur d'objectifs",
+    "description": "Reprend au démarrage les sessions enregistrées ayant des objectifs actifs, dans une limite de concurrence et un budget quotidien de tours."
+  }
+}

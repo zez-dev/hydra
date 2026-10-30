@@ -12,7 +12,7 @@ import { USAGE_ID, usageDefinition } from './definition.tsx'
 import { usageFace } from './face.ts'
 import { UsageBody } from './UsageBody.tsx'
 import { UsageTitle } from './UsageTitle.tsx'
-import { en, zh, type SidebarUsageKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh, type SidebarUsageKey } from './locales.ts'
 
 export type { SidebarUsageKey } from './locales.ts'
 export type { UsageInjected } from './face.ts'
@@ -38,7 +38,7 @@ export const inject = ['slots', 'locale', 'sidebarRightTabs', 'remote', 'remote.
 export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   ctx.effect(() => ctx.sidebarRightTabs.register(usageDefinition(t)), 'ui-usage: usage type')
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-usage: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-usage: dictionaries')
   const face = usageFace(ctx.remote)
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
     { name: 'sidebar.right.pane.tab', key: USAGE_ID, locale: NS, inject: () => face },

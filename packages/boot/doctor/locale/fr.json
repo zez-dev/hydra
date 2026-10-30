@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Vérification de l'environnement",
+    "description": "Vérifie le dossier personnel, l'espace de travail, le bac à sable, git, les plugins et les identifiants de cette installation, avec une correction pour chaque problème."
+  }
+}

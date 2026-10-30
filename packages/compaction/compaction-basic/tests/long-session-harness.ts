@@ -8,14 +8,10 @@
 import { appendFileSync } from 'node:fs'
 import { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmAdapter, resolveRetryPolicy, ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, GenerateOptions, LlmResolvedModelInfo, Message, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import type { ContentBlock, GenerateOptions, LlmResolvedModelInfo, RequestMessage, ResolvedRetryPolicy, StreamChunk } from '@deepseek-ai/dsh-llm'
+import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
-import InvariantRegistry from '@deepseek-ai/dsh-invariants'
-import * as SessionInvariant from '@deepseek-ai/dsh-session/invariant'
-import * as AgentInvariant from '@deepseek-ai/dsh-agent/invariant'
-import * as AgentLoopInvariant from '@deepseek-ai/dsh-agent-loop/invariant'
 import { BasicCompactionEngine } from '@deepseek-ai/dsh-compaction-basic'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner from '@deepseek-ai/dsh-compaction-tool-result-pruner'
@@ -38,6 +34,19 @@ export function reportLine(line: string): void {
   const path = process.env['DSH_STRESS_REPORT']
   if (path !== undefined && path.length > 0) appendFileSync(path, `${line}\n`)
   console.log(line)
+}
+
+/**
+ * Price one request message with the meter's heuristic; the summarizer's
+ * request-only instruction prices as the user message it stands for.
+ * @param ctx - context carrying the token meter.
+ * @param message - a durable message or a request-only user input.
+ * @returns the heuristic token count.
+ */
+function priceMessage(ctx: Context, message: RequestMessage): number {
+  return ctx.tokenMeter.estimateMessage(message.source === undefined
+    ? createUserMessage({ content: message.content, source: { kind: 'user' } })
+    : message)
 }
 
 /** Deterministic pseudo-random numbers so a run is reproducible. */
@@ -142,7 +151,7 @@ class StressProvider extends LlmAdapter {
   private priced(options: GenerateOptions): number {
     const [low, high] = this.shape.density
     const density = low + (high - low) * this.random()
-    const estimated = options.messages.reduce((sum, message) => sum + this.ctx.tokenMeter.estimateMessage(message), 0)
+    const estimated = options.messages.reduce((sum, message) => sum + priceMessage(this.ctx, message), 0)
     return Math.round(estimated * density)
   }
 
@@ -252,7 +261,7 @@ class StressProvider extends LlmAdapter {
 }
 
 /** The task number named by the latest human task message. */
-function currentTurn(messages: readonly Message[]): number {
+function currentTurn(messages: readonly RequestMessage[]): number {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message === undefined || message.role !== 'user') continue
@@ -266,13 +275,13 @@ function currentTurn(messages: readonly Message[]): number {
 }
 
 /** Continuation prompts since the latest human task message. */
-function continuationsSoFar(messages: readonly Message[]): number {
+function continuationsSoFar(messages: readonly RequestMessage[]): number {
   let count = 0
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (message === undefined) continue
     if (message.role === 'user' && message.content.some(block => block.type === 'text' && /^task \d+:/u.test(block.text))) break
-    if (message.role === 'user' && message.source.kind === 'plugin') count += 1
+    if (message.role === 'user' && message.source?.kind === AutoContinue.CONTINUATION_SOURCE.kind) count += 1
   }
   return count
 }
@@ -307,14 +316,6 @@ export async function runSession(
   const readSizes: number[] = []
   const ctx = new Context()
   await mountAgentLoopTestDependencies(ctx)
-  // The runtime invariants are test instrumentation the shipped bundles do
-  // not mount; a profiling run leaves them out to measure the product alone.
-  if (process.env['DSH_STRESS_NO_INVARIANTS'] === undefined) {
-    await ctx.plugin(InvariantRegistry)
-    await ctx.plugin(SessionInvariant)
-    await ctx.plugin(AgentInvariant)
-    await ctx.plugin(AgentLoopInvariant)
-  }
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(TokenMeter)
   const provider = new StressProvider(
@@ -341,7 +342,9 @@ export async function runSession(
     if (shrunk !== null) report.shrunkCaps.push(Number(shrunk[1]))
   }) as typeof ctx.logger.warn
   await ctx.plugin(ToolResultPruner, { thresholdChars: 8192, headChars: 4096, tailChars: 1024 })
-  await ctx.plugin(BasicCompactionEngine, { maxOverflowRetries: 3 })
+  // The shipped bundle's compaction settings: the default 65,536-token
+  // headroom would leave the 16K and 32K routes no pressure budget.
+  await ctx.plugin(BasicCompactionEngine, { maxOverflowRetries: 3, headroomTokens: 4096, maxTokens: 8192 })
   await ctx.plugin(AutoContinue, { maxContinuationsPerTurn: 8 })
   await ctx.plugin(LlmRetry)
   try {
@@ -392,11 +395,12 @@ export async function runSession(
       reportLine(`TRAIL ${name} turn ${failed.turn}: ${trail.join(' ')}`)
     }
     reportLine(`COMPACTIONS ${name} attempts=${attempts} landed=${report.checkpoints} failures=${JSON.stringify([...failures])}`)
-    report.continuations = events.filter(event => event.type === 'user/message' && event.data.source.kind === 'plugin').length
+    report.continuations = events.filter(event => event.type === 'user/message'
+      && event.data.source.kind === AutoContinue.CONTINUATION_SOURCE.kind).length
     const pluginMessages = new Map<string, number>()
     for (const event of events) {
-      if (event.type !== 'user/message' || event.data.source.kind !== 'plugin') continue
-      const key = `${event.data.source.plugin}:${event.data.content.map(block => (block.type === 'text' ? block.text.slice(0, 60) : block.type)).join('')}`
+      if (event.type !== 'user/message' || event.data.source.kind === 'user') continue
+      const key = `${event.data.source.kind}:${event.data.content.map(block => (block.type === 'text' ? block.text.slice(0, 60) : block.type)).join('')}`
       pluginMessages.set(key, (pluginMessages.get(key) ?? 0) + 1)
     }
     reportLine(`PLUGIN-MESSAGES ${name} ${JSON.stringify([...pluginMessages])}`)

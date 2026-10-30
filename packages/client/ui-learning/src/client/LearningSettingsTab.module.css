@@ -60,7 +60,7 @@
   align-items: flex-start;
   padding: 10px 12px;
   border: 1px solid var(--dsw-alias-separator-secondary);
-  border-radius: 8px;
+  border-radius: var(--dsw-radius-sm);
   background: var(--dsw-alias-fill-tertiary);
 }
 

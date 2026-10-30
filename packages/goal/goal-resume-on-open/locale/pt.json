@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Retomar metas ao abrir",
+    "description": "Reativa a meta ativa de uma sessão quando ela é aberta, após perguntar ou automaticamente."
+  }
+}

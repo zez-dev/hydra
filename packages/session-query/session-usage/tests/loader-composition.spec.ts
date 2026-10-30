@@ -16,12 +16,14 @@ import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SqliteSessionQueryEngine from '@deepseek-ai/dsh-session-query-sqlite'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
@@ -63,6 +65,7 @@ async function boot(home: string, options: { persistence?: boolean } = {}): Prom
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     '  config:',
@@ -103,6 +106,7 @@ async function boot(home: string, options: { persistence?: boolean } = {}): Prom
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
@@ -335,7 +339,7 @@ describe('session-usage real Loader composition through cordis.yml', () => {
     await seedCorpus(ctx)
     await expect(ctx.sessionUsage.report({ since: 'yesterday' })).rejects.toThrow(/since must be a local calendar day/)
     await expect(ctx.sessionUsage.report({ until: '9/16/2026' })).rejects.toThrow(/until must be a local calendar day/)
-    const refused = await ctx.tools.execute({
+    const refused = await executeModelToolFixture(ctx, {
       name: 'usage',
       arguments: { since: 'last week' },
       callId: ToolCallId('usage-bad'),
@@ -396,7 +400,7 @@ describe('session-usage real Loader composition through cordis.yml', () => {
     const { home } = await makeHome('tool')
     const ctx = await boot(home)
     await seedCorpus(ctx)
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       name: 'usage',
       arguments: { since: '2026-09-16' },
       callId: ToolCallId('usage-1'),
@@ -409,7 +413,7 @@ describe('session-usage real Loader composition through cordis.yml', () => {
     expect(text).toContain('Total          2,750  tokens')
     expect(text).toContain('Messages           2  across 2 sessions')
 
-    const unbounded = await ctx.tools.execute({
+    const unbounded = await executeModelToolFixture(ctx, {
       name: 'usage',
       arguments: {},
       callId: ToolCallId('usage-2'),
@@ -419,7 +423,7 @@ describe('session-usage real Loader composition through cordis.yml', () => {
     expect(unbounded.content.map(block => block.type === 'text' ? block.text : '').join('\n'))
       .toContain('Messages           3  across 2 sessions')
 
-    const ended = await ctx.tools.execute({
+    const ended = await executeModelToolFixture(ctx, {
       name: 'usage',
       arguments: { until: '2026-09-15' },
       callId: ToolCallId('usage-3'),

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Goal completion check",
+    "description": "Confirm with a separate model request that a goal is achieved before the model can mark it complete."
+  }
+}

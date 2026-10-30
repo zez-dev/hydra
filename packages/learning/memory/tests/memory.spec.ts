@@ -8,9 +8,10 @@ import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
@@ -20,6 +21,13 @@ import * as MemoryTools from '@deepseek-ai/dsh-memory/tools'
 import { createMessage } from '@deepseek-ai/dsh-llm'
 import { digestRecall, isRecallMessage, rankEntries, recalledIds, renderRecall, workspaceTag } from '@deepseek-ai/dsh-memory'
 import type { MemoryEntry } from '@deepseek-ai/dsh-memory'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Context another plugin adds to a step; it starts no work. */
+    'memory-test-plugin': { kind: 'memory-test-plugin' }
+  }
+}
 
 let root: string | undefined
 let context: Context | undefined
@@ -53,7 +61,7 @@ async function fakeAgent(ctx: Context, id = 'memory-agent', cwd?: string): Promi
   const scope = ctx.plugin(() => {})
   const session = cwd === undefined ? Session.create(SessionId(id)) : ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -66,7 +74,7 @@ async function fakeAgent(ctx: Context, id = 'memory-agent', cwd?: string): Promi
 async function preStep(ctx: Context, agent: Agent, messages: UserMessage[] = []): Promise<PreStepDecision> {
   return agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages, prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal: new AbortController().signal },
+    { messages, prompt: { systemPrompt: '', tools: [] }, modelSelection: { provider: 'mock', model: 'mock' }, turn: 1, step: 1, signal: new AbortController().signal },
     () => Promise.resolve({ kind: 'enter' as const, messages }),
   )
 }
@@ -103,7 +111,7 @@ describe('duplicates at the store', () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
     for (const text of ['tests run with vitest', 'the tests are run with vitest']) {
-      await ctx.tools.execute({ signal, callId: ToolCallId(text), name: 'memory', agent, arguments: { action: 'remember', text } })
+      await executeToolFixture(ctx, { signal, callId: ToolCallId(text), name: 'memory', agent, arguments: { action: 'remember', text } })
     }
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['the tests are run with vitest'])
   })
@@ -180,7 +188,7 @@ describe('recall rendering', () => {
   })
 
   it('identifies recall messages by their plugin source form and digests their text', () => {
-    const message = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' } })
+    const message = createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'plugin:dsh-memory', form: 'recall' } })
     expect(isRecallMessage(message)).toBe(true)
     expect(isRecallMessage(createUserMessage({ content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } }))).toBe(false)
     expect(digestRecall('hello')).toBe(digestRecall('hello'))
@@ -286,7 +294,7 @@ describe('recall injection on agent/pre-step', () => {
     expect(recalledText(first)).toContain('docker compose')
     agent.session.append('user/message', (first.kind === 'enter' ? first.messages : []).find(isRecallMessage)!, { surfaceOp: 'append' })
     // A plugin's own message starts no work, even when its words would match other entries.
-    const plugin = createUserMessage({ content: [{ type: 'text', text: 'How do I run the tests?' }], source: { kind: 'plugin', plugin: 'other' } })
+    const plugin = createUserMessage({ content: [{ type: 'text', text: 'How do I run the tests?' }], source: { kind: 'memory-test-plugin' } })
     expect(recalledText(await preStep(ctx, agent, [plugin]))).toBeUndefined()
   })
 
@@ -299,7 +307,7 @@ describe('recall injection on agent/pre-step', () => {
     // Only the latest request counts, and a plugin's own message is not one.
     agent.session.append('user/message', ask('How do deployments reach staging?'), { surfaceOp: 'append' })
     agent.session.append('user/message', ask('The tests fail on CI'), { surfaceOp: 'append' })
-    agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'staging deploy notes' }], source: { kind: 'plugin', plugin: 'other' } }), { surfaceOp: 'append' })
+    agent.session.append('user/message', createUserMessage({ content: [{ type: 'text', text: 'staging deploy notes' }], source: { kind: 'memory-test-plugin' } }), { surfaceOp: 'append' })
     agent.session.append('assistant/message', {
       stream: [], turn: 1, step: 1,
       message: createMessage({ role: 'assistant', content: [{ type: 'text', text: 'I will rerun them with vitest.' }], source: { kind: 'model', provider: 'p', model: 'm' } }),
@@ -394,11 +402,11 @@ describe('memory tool', () => {
   it('tags what it remembers with the session\'s project and never shows the tag', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx, 'tool-agent', '/work/alpha')
-    await ctx.tools.execute({ signal, callId: ToolCallId('w1'), name: 'memory', agent, arguments: { action: 'remember', text: 'the build needs node 22', tags: ['build'] } })
+    await executeToolFixture(ctx, { signal, callId: ToolCallId('w1'), name: 'memory', agent, arguments: { action: 'remember', text: 'the build needs node 22', tags: ['build'] } })
     expect(ctx.memory.list()[0]?.tags).toEqual(['build', workspaceTag('/work/alpha')])
-    await ctx.tools.execute({ signal, callId: ToolCallId('w0'), name: 'memory', agent, arguments: { action: 'remember', text: 'deploys go through make' } })
+    await executeToolFixture(ctx, { signal, callId: ToolCallId('w0'), name: 'memory', agent, arguments: { action: 'remember', text: 'deploys go through make' } })
     expect(ctx.memory.list().find(entry => entry.text === 'deploys go through make')?.tags).toEqual([workspaceTag('/work/alpha')])
-    const found = await ctx.tools.execute({ signal, callId: ToolCallId('w2'), name: 'memory', agent, arguments: { action: 'search', query: 'build node' } })
+    const found = await executeToolFixture(ctx, { signal, callId: ToolCallId('w2'), name: 'memory', agent, arguments: { action: 'search', query: 'build node' } })
     expect(JSON.stringify(found.value)).not.toContain('workspace:')
     const listed = await ctx.commands.find(agent, 'memory')!.handler({ commandId: CommandId('l'), agent, rawInput: '', attachments: [], signal })
     expect((listed as { text?: string }).text).toContain('the build needs node 22')
@@ -408,14 +416,14 @@ describe('memory tool', () => {
   it('remembers an approved entry attributed to the calling session, searches it, and forgets it', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
-    const remembered = await ctx.tools.execute({ signal, callId: ToolCallId('m1'), name: 'memory', agent, arguments: { action: 'remember', text: 'tests run with vitest', kind: 'fact', tags: ['testing'] } })
+    const remembered = await executeToolFixture(ctx, { signal, callId: ToolCallId('m1'), name: 'memory', agent, arguments: { action: 'remember', text: 'tests run with vitest', kind: 'fact', tags: ['testing'] } })
     expect(remembered.isError).toBe(false)
     const [entry] = ctx.memory.list({ status: 'approved' })
     expect(entry).toMatchObject({ text: 'tests run with vitest', sourceSessionId: agent.id })
-    const found = await ctx.tools.execute({ signal, callId: ToolCallId('m2'), name: 'memory', agent, arguments: { action: 'search', query: 'which runner do the tests use' } })
+    const found = await executeToolFixture(ctx, { signal, callId: ToolCallId('m2'), name: 'memory', agent, arguments: { action: 'search', query: 'which runner do the tests use' } })
     expect(found.isError).toBe(false)
     expect(JSON.stringify(found.value)).toContain(entry!.id)
-    const forgotten = await ctx.tools.execute({ signal, callId: ToolCallId('m3'), name: 'memory', agent, arguments: { action: 'forget', id: entry!.id } })
+    const forgotten = await executeToolFixture(ctx, { signal, callId: ToolCallId('m3'), name: 'memory', agent, arguments: { action: 'forget', id: entry!.id } })
     expect(forgotten.isError).toBe(false)
     expect(ctx.memory.list()).toHaveLength(0)
   })
@@ -423,7 +431,7 @@ describe('memory tool', () => {
   it('rejects remember without text', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('m4'), name: 'memory', agent, arguments: { action: 'remember' } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('m4'), name: 'memory', agent, arguments: { action: 'remember' } })
     expect(result.isError).toBe(true)
   })
 })

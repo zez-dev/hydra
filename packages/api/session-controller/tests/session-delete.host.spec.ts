@@ -5,12 +5,12 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import SessionStore, { SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionAlreadyOwnedError } from '@deepseek-ai/dsh-session-persistence'
-import { createSessionTestRemote, testSessionPersistence } from './test-remote.ts'
+import { createSessionTestRemote, testSessionPersistence, type TestSessionRemote } from './test-remote.ts'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mountAgentLoopTestDependencies, mountAgentLoopTestHarness } from '@deepseek-ai/dsh-agent-loop-testkit'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 const sid = (id: string): SessionId => id as SessionId
 
@@ -20,7 +20,7 @@ function header(id: string, extra: Partial<SessionHeader> = {}): SessionHeader {
 
 interface Harness {
   ctx: Context
-  remote: ReturnType<typeof createSessionTestRemote>
+  remote: TestSessionRemote
   deleted: SessionId[]
   detached: SessionId[]
   unarchived: SessionId[]
@@ -38,6 +38,8 @@ interface HarnessOptions {
   /** A failure every listing of stored sessions reports. */
   listFailure?: Error
   workspaceSessions?: SessionId[]
+  /** Whether the deployment mounts session persistence at all. */
+  persistence?: boolean
 }
 
 async function harness(metas: SessionHeader[], options: HarnessOptions = {}): Promise<Harness> {
@@ -50,18 +52,20 @@ async function harness(metas: SessionHeader[], options: HarnessOptions = {}): Pr
   const unarchived: SessionId[] = []
   const forgotten: SessionId[] = []
   const removed: SessionId[] = []
-  ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
-    list: () => options.listFailure === undefined
-      ? Promise.resolve([...remaining.values()])
-      : Promise.reject(options.listFailure),
-    inspect: (id: SessionId) => Promise.resolve(remaining.has(id) ? { meta: remaining.get(id)!, events: [] } : undefined),
-    delete: (id: SessionId) => {
-      if (options.owned?.includes(id)) return Promise.reject(new SessionAlreadyOwnedError(id))
-      if (options.undeletable?.includes(id)) return Promise.reject(new Error('read-only file system'))
-      deleted.push(id)
-      return Promise.resolve({ deleted: remaining.delete(id) })
-    },
-  }) as never)
+  if (options.persistence !== false) {
+    ctx.provide('sessionPersistence', testSessionPersistence(ctx, {
+      list: () => options.listFailure === undefined
+        ? Promise.resolve([...remaining.values()])
+        : Promise.reject(options.listFailure),
+      inspect: (id: SessionId) => Promise.resolve(remaining.has(id) ? { meta: remaining.get(id)!, events: [] } : undefined),
+      delete: (id: SessionId) => {
+        if (options.owned?.includes(id)) return Promise.reject(new SessionAlreadyOwnedError(id))
+        if (options.undeletable?.includes(id)) return Promise.reject(new Error('read-only file system'))
+        deleted.push(id)
+        return Promise.resolve({ deleted: remaining.delete(id) })
+      },
+    }) as never)
+  }
   ctx.provide('sessionProjectionCache', {
     cachedSnapshot: () => undefined,
     cachedPredecessorTitle: () => undefined,
@@ -77,7 +81,7 @@ async function harness(metas: SessionHeader[], options: HarnessOptions = {}): Pr
     unarchiveSession: (id: SessionId) => { unarchived.push(id); return Promise.resolve() },
   } as never)
   ctx.on('api-session/removed', (id) => { removed.push(id) })
-  const remote = createSessionTestRemote(ctx, {
+  const remote = await createSessionTestRemote(ctx, {
     defaultModelSelection: () => ({ provider: 'p', model: 'm' }),
     cwd: '/tmp',
   })
@@ -122,7 +126,7 @@ describe('session.delete', () => {
     const detach = h.ctx.agents.enter(child, parent)
     const drained: [SessionId, readonly SessionId[]][] = []
     h.ctx.provide('subagents', {
-      drainContinuableChildren: (owner: Agent, ids: readonly SessionId[]) => {
+      drainChildren: (owner: Agent, ids: readonly SessionId[]) => {
         drained.push([owner.id, ids])
         detach()
         return Promise.resolve()
@@ -209,6 +213,28 @@ describe('session.delete', () => {
     expect(h.removed).toEqual([])
   })
 
+  it('refuses without session persistence before releasing or closing anything', async () => {
+    const h = await harness([], { persistence: false })
+    const parentSession = h.ctx.sessions.create(sid('parent3'), { meta: { cwd: '/proj' } })
+    const parent = { id: parentSession.id, session: parentSession, status: 'idle', ctx: h.ctx.plugin(() => {}).ctx } as unknown as Agent
+    await h.ctx.agents.register(parent)
+    const childSession = h.ctx.sessions.create(sid('child3'), { meta: { cwd: '/proj', parentSession: sid('parent3'), origin: 'subagent' } })
+    const child = { id: childSession.id, session: childSession, status: 'idle', ctx: h.ctx.plugin(() => {}).ctx } as unknown as Agent
+    h.ctx.agents.enter(child, parent)
+    const drained: SessionId[] = []
+    h.ctx.provide('subagents', {
+      drainChildren: (_owner: Agent, ids: readonly SessionId[]) => { drained.push(...ids); return Promise.resolve() },
+    } as never)
+    const result = await h.remote.delete({ sessionId: sid('child3') })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.error.code).toBe('gateway/internal')
+    expect(result.error.message).toMatch(/mounts no session persistence/)
+    expect(drained).toEqual([])
+    expect(h.ctx.agents.get(sid('child3'))).toBe(child)
+    expect(h.removed).toEqual([])
+  })
+
   it('reports a failed lineage lookup as internal before deleting anything', async () => {
     const h = await harness([header('unlisted')], { listFailure: new Error('session directory unreadable') })
     const result = await h.remote.delete({ sessionId: sid('unlisted') })
@@ -255,7 +281,7 @@ describe('session.delete on a session this Host opened', () => {
    * create() yields a real Agent whose handle the controller keeps and delete()
    * removes a real stored log.
    */
-  async function liveHarness(): Promise<{ ctx: Context; remote: ReturnType<typeof createSessionTestRemote>; cwd: string }> {
+  async function liveHarness(): Promise<{ ctx: Context; remote: TestSessionRemote; cwd: string }> {
     const ctx = new Context()
     await mountAgentLoopTestDependencies(ctx)
     const cwd = await mkdtemp(join(tmpdir(), 'dsh-delete-live-'))
@@ -271,7 +297,7 @@ describe('session.delete on a session this Host opened', () => {
       list: () => [],
       unarchiveSession: () => Promise.resolve(),
     } as never)
-    const remote = createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd })
+    const remote = await createSessionTestRemote(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd })
     return { ctx, remote, cwd }
   }
 

@@ -1,17 +1,14 @@
 - menu:
   - text: Group by
-  - menuitem "WorkSpace":
-    - text: WorkSpace
-    - img
+  - menuitem "WorkSpace"
   - menuitem "Workspace Tree"
   - menuitem "In one list"
   - separator
   - text: Order by
   - menuitem "Manual"
-  - menuitem "Last updated":
-    - text: Last updated
-    - img
-  - menuitem "Lineage"
+  - menuitem "Last updated"
   - separator
-  - text: Archived sessions
-  - menuitem "Show archived"
+  - text: Filter sessions
+  - menuitem "Hide archived"
+  - menuitem "All conversations (show archived)"
+  - menuitem "Archived only"

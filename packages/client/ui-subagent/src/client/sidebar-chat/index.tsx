@@ -73,7 +73,7 @@ export function parseSubagentChatAddress(value: string): SubagentAddress | undef
   if (parts.length !== 2 || parts[0] !== 'session') return undefined
   const parentSessionId = url.searchParams.get('parent')
   const mode = url.searchParams.get('mode')
-  if (parentSessionId === null || parentSessionId === '' || (mode !== 'one-shot' && mode !== 'continuable')) {
+  if (parentSessionId === null || parentSessionId === '' || (mode !== 'one-shot' && mode !== 'continuable' && mode !== 'unknown')) {
     return undefined
   }
   try {
@@ -105,8 +105,6 @@ function subagentChatResourceProvider(sessions: ISessions): ResourceProvider<'su
     async *open(resourceAddress, { signal }) {
       const address = parseSubagentChatAddress(resourceAddress)
       if (address === undefined) throw new Error(`ui-subagent: invalid chat resource address "${resourceAddress}"`)
-      if (isAbortRequested(signal)) return
-      await sessions.refreshSubagents(address.parentSessionId)
       if (isAbortRequested(signal)) return
       const reference = sessions.retain(address, { source: 'sidebarChat', signal })
       try {
@@ -192,8 +190,8 @@ export function registerSidebarChat(ctx: Context, t: TranslateNS<typeof NS>): vo
       const list = ctx.sessions.list.getSnapshot()
       // A cold child has no projected identity until its log is opened; the
       // parent's catalog row already carries the label the dropdown showed.
-      const row = list.subagentsByParent[parsed.parentSessionId]?.entries.find(entry => entry.id === parsed.childSessionId)
-      const catalogLabel = row?.kind === 'child' ? row.label : undefined
+      const catalogLabel = list.projectionsBySession[parsed.parentSessionId]?.values.subagentCatalog
+        ?.find(entry => entry.id === parsed.childSessionId)?.label
       return list.byId[parsed.childSessionId]?.projectionValues?.subagent?.label ?? catalogLabel ?? parsed.childSessionId
     },
   } satisfies SidebarRightTabDefinition), 'ui-subagent: Sidebar chat type')

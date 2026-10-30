@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ausführung außerhalb der Spitzenzeiten",
+    "description": "Verschiebt Zielrunden und wartende Aufgaben in konfigurierte Nebenzeiten, optional auf ein günstigeres Modell."
+  }
+}

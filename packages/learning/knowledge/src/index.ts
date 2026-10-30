@@ -460,11 +460,11 @@ async function startEnrichment(
   }
   const id = startKnowledgeJob(
     jobs,
-    invocation.agent,
+    invocation.agent.session.id,
     `/kb enrich ${collection ?? 'all collections'} (${Math.min(limit, waiting)} files)`,
     'knowledge enrichment cancelled',
     run,
-    ({ summarized, text }) => ({ detail: `${summarized} summarized`, output: text }),
+    ({ summarized, text }) => ({ detail: `${summarized} summarized`, result: text }),
   )
   return {
     kind: 'success',
@@ -544,11 +544,11 @@ async function startEmbedding(
   }
   const id = startKnowledgeJob(
     jobs,
-    invocation.agent,
+    invocation.agent.session.id,
     `/kb embed ${collection ?? 'all collections'} (${Math.min(limit, waiting)} passages)`,
     'knowledge embedding cancelled',
     run,
-    report => ({ detail: `${report.embedded} embedded`, output: render(report) }),
+    report => ({ detail: `${report.embedded} embedded`, result: render(report) }),
   )
   return { kind: 'success', text: `Embedding up to ${Math.min(limit, waiting)} of ${waiting} waiting passage(s) as background job ${id}; job_kill ${id} stops it.` }
 }

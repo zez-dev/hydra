@@ -11,12 +11,23 @@ import { z as zod } from 'zod'
 import type { ZodType } from 'zod'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Message, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, Message, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { TodoItem } from './types.ts'
 // Type-only: resolves the required ctx.sessionProjections service declaration.
 import type {} from '@deepseek-ai/dsh-session-projection'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The open-todo reminder this tool steers. The kind is the name released
+     * Hydra logs migrate this producer's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:tool-todo': { kind: 'plugin:tool-todo' } & ContextFormed
+  }
+}
 // The `todos` projection-key declaration lives in src/types.ts (its one home);
 // this re-export projects the type face onto the package root AND keeps the
 // module edge in the emitted index.d.ts, so aggregate programs consuming the
@@ -64,8 +75,8 @@ export const Config: z<Config> = z.object({
   maxOpenTodoContinuationsPerTurn: z.natural().default(DEFAULT_OPEN_TODO_CONTINUATIONS),
 })
 
-/** Plugin name recorded on the task-state and continuation messages this package adds. */
-const TODO_PLUGIN = 'tool-todo'
+/** Source kind recorded on the task-state and continuation messages this package adds. */
+const TODO_SOURCE_KIND = 'plugin:tool-todo'
 
 /**
  * Whether a task still owes work.
@@ -151,27 +162,16 @@ function listVisible(session: Session, todos: readonly TodoItem[]): boolean {
 }
 
 const DESCRIPTION_HEAD =
-  'Record and update a structured task list for the current work. Send the ENTIRE '
-  + 'list every call — it REPLACES the previous list (there are no partial updates, '
-  + 'no per-item edits). Use it to plan multi-step work and show progress: add one '
-  + 'todo per concrete step before you start. '
+  'Record and update a task list to plan multi-step work and show progress; skip it for trivial '
+  + 'single-step tasks. Add one todo per concrete step before you start. '
 
 const DESCRIPTION_PARALLEL =
-  'Mark every todo being actively worked '
-  + 'on `in_progress` — several at once when work genuinely runs in parallel (e.g. '
-  + 'concurrent subagents or background commands), one for sequential work; while '
-  + 'work remains, at least one task should be `in_progress`. '
+  'While work remains, keep the todos being worked on `in_progress`, several only when work runs in parallel. '
 
 const DESCRIPTION_SINGLE =
-  'Keep AT MOST ONE todo `in_progress` at a '
-  + 'time; while work remains, exactly one active task should be `in_progress`. '
+  'While work remains, keep exactly one todo `in_progress`. '
 
-const DESCRIPTION_TAIL =
-  'Mark a todo '
-  + '`completed` the moment it is done (do not batch completions), and allow no '
-  + '`in_progress` item only once all work is complete. Skip the list for trivial '
-  + 'single-step tasks. Statuses: `pending` (not started), `in_progress` (being '
-  + 'worked on now), `completed` (finished).'
+const DESCRIPTION_TAIL = 'Mark each todo `completed` as soon as it is done.'
 
 /**
  * The model-facing description for one activation. The active-status clause is the only part that
@@ -232,15 +232,15 @@ const todosProjectionSchema: ZodType<TodoItem[] | null> = zod.union([
  * `ctx.sessionProjections`.
  * @param ctx - registrant context carrying the tool and session-projection registries.
  * @param config - deployment's explicit todo policy.
+ * @returns when the plugin is ready.
  */
-export function apply(ctx: Context, config: Config): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   const allowParallel = config.allowParallelInProgress
-  installOpenTodoFollowUp(ctx, config)
   // Standing-plan fold: latest whole todo/write list, cleared by the next
   // turn/start (turn/end keeps the finished checklist visible); null before the
   // first write or after a later turn begins; every other event returns the
   // same state reference.
-  ctx.sessionProjections.register<'todos', TodoItem[] | null>({
+  const todosProjectionHandle = await ctx.sessionProjections.register<'todos', TodoItem[] | null>({
     key: 'todos',
     stateSchema: todosProjectionSchema,
     init: () => null,
@@ -249,9 +249,10 @@ export function apply(ctx: Context, config: Config): void {
       if (event.type === 'turn/start') return state?.some(isOpen) === true ? state : null
       return state
     },
-    wire: { viewSchema: todosProjectionSchema, view: state => state },
+    wire: { viewSchema: todosProjectionSchema, view: state => state, summary: false },
     stateVersion: 3,
   })
+  installOpenTodoFollowUp(ctx, config, session => todosProjectionHandle.stateOf(session))
   ctx.tools.register(defineTool({
     name: 'todo_write',
     description: describe(allowParallel),
@@ -338,17 +339,20 @@ export function apply(ctx: Context, config: Config): void {
  * the previous turn did not complete.
  * @param ctx - plugin context.
  * @param config - the reminder switch and the per-turn continuation cap.
+ * @param latestList - reads the session's latest list; the `todos` projection keeps a list with
+ *   open tasks across turns.
  */
-function installOpenTodoFollowUp(ctx: Context, config: Config): void {
+function installOpenTodoFollowUp(
+  ctx: Context,
+  config: Config,
+  latestList: (session: Session) => readonly TodoItem[] | null,
+): void {
   // Schemastery (`Config`) fills the default before apply runs; the cast records that runtime fact.
   const maxContinuations = (config as Required<Pick<Config, 'maxOpenTodoContinuationsPerTurn'>>).maxOpenTodoContinuationsPerTurn
   /** The turn in which each session last wrote its list. */
   const writtenIn = new Map<SessionId, number>()
   /** Each session's current turn, and how many continuations it already asked for. */
   const turns = new Map<SessionId, { turn: number; continuations: number; previousCompleted: boolean }>()
-
-  // The `todos` projection keeps a list with open tasks across turns, so it is the latest list here.
-  const latestList = (session: Session): readonly TodoItem[] | null => ctx.sessionProjections.stateOf(session, 'todos') ?? null
 
   ctx.on('session/event', (session, event) => {
     switch (event.type) {
@@ -388,7 +392,7 @@ function installOpenTodoFollowUp(ctx: Context, config: Config): void {
       if (!cutOff && listVisible(agent.session, todos)) return decision
       const reminder: UserMessage = createUserMessage({
         content: [{ type: 'text', text: reminderText(todos) }],
-        source: { kind: 'plugin', plugin: TODO_PLUGIN, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks carried over` },
+        source: { kind: TODO_SOURCE_KIND, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks carried over` },
       })
       return { ...decision, messages: [...decision.messages, reminder] }
     })
@@ -403,7 +407,7 @@ function installOpenTodoFollowUp(ctx: Context, config: Config): void {
     current.continuations += 1
     agent.steer(createUserMessage({
       content: [{ type: 'text', text: continuationText(todos) }],
-      source: { kind: 'plugin', plugin: TODO_PLUGIN, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks remain` },
+      source: { kind: TODO_SOURCE_KIND, form: 'notice', summary: `Task list: ${todos.filter(isOpen).length} open tasks remain` },
     }))
   })
 }

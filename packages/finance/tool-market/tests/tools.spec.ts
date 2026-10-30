@@ -3,6 +3,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import MarketDataRuntime, { MarketDataError } from '@deepseek-ai/dsh-market-data'
@@ -45,6 +47,7 @@ async function setup(config: Partial<ToolMarket.Config> = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(CommandRuntime)
   await ctx.plugin(MarketDataRuntime, {
@@ -77,7 +80,7 @@ describe('the market tools', () => {
 
   it('quotes and renders the close with its session date', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_quote', arguments: { symbols: ['AAPL'] },
     })
     expect(result.isError).toBe(false)
@@ -86,7 +89,7 @@ describe('the market tools', () => {
 
   it('caps the symbols one quote call may name and says how many it dropped', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_quote', arguments: { symbols: ['A', 'B', 'C', 'D'] },
     })
     const lines = text(result).split('\n')
@@ -96,7 +99,7 @@ describe('the market tools', () => {
 
   it('caps history at the configured bar limit and says it truncated', async () => {
     const { ctx, provider } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_history', arguments: { symbol: 'AAPL', limit: 500 },
     })
     expect(provider.asked.history).toBe(5)
@@ -105,7 +108,7 @@ describe('the market tools', () => {
 
   it('passes a date window through to the source', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_history', arguments: { symbol: 'AAPL', from: '2026-01-01', to: '2026-01-05' },
     })
     expect(result.isError).toBe(false)
@@ -113,7 +116,7 @@ describe('the market tools', () => {
 
   it('renders an issuer profile', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_profile', arguments: { symbol: 'AAPL' },
     })
     expect(text(result)).toContain('Stub Inc.')
@@ -121,7 +124,7 @@ describe('the market tools', () => {
 
   it('caps filings at the configured limit and says it capped them', async () => {
     const { ctx, provider } = await setup()
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_filings', arguments: { symbol: 'AAPL', limit: 99 },
     })
     expect(provider.asked.filingsLimit).toBe(3)
@@ -132,6 +135,7 @@ describe('the market tools', () => {
     const ctx = new Context()
     await ctx.plugin(SystemPrompt)
     await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
     await ctx.plugin(AgentRegistry)
     await ctx.plugin(CommandRuntime)
     await ctx.plugin(MarketDataRuntime, {
@@ -144,7 +148,7 @@ describe('the market tools', () => {
       quote: () => Promise.reject(new MarketDataError('the source carries no symbol "ZZZZ"', 'MARKET_SYMBOL_UNKNOWN')),
     })
     await ctx.plugin(ToolMarket, { maxSymbols: 2, maxBars: 5, maxFilings: 3, summaryBars: 30 })
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'market_quote', arguments: { symbols: ['ZZZZ'] },
     })
     expect(result.isError).toBe(true)

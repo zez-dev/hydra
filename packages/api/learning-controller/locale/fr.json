@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "API d'apprentissage",
+    "description": "Permet à l'onglet Apprentissage de l'interface web de lister, examiner, oublier et promouvoir en compétences les entrées de mémoire apprises."
+  }
+}

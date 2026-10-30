@@ -11,6 +11,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import * as Doctor from '@deepseek-ai/dsh-doctor'
 import * as DoctorTools from '@deepseek-ai/dsh-doctor/tools'
@@ -53,6 +55,7 @@ async function setup(config: Partial<Doctor.Config> = {}) {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
@@ -211,7 +214,7 @@ describe('/doctor and the doctor tool', () => {
   it('returns the report as JSON from the tool and never mutates', async () => {
     const { ctx, cwd } = await setup()
     const agent = await fakeAgent(ctx, cwd)
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'doctor', arguments: {}, agent })
+    const result = await executeModelToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'doctor', arguments: {}, agent })
     expect(result.isError).toBe(false)
     const report = result.value as unknown as DoctorReport
     expect(Array.isArray(report.rows)).toBe(true)
@@ -220,7 +223,7 @@ describe('/doctor and the doctor tool', () => {
 
   it('checks the process working directory when the tool runs without an agent', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c2'), name: 'doctor', arguments: { probe: true } })
+    const result = await executeModelToolFixture(ctx, { signal, callId: ToolCallId('c2'), name: 'doctor', arguments: { probe: true } })
     expect(result.isError).toBe(false)
     const report = result.value as unknown as DoctorReport
     expect(report.rows.find(row => row.check === 'git repository')).toMatchObject({ status: 'ok', detail: process.cwd() })

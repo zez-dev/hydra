@@ -97,13 +97,13 @@ export function apply(ctx: Context): void {
       const timeoutMs = Math.min(args.timeoutMs ?? limits.maxExperimentMs, limits.maxExperimentMs)
       const specs: MetricSpec[] = (args.metrics ?? []).map(spec => ({ name: spec.name, regex: spec.regex }))
       const dshEnv = ctx.get('shellEnv')?.collect(exec)
-      const result = await shell.run(shell.resolve({
+      const result = await (await shell.execute(shell.resolve({
         command: args.command,
         workdir: cwd,
         timeoutMs,
         ...dshEnv === undefined ? {} : { dshEnv },
         signal: exec.signal,
-      }))
+      }))).result()
       if (result.aborted) throw new Error('run_experiment aborted')
       const raw = [result.stdout.text, result.stderr.text].filter(text => text.length > 0).join('\n')
       const metrics = extractMetrics(raw, specs)

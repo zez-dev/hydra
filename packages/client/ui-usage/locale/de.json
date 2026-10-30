@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Nutzungsdashboard",
+    "description": "Zeigt Token-Summen, eine tägliche Heatmap über 12 Monate und eine Tabelle pro Modell in der rechten Seitenleiste."
+  }
+}

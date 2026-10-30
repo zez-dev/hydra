@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Base de conocimiento",
+    "description": "Indexa carpetas de documentos para búsqueda de texto completo y permite que el modelo las busque, lea y explore."
+  }
+}

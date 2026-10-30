@@ -9,9 +9,10 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Research from '@deepseek-ai/dsh-research'
@@ -88,7 +89,7 @@ async function fakeAgent(ctx: Context, cwd: string, id = 'scoring-agent'): Promi
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -161,7 +162,7 @@ describe('hypothesis scoring after an experiment', () => {
     const ctx = await setup(adapter)
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
     const h2 = (await run({ action: 'hypothesis', text: 'Width matters' })).value as { id: string }
     adapter.scoringAnswers.push(`[{"hypothesisId":"${h1.id}","score":0.2,"reason":"loss rose"},{"hypothesisId":"${h2.id}","score":0.7,"reason":"loss fell"},{"hypothesisId":"h-ghost","score":0.5,"reason":"unknown"}]`)
@@ -186,7 +187,7 @@ describe('hypothesis scoring after an experiment', () => {
     ctx.logger.warn = ((...args: unknown[]) => { warnings.push(String(args[0])); warn(...args as [string]) }) as typeof ctx.logger.warn
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
     adapter.scoringAnswers.push(`[{"hypothesisId":"${h1.id}","score":0.6,"reason":"promising"}]`)
     await run({ action: 'experiment', what: 'a', result: 'b' })
@@ -206,7 +207,7 @@ describe('hypothesis scoring after an experiment', () => {
     ctx.logger.warn = ((...args: unknown[]) => { warnings.push(String(args[0])); warn(...args as [string]) }) as typeof ctx.logger.warn
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     await run({ action: 'hypothesis', text: 'Depth matters' })
     await run({ action: 'experiment', what: 'a', result: 'b' })
     await run({ action: 'experiment', what: 'c', result: 'd' })
@@ -219,7 +220,7 @@ describe('hypothesis scoring after an experiment', () => {
     const ctx = await setup(adapter, { scoring: { enabled: true, maxOutputTokens: 256, timeoutMs: 5000, provider: 'mock', model: 'mock' } })
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     await run({ action: 'experiment', what: 'a', result: 'b' })
     expect(adapter.scoringRequests).toHaveLength(0)
   })

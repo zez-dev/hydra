@@ -123,7 +123,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     if (config.action === 'pause-goal') {
       agent.inject(createUserMessage({
         content: [{ type: 'text', text: NOTICE }],
-        source: { kind: 'plugin', plugin: 'dsh-spend-guard' },
+        source: { kind: 'plugin:dsh-spend-guard' },
       }))
     } else {
       agent.cancel({ kind: 'hook', reason: `spend-guard: ${scope} token budget reached` })

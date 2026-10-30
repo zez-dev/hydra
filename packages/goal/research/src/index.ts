@@ -25,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-goal'
 import type {} from '@deepseek-ai/dsh-notify'
 import { FolderJournalStore, slugify } from './journal.ts'
 import { parseResearchInput, renderResearchInstruction, researchObjective, researchSlugOf } from './instruction.ts'
-import { createRecallMessage, digestRecall, isRecallMessage, recallText, renderJournalRecall, RESEARCH_PLUGIN } from './recall.ts'
+import { createRecallMessage, digestRecall, isRecallMessage, recallText, renderJournalRecall, RESEARCH_SOURCE_KIND } from './recall.ts'
 import { relatedBreakthroughs } from './bridge.ts'
 // Type-only: resolves the optional `ctx.memory` service declaration.
 import type {} from '@deepseek-ai/dsh-memory'
@@ -36,7 +36,7 @@ export type * from './types.ts'
 export { FolderJournalStore, JOURNAL_FILE, parseJournalFile, renderJournalFile, slugify } from './journal.ts'
 export { parseResearchInput, renderResearchInstruction, RESEARCH_PREFIX, researchObjective, researchSlugOf } from './instruction.ts'
 export type { ResearchInput } from './instruction.ts'
-export { createRecallMessage, digestRecall, isRecallMessage, recallText, renderJournalRecall, RESEARCH_PLUGIN } from './recall.ts'
+export { createRecallMessage, digestRecall, isRecallMessage, recallText, renderJournalRecall, RESEARCH_SOURCE_KIND } from './recall.ts'
 export { BREAKTHROUGH_TAG, mirrorBreakthroughs, normalizeBreakthrough, relatedBreakthroughs, researchTag, RESEARCH_TAG_PREFIX } from './bridge.ts'
 export type { BridgeMemory, BridgeMemoryEntry } from './bridge.ts'
 export type { RecallOptions } from './recall.ts'
@@ -118,6 +118,9 @@ export const Config: z<Config> = z.object({
 
 const USAGE = 'Usage: /research <objective> [--criteria "a; b"] [--slug name] | /research list | /research continue [name]'
   + ' | /research status | /research pause | /research resume'
+
+/** Source kinds of the messages that start work: the user's, a goal round's, a webhook's, a scheduled follow-up's. */
+const WORK_SOURCE_KINDS: ReadonlySet<string> = new Set(['user', 'goal', 'webhook', 'schedule'])
 
 /** What a session without research is told; a journal from another session continues with `/research continue`. */
 const NO_RESEARCH = 'No research goal in this session. /research continue <name> picks up a journal in this workspace'
@@ -235,7 +238,7 @@ export function apply(ctx: Context, config: Config): void {
     }
     const messages: Message[] = [createUserMessage({
       content: [{ type: 'text', text: renderScoringRequest(journal) }],
-      source: { kind: 'plugin', plugin: RESEARCH_PLUGIN },
+      source: { kind: RESEARCH_SOURCE_KIND },
     })]
     try {
       using callDeadline = deadline(signal, config.scoring.timeoutMs, RESEARCH_SCORE_TIMEOUT_CODE)
@@ -442,7 +445,7 @@ export function apply(ctx: Context, config: Config): void {
     })
     const digest = digestRecall(text)
     const visible = recallHistory(agent).visibleDigest
-    const startsWork = decision.messages.some(message => message.source.kind !== 'plugin')
+    const startsWork = decision.messages.some(message => WORK_SOURCE_KINDS.has(message.source.kind))
     let messages = decision.messages
     if (visible === digest || (visible !== undefined && !startsWork)) {
       messages = pending === undefined ? messages : withoutPending()
@@ -455,7 +458,7 @@ export function apply(ctx: Context, config: Config): void {
     if (round !== undefined && goal !== undefined && goal.phase === 'active') {
       messages = [...messages, createUserMessage({
         content: [{ type: 'text', text: renderResearchInstruction(journal) }],
-        source: { kind: 'plugin', plugin: RESEARCH_PLUGIN },
+        source: { kind: RESEARCH_SOURCE_KIND },
       })]
     }
     return messages === decision.messages ? decision : { ...decision, messages }

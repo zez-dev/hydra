@@ -17,6 +17,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import * as AutoContinue from '@deepseek-ai/dsh-auto-continue'
 import { MockAdapter, maxTokensResponse, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 
@@ -39,6 +40,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     '  config:',
@@ -60,6 +62,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-auto-continue', AutoContinue],
@@ -89,7 +92,7 @@ describe('auto-continue real Loader composition through cordis.yml', () => {
     const events = agent.session.snapshotEvents()
     expect(events.filter(event => event.type === 'turn/start')).toHaveLength(1)
     expect(events.filter(event => event.type === 'assistant/message')).toHaveLength(2)
-    const continuation = events.find(event => event.type === 'user/message' && event.data.source.kind === 'plugin')
+    const continuation = events.find(event => event.type === 'user/message' && event.data.source.kind === 'plugin:dsh-auto-continue')
     expect(continuation).toBeDefined()
     expect(adapter.requests).toHaveLength(2)
     const lastRequestText = adapter.requests[1]!.messages.at(-1)!.content

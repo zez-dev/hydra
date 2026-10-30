@@ -8,9 +8,10 @@ import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import Storage from '@deepseek-ai/dsh-storage'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
@@ -54,7 +55,7 @@ async function fakeAgent(ctx: Context, id = 'curator-agent'): Promise<Agent> {
   const scope = ctx.plugin(() => {})
   const session = Session.create(SessionId(id))
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -68,7 +69,7 @@ async function preStep(ctx: Context, agent: Agent, request = 'which package mana
   const messages = [createUserMessage({ content: [{ type: 'text', text: request }], source: { kind: 'user' } })]
   return agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages, prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal: new AbortController().signal },
+    { messages, prompt: { systemPrompt: '', tools: [] }, modelSelection: { provider: 'mock', model: 'mock' }, turn: 1, step: 1, signal: new AbortController().signal },
     () => Promise.resolve({ kind: 'enter' as const, messages }),
   )
 }
@@ -182,7 +183,7 @@ describe('curation in the store', () => {
   it('search through the tool marks returned entries used', async () => {
     const ctx = await setup({ staleAfterDays: 30, archiveAfterDays: 90, duplicateThreshold: 0.85 })
     const entry = await ctx.memory.add({ text: 'tests run per package', kind: 'shortcut', tags: [] }, 'approved')
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'memory', arguments: { action: 'search', query: 'per package' } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'memory', arguments: { action: 'search', query: 'per package' } })
     expect(result.isError).toBe(false)
     expect(ctx.memory.get(entry.id)?.lastUsedAt).toBeDefined()
   })

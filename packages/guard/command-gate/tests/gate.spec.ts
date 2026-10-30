@@ -5,9 +5,11 @@ import type { Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import ApprovalService from '@deepseek-ai/dsh-user-approval'
@@ -52,6 +54,7 @@ async function setup(config: Partial<Config> = {}, approval?: 'service' | 'never
   context = ctx
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
@@ -70,7 +73,7 @@ async function setup(config: Partial<Config> = {}, approval?: 'service' | 'never
 async function registerAgent(ctx: Context, session: Session): Promise<{ agent: Agent; unregister: () => Promise<void> }> {
   const scope = ctx.plugin(() => {})
   const agent: Agent = {
-    id: session.id, options: {}, session, inbox: unsupportedInbox(),
+    id: session.id, options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -93,9 +96,9 @@ async function gateReport(ctx: Context, agent: Agent): Promise<string> {
   return (result as { text: string }).text
 }
 
-/** Run one command through the registry, the way a model call would. */
+/** Run one command through the native executor, the way a model call would. */
 async function run(ctx: Context, agent: Agent, command: string, workdir?: string) {
-  return ctx.tools.execute({
+  return executeModelToolFixture(ctx, {
     signal,
     callId: ToolCallId('c1'),
     name: 'bash',
@@ -141,7 +144,7 @@ describe('the gate decides inside the executor', () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
     for (const args of [null, 'rm -rf /etc']) {
-      const result = await ctx.tools.execute({ signal, callId: ToolCallId('c3'), name: 'bash', agent, arguments: args })
+      const result = await executeModelToolFixture(ctx, { signal, callId: ToolCallId('c3'), name: 'bash', agent, arguments: args })
       expect(result.isError).toBe(true)
       expect((result.content[0] as { text: string }).text).toContain('invalid arguments')
     }
@@ -153,7 +156,7 @@ describe('the gate decides inside the executor', () => {
     const ctx = await setup()
     const withoutWorkspace = await fakeAgent(ctx, 'no-workspace', {})
     expect((await run(ctx, withoutWorkspace, 'git reset --hard')).isError).toBe(false)
-    const withoutAgent = await ctx.tools.execute({
+    const withoutAgent = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c4'), name: 'bash', arguments: { command: 'git reset --hard' },
     })
     expect(withoutAgent.isError).toBe(false)
@@ -170,7 +173,7 @@ describe('the gate decides inside the executor', () => {
       output: { schema: { type: 'json' }, render: () => [] },
       execute: async () => ({ ok: true }),
     }))
-    const result = await ctx.tools.execute({
+    const result = await executeModelToolFixture(ctx, {
       signal, callId: ToolCallId('c2'), name: 'note', agent, arguments: { text: 'rm -rf /etc' },
     })
     expect(result.isError).toBe(false)

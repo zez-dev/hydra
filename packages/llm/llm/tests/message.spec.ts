@@ -1,21 +1,51 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 import {
   ToolCallId,
+  boundContextSummary,
+  CONTEXT_SUMMARY_MAX_CHARS,
   createAssistantMessage,
-  createPluginRecallMessage,
+  createDeveloperMessage,
+  createSystemMessage,
   createToolResultMessage,
   createUserMessage,
   freezeMessage,
-  isPluginRecallMessage,
   MessageId,
   messageText,
 } from '@deepseek-ai/dsh-llm'
 
 describe('message construction', () => {
+  it('detaches and freezes developer tool names without copying their definitions', () => {
+    const content = [{ type: 'tool-addition' as const, toolName: 'search' }]
+    const message = createDeveloperMessage({ content, source: { kind: 'test' } })
+    content[0]!.toolName = 'changed'
+    expect(message.role).toBe('developer')
+    expect(message.content).toEqual([{ type: 'tool-addition', toolName: 'search' }])
+    expect(Object.isFrozen(message.content[0])).toBe(true)
+    expect(freezeMessage(message).id).toBe(message.id)
+  })
+
+  it('bounds producer summaries while preserving summaries at the exact limit', () => {
+    const exact = 'x'.repeat(CONTEXT_SUMMARY_MAX_CHARS)
+    expect(boundContextSummary(exact)).toBe(exact)
+    expect(boundContextSummary(exact + 'x')).toBe(exact.slice(0, -1) + '…')
+  })
+
+  it('preserves system-prompt attribution on immutable system messages', () => {
+    const expectedSource: { kind: 'system-prompt' } = { kind: 'system-prompt' }
+    const message = createSystemMessage('rule')
+    expectTypeOf(message.source).toEqualTypeOf(expectedSource)
+    expect(message.role).toBe('system')
+    expect(message.content).toEqual([{ type: 'text', text: 'rule' }])
+    expect(message.source).toEqual(expectedSource)
+    expect(Object.isFrozen(message)).toBe(true)
+    expect(Object.isFrozen(message.source)).toBe(true)
+    expect(createSystemMessage('').content).toEqual([])
+  })
+
   it('assigns identity immediately and returns a detached deep-frozen message', () => {
     const input = {
       content: [{ type: 'text' as const, text: 'original' }],
-      source: { kind: 'plugin' as const, plugin: 'test' },
+      source: { kind: 'test' as const },
     }
 
     const message = createUserMessage(input)
@@ -86,14 +116,11 @@ describe('message construction', () => {
     })
 
     expect(message).toMatchObject({
-      role: 'user',
+      role: 'tool',
+      toolCallId: callId,
+      isError: false,
       source: { kind: 'tool', callId },
-      content: [{
-        type: 'tool-result',
-        toolCallId: callId,
-        content: [{ type: 'text', text: 'result' }],
-        isError: false,
-      }],
+      content: [{ type: 'text', text: 'result' }],
     })
     expect(message.id).not.toHaveLength(0)
     expect(Object.isFrozen(message)).toBe(true)
@@ -101,26 +128,7 @@ describe('message construction', () => {
   })
 })
 
-describe('plugin recall messages', () => {
-  it('creates a frozen user message holding the text, sourced to the plugin in recall form', () => {
-    const message = createPluginRecallMessage('dsh-memory', '<retrieved_memory>note</retrieved_memory>')
-    expect(message).toMatchObject({
-      role: 'user',
-      content: [{ type: 'text', text: '<retrieved_memory>note</retrieved_memory>' }],
-      source: { kind: 'plugin', plugin: 'dsh-memory', form: 'recall' },
-    })
-    expect(message.id).toEqual(expect.any(String))
-    expect(Object.isFrozen(message)).toBe(true)
-  })
-
-  it('recognizes only the named plugin\'s recall form', () => {
-    const content = [{ type: 'text' as const, text: 'note' }]
-    expect(isPluginRecallMessage(createPluginRecallMessage('dsh-memory', 'note'), 'dsh-memory')).toBe(true)
-    expect(isPluginRecallMessage(createPluginRecallMessage('dsh-memory', 'note'), 'dsh-research')).toBe(false)
-    expect(isPluginRecallMessage(createUserMessage({ content, source: { kind: 'plugin', plugin: 'dsh-memory' } }), 'dsh-memory')).toBe(false)
-    expect(isPluginRecallMessage(createUserMessage({ content, source: { kind: 'user' } }), 'dsh-memory')).toBe(false)
-  })
-
+describe('message text', () => {
   it('reads the text blocks of a message, concatenated, and nothing else', () => {
     const mixed = createUserMessage({
       content: [{ type: 'text', text: 'Hello' }, { type: 'reasoning', text: 'hidden' }, { type: 'text', text: ' world' }],

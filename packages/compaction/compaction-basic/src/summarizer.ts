@@ -5,9 +5,11 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { contentHasImage, createUserMessage, BlockAssembler, LlmError, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
+import { contentHasImage, BlockAssembler, LlmError, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
+import { deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type {
-  ContentBlock, FinishReason, GenerateOptions, Message, ReasoningEffortId, TokenUsage, ToolSchema } from '@deepseek-ai/dsh-llm'
+  ContentBlock, FinishReason, GenerateOptions, Message, ReasoningEffortId, RequestMessage, TokenUsage, ToolHistory, ToolSchema,
+} from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 
 interface SummaryConfig {
@@ -114,9 +116,10 @@ export type SummaryResult = {
  * Run the default cache-reusing `ctx.llm.stream()` summarization call: replay
  * the conversation prefix, then append the compaction instruction as the final
  * user message so the provider's warm prefix cache is reused. An answer with
- * no text is asked once more: without the tools when the model called one,
- * at the route's default effort when the lowest effort was asked; a route
- * whose default effort then answers is asked at its default from then on.
+ * no text is asked once more: without the tools and the tool history when the
+ * model called one, at the route's default effort when the lowest effort was
+ * asked; a route whose default effort then answers is asked at its default
+ * from then on.
  * @param ctx - context providing the LLM service.
  * @param config - resolved backend configuration.
  * @param input - replayed conversation prefix (system, tools, and leading messages) to condense.
@@ -149,11 +152,11 @@ export async function summarizeWithLlm(
     )
   }
 
-  const messages: Message[] = [
+  const messages: RequestMessage[] = [
     ...input.messages,
-    createUserMessage({
+    deepFreeze({
+      role: 'user',
       content: [{ type: 'text', text: COMPACTION_INSTRUCTION }],
-      source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
     }),
   ]
   // A thinking model spends a summary's cap on reasoning first, and near a
@@ -165,7 +168,8 @@ export async function summarizeWithLlm(
   const lowest = defaultEffortRoutes.has(routeKey)
     ? undefined
     : await ctx.llm.resolveModelInfo(target.provider, target.model, signal).then(info => lowestReasoningEffort(info), () => undefined)
-  let attempt: { readonly tools?: ToolSchema[]; readonly reasoningEffort?: ReasoningEffortId } = {
+  let attempt: { readonly tools?: ToolSchema[]; readonly toolHistory?: ToolHistory; readonly reasoningEffort?: ReasoningEffortId } = {
+    toolHistory: agent.session.toolHistory(),
     ...input.tools === undefined ? {} : { tools: [...input.tools] },
     ...lowest === undefined ? {} : { reasoningEffort: lowest },
   }
@@ -174,6 +178,7 @@ export async function summarizeWithLlm(
       provider: target.provider,
       model: target.model,
       messages,
+      ...attempt.toolHistory === undefined ? {} : { toolHistory: attempt.toolHistory },
       ...attempt.tools === undefined ? {} : { tools: attempt.tools },
       maxTokens: config.maxTokens,
       ...attempt.reasoningEffort === undefined ? {} : { reasoningEffort: attempt.reasoningEffort },
@@ -209,7 +214,7 @@ export async function summarizeWithLlm(
     const calledTool = rawOutput.some(block => block.type === 'tool-call')
     let next: typeof attempt | undefined
     if (calledTool && attempt.tools !== undefined) {
-      const { tools: _tools, ...kept } = attempt
+      const { tools: _tools, toolHistory: _toolHistory, ...kept } = attempt
       next = kept
     } else if (!calledTool && attempt.reasoningEffort !== undefined) {
       const { reasoningEffort: _effort, ...kept } = attempt

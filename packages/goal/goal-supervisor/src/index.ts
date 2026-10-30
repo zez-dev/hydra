@@ -16,7 +16,7 @@ import type { AgentSetup } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 // Type-only: resolves the optional `agentPresets` and `agentDefaultModel` declarations.
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-session-query'
 import { isUnlimitedGoalRounds } from '@deepseek-ai/dsh-goal'

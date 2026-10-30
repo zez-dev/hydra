@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createToolResultMessage, LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
-import ToolRuntime, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Evaluator from '@deepseek-ai/dsh-goal-evaluator'
 import { collectEvidence, parseVerdict, renderWorkspaceEvidence } from '@deepseek-ai/dsh-goal-evaluator'
@@ -58,7 +59,7 @@ async function setup(adapter: LlmAdapter, workspaceChanges?: WorkspaceChanges): 
   const session = ctx.sessions.create(SessionId(`evaluator-${Math.random()}`))
   const scope = ctx.plugin(() => {})
   const agent: Agent = {
-    id: session.id, options: {}, session, inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
+    id: session.id, options: {}, session, model: unsupportedModel(), inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
     send: () => {}, followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
     whenIdle: () => Promise.resolve(),
@@ -68,21 +69,17 @@ async function setup(adapter: LlmAdapter, workspaceChanges?: WorkspaceChanges): 
 }
 
 function recordToolResult(session: Session, index: number, text: string): void {
-  session.append('tool/call', { turn: 1, step: 1, callId: ToolCallId(`c${index}`), name: 'bash', arguments: JSON.stringify({ command: `cmd ${index}` }) })
+  const callId = ToolCallId(`c${index}`)
+  const call = session.append('tool/call', { turn: 1, step: 1, callId, name: 'bash', arguments: JSON.stringify({ command: `cmd ${index}` }) })
   session.append('tool/result', {
     turn: 1,
     step: 1,
-    message: {
-      id: `m${index}` as never,
-      role: 'user',
-      content: [{ type: 'tool-result', toolCallId: ToolCallId(`c${index}`), content: [{ type: 'text', text }] }],
-      source: { kind: 'tool', toolName: 'bash', callId: ToolCallId(`c${index}`) },
-    } as never,
-  }, { surfaceOp: 'append' })
+    message: createToolResultMessage({ callId, content: [{ type: 'text', text }], isError: false }),
+  }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] })
 }
 
 async function complete(ctx: Context, agent: Agent, goalId: string, revision: number) {
-  return ctx.tools.execute({
+  return executeToolFixture(ctx, {
     signal: new AbortController().signal,
     callId: ToolCallId('complete-1'),
     name: 'update_goal',
@@ -109,7 +106,7 @@ describe('collectEvidence', () => {
     }
     for (let index = 0; index < 3; index += 1) {
       push({ type: 'tool/call', data: { turn: 1, step: 1, callId: ToolCallId(`c${index}`), name: `tool${index}`, arguments: '{}' } } as never)
-      push({ type: 'tool/result', data: { turn: 1, step: 1, message: { content: [{ type: 'tool-result', toolCallId: ToolCallId(`c${index}`), content: [{ type: 'text', text: `result ${index} ${'x'.repeat(50)}` }] }] } } } as never)
+      push({ type: 'tool/result', data: { turn: 1, step: 1, message: { toolCallId: ToolCallId(`c${index}`), content: [{ type: 'text', text: `result ${index} ${'x'.repeat(50)}` }] } } } as never)
     }
     const evidence = collectEvidence(events, 2, 30)
     expect(evidence).toHaveLength(2)
@@ -219,7 +216,7 @@ describe('update_goal complete gate', () => {
     const noGoal = await complete(ctx, agent, 'g', 1)
     expect(noGoal.isError).toBe(false)
     const goal = ctx.goals.create(agent, { objective: 'ship it' })
-    const paused = await ctx.tools.execute({
+    const paused = await executeToolFixture(ctx, {
       signal: new AbortController().signal,
       callId: ToolCallId('pause-1'),
       name: 'update_goal',

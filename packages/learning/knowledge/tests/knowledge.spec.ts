@@ -8,14 +8,17 @@ import Loader from '@deepseek-ai/cordis-plugin-loader'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Session, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import LlmRuntime, { LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
-import type { JobStart } from '@deepseek-ai/dsh-jobs'
+import { JobId, type JobHandle, type JobSpec } from '@deepseek-ai/dsh-jobs'
 import * as Knowledge from '@deepseek-ai/dsh-knowledge'
 import * as KnowledgeTools from '@deepseek-ai/dsh-knowledge/tools'
 import { chunkFile, KnowledgeIndex, matchExpression, parseRef } from '@deepseek-ai/dsh-knowledge'
@@ -283,10 +286,12 @@ async function boot(collectionLines: readonly string[], extraLines: readonly str
   root ??= await mkdtemp(join(tmpdir(), 'dsh-knowledge-'))
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
+    "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-llm'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-commands'",
     "- name: '@deepseek-ai/dsh-knowledge'",
     '  config:',
@@ -303,10 +308,12 @@ async function boot(collectionLines: readonly string[], extraLines: readonly str
   await ctx.plugin(Loader)
   ctx.loader.builtins.include = Include
   const modules = new Map<string, unknown>([
+    ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-llm', LlmRuntime],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
     ['@deepseek-ai/dsh-knowledge', Knowledge],
     ['@deepseek-ai/dsh-knowledge/tools', KnowledgeTools],
@@ -331,7 +338,7 @@ async function fakeAgent(ctx: Context, cwd?: string): Promise<Agent> {
     ? Session.create(id)
     : Session.create(id, [], { version: SESSION_FORMAT_VERSION, id, createdAt: 0, isSeeded: false, cwd })
   const value: Agent = {
-    id, options: {}, session, inbox: unsupportedInbox(),
+    id, options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -366,17 +373,17 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     await ctx.knowledge.update()
     const signal = new AbortController().signal
 
-    const found = await ctx.tools.execute({ signal, callId: ToolCallId('k1'), name: 'knowledge_search', arguments: { query: 'sick leave certificate' } })
+    const found = await executeToolFixture(ctx, { signal, callId: ToolCallId('k1'), name: 'knowledge_search', arguments: { query: 'sick leave certificate' } })
     expect(found.isError).toBe(false)
     expect(resultText(found)).toContain('[docs:hr/leave.md#L9-L11] Leave policy › Sick leave')
 
-    const read = await ctx.tools.execute({ signal, callId: ToolCallId('k2'), name: 'knowledge_read', arguments: { ref: 'docs:hr/leave.md#L9-L11' } })
+    const read = await executeToolFixture(ctx, { signal, callId: ToolCallId('k2'), name: 'knowledge_read', arguments: { ref: 'docs:hr/leave.md#L9-L11' } })
     expect(resultText(read)).toContain('11: Sick leave needs a medical certificate')
 
-    const escaped = await ctx.tools.execute({ signal, callId: ToolCallId('k3'), name: 'knowledge_read', arguments: { ref: 'docs:../secret' } })
+    const escaped = await executeToolFixture(ctx, { signal, callId: ToolCallId('k3'), name: 'knowledge_read', arguments: { ref: 'docs:../secret' } })
     expect(escaped.isError).toBe(true)
 
-    const listed = await ctx.tools.execute({ signal, callId: ToolCallId('k4'), name: 'knowledge_browse', arguments: {} })
+    const listed = await executeToolFixture(ctx, { signal, callId: ToolCallId('k4'), name: 'knowledge_browse', arguments: {} })
     expect(resultText(listed)).toBe('docs: 2 files, 4 passages, 0 summarized')
 
     const assembly = await ctx.systemPrompt.assemble()
@@ -395,7 +402,7 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     ctx.llm.registerAdapter(['mock'], new SummaryAdapter())
     const enriched = await kb.handler({ commandId: CommandId('kb-3'), agent: { ...agent, options: { provider: 'mock', model: 'mock' } }, rawInput: 'enrich docs', attachments: [], signal })
     expect((enriched as { text: string }).text).toContain('summarized 2, failed 0, 0 still waiting')
-    const summarized = await ctx.tools.execute({ signal, callId: ToolCallId('k5'), name: 'knowledge_search', arguments: { query: 'leave policy certificate' } })
+    const summarized = await executeToolFixture(ctx, { signal, callId: ToolCallId('k5'), name: 'knowledge_search', arguments: { query: 'leave policy certificate' } })
     expect(resultText(summarized)).toContain('Matching files:\n- [docs:hr/leave.md] (guide; hr) A leave policy.')
   })
 
@@ -409,7 +416,7 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     const knowledgeTools = (): string[] => ctx.tools.schemas(agent).map(schema => schema.name).filter(name => name.startsWith('knowledge_'))
     expect(knowledgeTools()).toEqual(['knowledge_add'])
 
-    const unasked = await ctx.tools.execute({ signal, callId: ToolCallId('k-add'), name: 'knowledge_add', arguments: { path: docs }, agent })
+    const unasked = await executeToolFixture(ctx, { signal, callId: ToolCallId('k-add'), name: 'knowledge_add', arguments: { path: docs }, agent })
     expect(resultText(unasked)).toBe(`This session cannot ask the user for approval, so nothing was indexed; the user can run /kb add ${docs} instead.`)
 
     const kb = ctx.commands.find(agent, 'kb')
@@ -419,7 +426,7 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     await vi.waitFor(() => {
       expect(knowledgeTools()).toContain('knowledge_search')
     })
-    const found = await ctx.tools.execute({ signal, callId: ToolCallId('k-found'), name: 'knowledge_search', arguments: { query: 'sick leave certificate' }, agent })
+    const found = await executeToolFixture(ctx, { signal, callId: ToolCallId('k-found'), name: 'knowledge_search', arguments: { query: 'sick leave certificate' }, agent })
     expect(resultText(found)).toContain('[docs:hr/leave.md#L9-L11] Leave policy › Sick leave')
   })
 
@@ -429,9 +436,9 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     const ctx = await boot(['      - name: docs', `        root: ${JSON.stringify(docs)}`], ['    enrichConcurrency: 1'])
     await ctx.knowledge.update()
     ctx.llm.registerAdapter(['mock'], new SummaryAdapter())
-    const starts: JobStart[] = []
+    const starts: JobSpec[] = []
     ctx.provide('jobs', {
-      start: (spec: JobStart) => {
+      start: (spec: JobSpec) => {
         starts.push(spec)
         return `knowledge-enrich-${starts.length}`
       },
@@ -452,16 +459,17 @@ describe('knowledge real Loader composition through cordis.yml', () => {
     await enrich()
     expect(starts.map(spec => [spec.kind, spec.label])).toEqual(Array.from({ length: 3 }, () => ['knowledge-enrich', '/kb enrich docs (2 files)']))
 
+    const handle =(index: number): JobHandle => ({ id: JobId(`knowledge-enrich-${index + 1}`), append() {}, updateProgress() {} })
     // A rejection that is not an Error is reported through String().
     const unreadable = vi.spyOn(ctx.knowledge, 'pendingSummaries').mockImplementationOnce(() => { throw 'index unavailable' })
-    expect(await starts[0]!.run().done).toEqual({ status: 'failed', detail: 'index unavailable' })
+    expect(await starts[0]!.run(handle(0)).done).toEqual({ status: 'failed', detail: 'index unavailable' })
     unreadable.mockRestore()
 
-    const killed = starts[1]!.run()
+    const killed = starts[1]!.run(handle(1))
     killed.cancel()
     expect(await killed.done).toMatchObject({ status: 'killed' })
 
-    const completed = await starts[2]!.run().done
+    const completed = await starts[2]!.run(handle(2)).done
     expect(completed.status).toBe('completed')
     expect(completed.detail).toMatch(/^\d summarized$/)
   })

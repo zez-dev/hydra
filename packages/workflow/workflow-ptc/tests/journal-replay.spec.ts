@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
@@ -38,7 +40,9 @@ async function harness(options: { journal?: boolean } = {}) {
   const answers = new Map<string, string>()
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjections)
+  await ctx.plugin(AgentRegistry)
   await ctx.plugin(SandboxPolicy, { mode: 'read-only' })
+  provideWorkingDirectoryFixture(ctx)
   await ctx.plugin(SubagentRuntime)
   ctx.subagents.registerProvider(scriptedProvider({ starts, answers }) as never)
   await ctx.plugin(ScriptedRuntime)
@@ -51,7 +55,7 @@ async function harness(options: { journal?: boolean } = {}) {
   }
   await ctx.plugin(PtcWorkflowEngine, { provider: 'stub' })
   const runtime = ctx.ptcRuntime as ScriptedRuntime
-  const parent = fakeParent(ctx)
+  const parent = await fakeParent(ctx)
 
   async function run(script: string, calls: ScriptedCall[], resumeRunId?: RunId): Promise<{ id: RunId; result: WorkflowResult }> {
     runtime.calls = calls

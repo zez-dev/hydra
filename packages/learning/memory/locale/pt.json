@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Memória",
+    "description": "Mantém entre sessões os fatos, atalhos e preferências aprendidos e recupera os relevantes em cada solicitação."
+  }
+}
