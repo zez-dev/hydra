@@ -70,10 +70,10 @@
       "seq": 9,
       "time": 0,
       "data": {
-        "estimatedTokens": 3193,
-        "pendingTokens": 315,
-        "pricedTokens": 3193,
-        "density": 1,
+        "estimatedTokens": 0,
+        "pendingTokens": 0,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -305,10 +305,10 @@
       "seq": 20,
       "time": 0,
       "data": {
-        "estimatedTokens": 3355,
+        "estimatedTokens": 0,
         "pendingTokens": 0,
-        "pricedTokens": 3355,
-        "density": 1,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -584,10 +584,10 @@
       "seq": 30,
       "time": 0,
       "data": {
-        "estimatedTokens": 3380,
+        "estimatedTokens": 0,
         "pendingTokens": 0,
-        "pricedTokens": 3380,
-        "density": 1,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -797,10 +797,10 @@
       "seq": 37,
       "time": 0,
       "data": {
-        "estimatedTokens": 3424,
+        "estimatedTokens": 0,
         "pendingTokens": 0,
-        "pricedTokens": 3424,
-        "density": 1,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -1017,10 +1017,10 @@
       "seq": 45,
       "time": 0,
       "data": {
-        "estimatedTokens": 3482,
+        "estimatedTokens": 0,
         "pendingTokens": 0,
-        "pricedTokens": 3482,
-        "density": 1,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -1323,10 +1323,10 @@
       "seq": 59,
       "time": 0,
       "data": {
-        "estimatedTokens": 3647,
-        "pendingTokens": 55,
-        "pricedTokens": 3647,
-        "density": 1,
+        "estimatedTokens": 0,
+        "pendingTokens": 0,
+        "pricedTokens": 0,
+        "density": 0,
         "contextWindow": 1000000,
         "outputCap": 256000,
         "thresholdTokens": 700000
@@ -1692,10 +1692,10 @@
           "seq": 9,
           "time": 0,
           "data": {
-            "estimatedTokens": 3193,
-            "pendingTokens": 315,
-            "pricedTokens": 3193,
-            "density": 1,
+            "estimatedTokens": 0,
+            "pendingTokens": 0,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -1993,10 +1993,10 @@
           "seq": 20,
           "time": 0,
           "data": {
-            "estimatedTokens": 3355,
+            "estimatedTokens": 0,
             "pendingTokens": 0,
-            "pricedTokens": 3355,
-            "density": 1,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -2332,10 +2332,10 @@
           "seq": 30,
           "time": 0,
           "data": {
-            "estimatedTokens": 3380,
+            "estimatedTokens": 0,
             "pendingTokens": 0,
-            "pricedTokens": 3380,
-            "density": 1,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -2587,10 +2587,10 @@
           "seq": 37,
           "time": 0,
           "data": {
-            "estimatedTokens": 3424,
+            "estimatedTokens": 0,
             "pendingTokens": 0,
-            "pricedTokens": 3424,
-            "density": 1,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -3041,10 +3041,10 @@
           "seq": 45,
           "time": 0,
           "data": {
-            "estimatedTokens": 3482,
+            "estimatedTokens": 0,
             "pendingTokens": 0,
-            "pricedTokens": 3482,
-            "density": 1,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -3093,10 +3093,10 @@
           "seq": 10,
           "time": 0,
           "data": {
-            "estimatedTokens": 3171,
-            "pendingTokens": 293,
-            "pricedTokens": 3171,
-            "density": 1,
+            "estimatedTokens": 0,
+            "pendingTokens": 0,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -3944,10 +3944,10 @@
           "seq": 10,
           "time": 0,
           "data": {
-            "estimatedTokens": 3172,
-            "pendingTokens": 294,
-            "pricedTokens": 3172,
-            "density": 1,
+            "estimatedTokens": 0,
+            "pendingTokens": 0,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000
@@ -4467,10 +4467,10 @@
           "seq": 59,
           "time": 0,
           "data": {
-            "estimatedTokens": 3647,
-            "pendingTokens": 55,
-            "pricedTokens": 3647,
-            "density": 1,
+            "estimatedTokens": 0,
+            "pendingTokens": 0,
+            "pricedTokens": 0,
+            "density": 0,
             "contextWindow": 1000000,
             "outputCap": 256000,
             "thresholdTokens": 700000

@@ -2773,6 +2773,14 @@ def normalize_snapshot_value(
             for field in ("startedAt", "finishedAt"):
                 if field in data:
                     data[field] = 0
+    if normalized.get("type") == "compaction/pressure":
+        # The measured counts price the rendered prompt, which differs by machine and operating system;
+        # the declared window, output cap, and threshold stay compared.
+        data = normalized.get("data")
+        if isinstance(data, dict):
+            for field in ("estimatedTokens", "pendingTokens", "pricedTokens", "density"):
+                if field in data:
+                    data[field] = 0
     if "seq" in normalized and "time" in normalized:
         normalized["time"] = 0
     if normalized.get("type") in ("assistant/message", "assistant/attempt"):
