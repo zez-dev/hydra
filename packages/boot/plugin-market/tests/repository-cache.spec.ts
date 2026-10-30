@@ -149,12 +149,23 @@ it('reports an unreachable host as a network failure, a failed local command as 
   await expect(broken).rejects.toThrow('git update-ref')
   await expect(broken).rejects.not.toBeInstanceOf(DetailFailure)
   expect(readdirSync(join(root, 'cache'))).toEqual([])
-  // Git that cannot answer `git --version` within the deadline cannot run.
   const other = repository('t2', { 'README.md': 'x' })
-  await expectRejection(cache({ timeoutMs: 1 }).read(other.url, other.commit, 'README.md', 100, signal), { reason: 'git-unavailable' }, 'timed out')
   vi.stubEnv('PATH', join(root, 'no-git'))
   const missing = cache().read(other.url, other.commit, 'README.md', 100, signal)
   await expectRejection(missing, { reason: 'git-unavailable' }, 'git --version')
+  expect(readdirSync(join(root, 'cache'))).toEqual([])
+})
+
+// Windows does not run a shell script as a command named `git`.
+it.skipIf(process.platform === 'win32')('reports a Git that does not answer `git --version` within the deadline as unavailable', async () => {
+  const source = repository('silent', { 'README.md': 'x' })
+  // This `git` never answers, so the deadline decides the outcome rather than how fast the host starts a process.
+  const bin = join(root, 'silent-git')
+  mkdirSync(bin)
+  writeFileSync(join(bin, 'git'), '#!/bin/sh\nexec /bin/sleep 60\n', { mode: 0o755 })
+  vi.stubEnv('PATH', bin)
+  const silent = cache({ timeoutMs: 1 }).read(source.url, source.commit, 'README.md', 100, signal)
+  await expectRejection(silent, { reason: 'git-unavailable' }, 'timed out')
   expect(readdirSync(join(root, 'cache'))).toEqual([])
 })
 
