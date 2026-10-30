@@ -55,12 +55,15 @@ export interface TeamMemberSnapshot {
   readonly error?: string
 }
 
-/** Current runtime-enriched roster row. */
+/**
+ * Current runtime-enriched roster row. `waiting` appears only when the Team
+ * takes turns: the teammate has input and waits for the turn.
+ */
 export interface TeamMemberView {
   readonly id: SessionId
   readonly name: string
   readonly role: 'lead' | 'teammate'
-  readonly status: 'running' | 'inactive' | 'provisioning' | 'failed'
+  readonly status: 'running' | 'inactive' | 'waiting' | 'provisioning' | 'failed'
   readonly description?: string
   readonly provider?: string
   readonly context?: 'fresh' | 'fork'
@@ -149,7 +152,7 @@ declare module '@deepseek-ai/dsh-llm' {
   }
 }
 
-/** Team-service deployment limits. */
+/** Team-service deployment limits and teammate scheduling. */
 export interface Config {
   /** Maximum immutable teammate names retained by one Team. */
   readonly maxMembers?: number
@@ -159,6 +162,18 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds for shared operation settlement and for each Team child drain. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Run one teammate at a time. A teammate that receives input while another
+   * teammate has the turn waits, in arrival order, until the turn passes when
+   * the working teammate goes idle or waits for Team activity. The Lead is not
+   * part of the rotation. Defaults to false: teammates run in parallel.
+   */
+  readonly takeTurns?: boolean
+}
+
+/** Result of interrupting one teammate; a waiting teammate has no turn to interrupt and keeps its place. */
+export interface TeamInterruptResult {
+  readonly previousStatus: 'running' | 'inactive' | 'waiting'
 }
 
 /** Input for creating one durable teammate. */

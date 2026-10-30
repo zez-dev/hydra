@@ -20,7 +20,7 @@ import * as ToolSubagentControl from '@deepseek-ai/dsh-tool-subagent-control'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { resolveAdapterOptions } from '@deepseek-ai/dsh-llm-deepseek'
 import { serialize } from '@deepseek-ai/dsh-llm-deepseek/src/serialize.ts'
-import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { MockAdapter, textResponse, toolCallResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { mountWorkingDirectoryFixture } from '../../../subagent/subagent/tests/working-directory-fixture.ts'
 import TeamService from '../../agent-team/src/index.ts'
@@ -70,7 +70,11 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-async function setup(script: ConstructorParameters<typeof MockAdapter>[0], legacyControl = false) {
+async function setup(
+  script: ConstructorParameters<typeof MockAdapter>[0],
+  legacyControl = false,
+  teamConfig: ConstructorParameters<typeof TeamService>[1] = {},
+) {
   const ctx = new Context()
   contexts.add(ctx)
   await mountAgentLoopTestDependencies(ctx)
@@ -84,7 +88,7 @@ async function setup(script: ConstructorParameters<typeof MockAdapter>[0], legac
   if (legacyControl) await ctx.plugin(ToolSubagentControl)
   await ctx.plugin(SubagentSpawn, { providerName: 'spawn' })
   await ctx.plugin(SubagentFork, { providerName: 'fork' })
-  await ctx.plugin(TeamService)
+  await ctx.plugin(TeamService, teamConfig)
   const fiber = await ctx.plugin(toolTeam)
   const adapter = new MockAdapter(script)
   ctx.llm.registerAdapter(['mock'], adapter)
@@ -142,8 +146,39 @@ async function waitNoAgent(ctx: Context, id: SessionId): Promise<void> {
   await vi.waitFor(() => { expect(ctx.agents.get(id)).toBeUndefined() }, { timeout: 5_000 })
 }
 
+/** Shipped default policy text, byte-identical to the recorded team-targets system prompt. */
+const PARALLEL_POLICY = `Agent Teams is available in this session
+
+The Team Lead and all teammates share the same working directory and filesystem. Edits are immediately visible to every member. Split write work into disjoint scopes, record expected write scopes on shared tasks, and use task dependencies when work must be ordered. Write-scope overlap is advisory, not a lock.
+
+Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
+
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+
+const TURNS_POLICY = `Agent Teams is available in this session
+
+The Team Lead and all teammates share the same working directory and filesystem. Edits are immediately visible to every member. Split write work into disjoint scopes, record expected write scopes on shared tasks, and use task dependencies when work must be ordered. Write-scope overlap is advisory, not a lock.
+
+Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
+
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running, provisioning, or waiting; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.
+
+Teammates take turns: only one teammate works at a time, and the Team Lead is not part of the rotation. A teammate that receives a message while another teammate works is waiting; waiting teammates start in the order they began waiting. The working teammate hands over when it finishes its turn or calls wait_agent, and that wait_agent returns once it may work again. To hand work to another teammate, send it a message, then finish your turn or call wait_agent. Every waiting teammate waits while the working teammate runs commands, so keep them short. The Lead can use interrupt_agent to end the working teammate's turn; a waiting teammate keeps its place.`
+
+/** Remove the interrupt_agent guidance a policy carries only while interruption is registered. */
+function withoutInterrupt(policy: string): string {
+  return policy
+    .replace('send_message and interrupt_agent, or as owner', 'send_message, or as owner')
+    .replace(' The Lead can use interrupt_agent to end the working teammate\'s turn; a waiting teammate keeps its place.', '')
+}
+
+/** Identify the teammate a loop request belongs to from its Team identity context. */
+function teammateName(request: GenerateOptions): string {
+  return /You are teammate "([^"]+)"/u.exec(runtimeContextText(request) ?? '')?.[1] ?? 'lead'
+}
+
 describe('dsh-tool-team', () => {
-  it.each(['running', 'inactive', 'provisioning', 'failed'] as const)(
+  it.each(['running', 'inactive', 'waiting', 'provisioning', 'failed'] as const)(
     'projects %s members consistently in creation, listing, and schemas', async (status) => {
       const { ctx, lead } = await setup([])
       const member = {
@@ -171,13 +206,13 @@ describe('dsh-tool-team', () => {
         expect(schema?.properties).toHaveProperty('target')
         expect(schema?.properties).not.toHaveProperty('id')
         expect(schema?.properties).not.toHaveProperty('name')
-        expect(schema?.properties?.status?.enum).toEqual(['running', 'inactive', 'provisioning', 'failed'])
+        expect(schema?.properties?.status?.enum).toEqual(['running', 'inactive', 'waiting', 'provisioning', 'failed'])
       }
       expect(ctx.agentTeams.listMembers(lead)).toEqual([member])
     },
   )
 
-  it.each(['running', 'inactive'] as const)('returns interrupted %s status', async (previousStatus) => {
+  it.each(['running', 'inactive', 'waiting'] as const)('returns interrupted %s status', async (previousStatus) => {
     const { ctx, lead } = await setup([])
     const interrupt = vi.spyOn(ctx.agentTeams, 'interrupt').mockReturnValue({ previousStatus })
     const result = await execute(ctx, lead, 'interrupt_agent', { target: 'reviewer' })
@@ -285,6 +320,72 @@ describe('dsh-tool-team', () => {
     expect(text(denied)).toContain('only the Team Lead')
     await execute(ctx, lead, 'interrupt_agent', { target: 'tool-worker' })
     await vi.waitFor(() => { expect(ctx.agents.get(childId)).toBeUndefined() }, { timeout: 5_000 })
+  })
+
+  it.each([
+    [false, true, PARALLEL_POLICY],
+    [false, false, withoutInterrupt(PARALLEL_POLICY)],
+    [true, true, TURNS_POLICY],
+    [true, false, withoutInterrupt(TURNS_POLICY)],
+  ] as const)('pins the policy and status wording with takeTurns=%s and interrupt=%s', async (takeTurns, interrupt, policy) => {
+    const { ctx, lead, fiber } = await setup([], false, { takeTurns })
+    await fiber.dispose()
+    await ctx.plugin(toolTeam, { interrupt })
+    const assembled = await assembly(ctx, lead)
+    expect(assembled.sections.find(section => section.name === 'team:policy')?.text).toBe(policy)
+    const descriptions = new Map(assembled.tools.map(schema => [schema.name, schema.description]))
+    expect(descriptions.get('list_agents')).toBe(takeTurns
+      ? 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. waiting means the teammate has a message and waits for its turn to work. provisioning and failed describe member creation.'
+      : 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.')
+    expect(descriptions.get('wait_agent')).toBe(takeTurns
+      ? 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running, provisioning, or waiting. A working teammate hands over to the next waiting teammate during the wait and returns once it may work again. Re-list after wakeup or timeout instead of polling.'
+      : 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.')
+    const noProgress = await execute(ctx, lead, 'wait_agent', {})
+    expect(JSON.parse(text(noProgress))).toEqual({
+      timedOut: false,
+      noProgress: {
+        reason: 'no-active-peer',
+        message: `No other Team member is ${takeTurns ? 'running, provisioning, or waiting' : 'running or provisioning'}. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.`,
+      },
+    })
+  })
+
+  it('hands the turn to a waiting teammate during wait_agent and returns once the turn comes back', async () => {
+    const replies = new Map<string, StreamChunk[][]>([
+      ['worker-a', [toolCallResponse('a-wait', 'wait_agent', { timeout_ms: 10_000 }), textResponse('a done')]],
+      ['worker-b', [textResponse('b done')]],
+    ])
+    const order: string[] = []
+    const route = (request: GenerateOptions): StreamChunk[] => {
+      const name = teammateName(request)
+      order.push(name)
+      return replies.get(name)?.shift() ?? textResponse(`${name} noted`)
+    }
+    const { ctx, lead } = await setup(['hang', ...Array.from({ length: 8 }, () => route)], false, { takeTurns: true })
+    const holder = await execute(ctx, lead, 'spawn_teammate', { name: 'holder', description: 'hold the turn', prompt: 'hold' })
+    const holderId = spawnedChildId(ctx, lead, holder)
+    await waitRunning(ctx, holderId)
+    const spawnedA = await execute(ctx, lead, 'spawn_teammate', { name: 'worker-a', description: 'first worker', prompt: 'work first' })
+    const spawnedB = await execute(ctx, lead, 'spawn_teammate', { name: 'worker-b', description: 'second worker', prompt: 'work second' })
+    expect([spawnedA, spawnedB].map(result => (JSON.parse(text(result)) as { member: { status: string } }).member.status))
+      .toEqual(['waiting', 'waiting'])
+    const waitingRoster = JSON.parse(text(await execute(ctx, lead, 'list_agents', {}))) as Array<{ target: string; status: string }>
+    expect(waitingRoster.map(row => [row.target, row.status])).toEqual([
+      ['lead', 'inactive'], ['holder', 'running'], ['worker-a', 'waiting'], ['worker-b', 'waiting'],
+    ])
+    expect(JSON.parse(text(await execute(ctx, lead, 'interrupt_agent', { target: 'worker-b' })))).toEqual({ previousStatus: 'waiting' })
+    expect(JSON.parse(text(await execute(ctx, lead, 'interrupt_agent', { target: 'holder' })))).toEqual({ previousStatus: 'running' })
+    const workerA = spawnedChildId(ctx, lead, spawnedA)
+    const workerB = spawnedChildId(ctx, lead, spawnedB)
+    await waitNoAgent(ctx, workerA)
+    await waitNoAgent(ctx, workerB)
+    expect(order.filter(name => name !== 'lead')).toEqual(['worker-a', 'worker-b', 'worker-a'])
+    await using persisted = await ctx.sessionPersistence.open(workerA, 'read')
+    const { events } = await persisted.read()
+    const waitResult = events.find(event => event.type === 'tool/result' && event.data.message.toolCallId === 'a-wait')
+    expect(waitResult?.type === 'tool/result' ? waitResult.data.message.content : []).toEqual([
+      { type: 'text', text: '{"timedOut":false}' },
+    ])
   })
 
   it.each([

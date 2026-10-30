@@ -50,6 +50,20 @@ The layer adds the Agent Teams domain and its scoped creation, roster, messaging
 
 In Web and Desktop conversations, the [Team UI](../client-ui-agent-team/README.md) displays the member roster and shared task board and opens teammate sessions. The same bundle switch controls the tools and browser UI. The Plugins page reads the bundle's [icon](icon.svg) from its `package.json.icon` declaration, including while the bundle is disabled.
 
+### Run one teammate at a time
+
+Teammates run in parallel by default. To make them [take turns](../agent-team/README.md#taking-turns), set `takeTurns: true` on the `agent-team` row in your profile's `cordis.patch.yml`. A patch entry replaces the row's whole configuration, so restate the bundle's other settings:
+
+```yaml
+- id: agent-team
+  config:
+    maxMembers: 8
+    maxTasks: 256
+    maxMessageBytes: 65536
+    disposalTimeoutMs: 5000
+    takeTurns: true
+```
+
 -----
 
 <a id="understand-the-implementation"></a>

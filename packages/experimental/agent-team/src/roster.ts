@@ -13,10 +13,12 @@ import type { TeamRuntimeLifecycle } from './lifecycle.ts'
 import { readPersistedSession } from './persisted.ts'
 import type { TeamState } from './projection.ts'
 import { messageAccepted } from './session-message.ts'
+import type { TurnQueue } from './turns.ts'
 import { TeamId } from './types.ts'
 import type {
   SpawnTeammateRequest,
   SpawnTeammateResult,
+  TeamInterruptResult,
   TeamMemberSnapshot,
   TeamMemberView,
 } from './types.ts'
@@ -60,12 +62,14 @@ export class TeamRoster {
    * @param journal - authoritative Lead-log transaction owner.
    * @param lifecycle - shared Team runtime admission cutoff.
    * @param maxMembers - maximum immutable roster entries per Team.
+   * @param turns - teammate turn order when the Team takes turns.
    */
   constructor(
     private readonly ctx: Context,
     private readonly journal: TeamJournal,
     private readonly lifecycle: TeamRuntimeLifecycle,
     private readonly maxMembers: number,
+    private readonly turns: TurnQueue | undefined,
   ) {}
 
   /**
@@ -93,10 +97,8 @@ export class TeamRoster {
       if (parentId !== undefined) {
         const root = this.ctx.agents.get(parentId)
         if (root !== undefined) {
-          const member = this.journal.state(root).members.find(candidate => candidate.id === agent.id)
-          if (member?.phase === 'active' || member?.phase === 'provisioning') {
-            return { root, id: TeamId(root.id), role: 'teammate', name: member.name }
-          }
+          const member = this.liveRosterRecord(root, agent)
+          if (member !== undefined) return { root, id: TeamId(root.id), role: 'teammate', name: member.name }
           // A direct child outside the durable roster is not a teammate. Ordinary
           // host forks are independent roots; subagent descriptors distinguish
           // provider-owned workers that must not receive a nested Team identity.
@@ -116,6 +118,26 @@ export class TeamRoster {
       // the non-throwing probe must not veto unrelated Agent lifecycle edges.
       return undefined
     }
+  }
+
+  /**
+   * Resolve a rostered teammate's Team without reading its Session history,
+   * for the turn gate's per-step and per-delivery checks.
+   * @param agent - Agent delivered by a live Agent lifecycle event.
+   * @returns the Team identity, or undefined for Leads, non-Team Agents, and children of absent parents.
+   */
+  teamOfTeammate(agent: Agent): TeamId | undefined {
+    const parentId = agent.session.header.parentSession
+    const root = parentId === undefined ? undefined : this.ctx.agents.get(parentId)
+    if (root === undefined) return undefined
+    let member: TeamMemberSnapshot | undefined
+    try {
+      member = this.liveRosterRecord(root, agent)
+    } catch (_failedProjection) {
+      // A failed Team projection already rejects every authoritative Team operation; the gate leaves the Agent alone.
+      return undefined
+    }
+    return member === undefined ? undefined : TeamId(root.id)
   }
 
   /**
@@ -145,7 +167,7 @@ export class TeamRoster {
           ? 'failed'
           : member.phase === 'provisioning'
             ? 'provisioning'
-            : availability(live),
+            : this.teammateStatus(membership.id, live),
         description: member.description,
         provider: member.provider,
         context: member.context,
@@ -184,7 +206,7 @@ export class TeamRoster {
    * @param targetName - durable teammate name.
    * @returns the target status sampled before cancellation.
    */
-  interrupt(caller: Agent, targetName: string): { previousStatus: 'running' | 'inactive' } {
+  interrupt(caller: Agent, targetName: string): TeamInterruptResult {
     const membership = this.membership(caller)
     if (membership.role !== 'lead') throw new TeamError('only the Team Lead can interrupt teammates', 'TEAM_LEAD_REQUIRED')
     const state = this.journal.state(membership.root)
@@ -192,6 +214,7 @@ export class TeamRoster {
     if (target.id === membership.root.id) throw new TeamError('the Team Lead cannot interrupt itself', 'TEAM_INVALID_TARGET')
     const live = this.ctx.agents.get(target.id)
     if (live === undefined) return { previousStatus: 'inactive' }
+    if (this.turns?.waiting(membership.id, live) === true) return { previousStatus: 'waiting' }
     const previousStatus = availability(live)
     this.ctx.subagents.interrupt(target.id, { kind: 'ancestor', agent: caller })
     return { previousStatus }
@@ -316,7 +339,7 @@ export class TeamRoster {
       }
       throw conflict
     }
-    return { member: this.memberView(active) }
+    return { member: this.memberView(TeamId(root.id), active) }
   }
 
   /** Flush the accepted initial inbox item before the Lead can commit `active`. */
@@ -417,13 +440,13 @@ export class TeamRoster {
   }
 
   /** Build one runtime member row after successful creation. */
-  private memberView(member: TeamMemberSnapshot & { readonly phase: 'active' }): TeamMemberView {
+  private memberView(team: TeamId, member: TeamMemberSnapshot & { readonly phase: 'active' }): TeamMemberView {
     const live = this.ctx.agents.get(member.id)
     return {
       id: member.id,
       name: member.name,
       role: 'teammate',
-      status: availability(live),
+      status: this.teammateStatus(team, live),
       description: member.description,
       provider: member.provider,
       context: member.context,
@@ -462,6 +485,21 @@ export class TeamRoster {
       })
       return terminal.phase === 'active' ? 'active' : 'failed'
     })
+  }
+
+  /** Return the active or provisioning roster record of one direct child of a live Lead. */
+  private liveRosterRecord(root: Agent, agent: Agent): TeamMemberSnapshot | undefined {
+    const member = this.journal.state(root).members.find(candidate => candidate.id === agent.id)
+    return member?.phase === 'active' || member?.phase === 'provisioning' ? member : undefined
+  }
+
+  /** Overlay the turn order on one active teammate's availability: queued is waiting, the holder is running. */
+  private teammateStatus(team: TeamId, live: Agent | undefined): TeamMemberView['status'] {
+    if (live !== undefined && this.turns !== undefined) {
+      if (this.turns.waiting(team, live)) return 'waiting'
+      if (this.turns.holds(team, live)) return 'running'
+    }
+    return availability(live)
   }
 
   /** Whether a Session's own suffix identifies a provider-owned subagent child. */

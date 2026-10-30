@@ -808,6 +808,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SpawnTeammateRequest: 'agent-team.md',
   SpawnTeammateResult: 'agent-team.md',
   TeamId: 'agent-team.md',
+  TeamInterruptResult: 'agent-team.md',
   TeamMemberView: 'agent-team.md',
   TeamMembership: 'agent-team.md',
   TeamTaskId: 'agent-team.md',

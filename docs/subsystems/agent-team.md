@@ -21,7 +21,7 @@ interface TeamMemberSnapshot {
 }
 ```
 
-Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status is derived separately and never rewrites this record.
+Every member starts in `provisioning` and reaches exactly one terminal roster phase, `active` or `failed`. Roster `running`/`inactive` status, and `waiting` when the Team takes turns, is derived separately and never rewrites this record.
 
 ## Messages and historical mailbox
 
@@ -38,7 +38,7 @@ interface TeamMessageSnapshot {
 }
 ```
 
-Every message attempts Steer delivery. A running target receives it at the nearest step boundary; an inactive target starts a turn if loaded or cold-resumes otherwise. Scheduling is not stored in the durable record because callers cannot select another mode.
+Every message attempts Steer delivery. A running target receives it at the nearest step boundary; an inactive target starts a turn if loaded or cold-resumes otherwise, after waiting for the Team turn when the Team takes turns. Scheduling is not stored in the durable record because callers cannot select another mode.
 
 Historical `team-message` sources retain the old message id and sender attribution; the client uses them for the message title and icon.
 
@@ -201,21 +201,24 @@ listTasks(caller: Agent): TeamTaskView[]
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
 
 /**
- * Wait for the next Team-domain or member-status change.
+ * Wait for the next Team-domain or member-status change. A teammate that has
+ * the turn gives it to the next waiting teammate for the wait and returns
+ * only after the turn comes back.
  * @param caller - exact live Team member waiting for activity.
  * @param timeoutMs - bounded wait duration from ten seconds through one hour.
- * @param signal - caller cancellation for the wait only.
+ * @param signal - caller cancellation for the wait and for the renewed turn wait.
  * @returns one observed change or a timeout result.
  */
 async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>
 
 /**
- * Interrupt one live teammate turn without clearing its pending inbox.
+ * Interrupt one live teammate turn without clearing its pending inbox. A
+ * teammate waiting for the turn has no turn to interrupt and keeps its place.
  * @param caller - exact live Lead Agent.
  * @param targetName - durable teammate name.
  * @returns the target status sampled before cancellation.
  */
-interrupt(caller: Agent, targetName: string): { previousStatus: 'running' | 'inactive' }
+interrupt(caller: Agent, targetName: string): TeamInterruptResult
 
 /**
  * Resolve a caller without throwing, used by scoped-tool installation and observers.

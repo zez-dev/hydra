@@ -44,7 +44,7 @@ The smallest addition to an existing composition is durable session storage plus
 - name: '@deepseek-ai/dsh-experimental-tool-agent-team'
 ```
 
-With the tools installed, the model does the rest on request — for example, "create a teammate named reviewer to check the diff", then "send reviewer the change summary". All limits are optional and validated at startup:
+With the tools installed, the model does the rest on request — for example, "create a teammate named reviewer to check the diff", then "send reviewer the change summary". All settings are optional and validated at startup:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -52,6 +52,7 @@ With the tools installed, the model does the rest on request — for example, "c
 | `maxTasks` | `256` | Maximum active tasks on the board |
 | `maxMessageBytes` | `65,536` | Maximum size of one sent message |
 | `disposalTimeoutMs` | `5,000` | Time allowed for shutdown cleanup |
+| `takeTurns` | `false` | Run one teammate at a time ([Taking turns](#taking-turns)); otherwise teammates run in parallel |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-experimental-agent-team) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -76,6 +77,16 @@ Any member can add a task with a title, details, optional dependencies on other 
 Tasks have an owner: a member claims a task to start work, completes it when done, releases it back, or reopens it; the Lead can assign a task to any member. Every change is compare-and-set: an update based on an outdated copy is rejected, so two members cannot silently overwrite each other's work.
 
 File hints produce warnings when two in-progress tasks plan to touch overlapping paths — they never block anything. Deleted tasks remain in history but disappear from the active list.
+
+### Taking turns
+
+<a id="taking-turns"></a>
+
+With `takeTurns: true`, only one teammate works at a time. A teammate that receives a message, including its first task, while another teammate has the turn is `waiting`: the message is accepted into its inbox as usual, and the teammate starts when the turn reaches it. Waiting teammates get the turn in the order they began waiting.
+
+The working teammate keeps the turn until it goes idle. While it waits for the next team change, the next waiting teammate works, and its wait returns only after the turn comes back to it. A teammate therefore hands work over by sending a message and then finishing its turn or waiting, and the reply hands the turn back. The Lead is not part of the rotation and keeps working; Agents outside the roster, including a teammate's own subagents, never wait for the turn.
+
+The roster reports a queued teammate as `waiting` and the turn holder as `running`. Interrupting a waiting teammate leaves it in place and reports `previousStatus: 'waiting'`; interrupting the working teammate ends its turn and passes the turn on.
 
 ### Waiting and interruption
 
@@ -119,6 +130,7 @@ The [Agent Teams Agent Note](../../../.agents/notes/implemented/feature/2026-08-
 | [`src/projection.ts`](src/projection.ts) | Strict replay projection that decodes and validates Team events and publishes the `agentTeam` client view |
 | [`src/task-view.ts`](src/task-view.ts) | Pure task readiness, owner-name, and write-overlap derivation shared by the task board and the client view |
 | [`src/activity.ts`](src/activity.ts) | One-shot change waiters and disposal release |
+| [`src/turns.ts`](src/turns.ts) | Turn order, plus the holds and step waits that keep teammates outside the turn when the Team takes turns |
 | [`src/lifecycle.ts`](src/lifecycle.ts) | Shared admission cutoff and bounded settlement |
 
 ### Team identity and roster
@@ -138,6 +150,12 @@ Tasks are complete versioned snapshots; every mutation carries `expectedRevision
 ### Waiting and interruption
 
 `waitForChange()` waits for one roster, task, message-acceptance, or live-status edge that occurs after registration, from ten seconds through one hour, and reports only whether it timed out; runtime disposal releases current waits. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED`. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
+
+### Taking turns
+
+`TurnQueue` keeps one process-local turn per Team: the current grant and a first-in-first-out list of waiting teammates. `TeamTurnGate` enforces it. When input enters an idle teammate's inbox, the gate takes a free turn or starts an Agent maintenance hold that waits for the turn; the input stays pending in the durable inbox, and the Agent loop latches its wake until the hold ends. A teammate step that starts without the turn waits in a prepended `agent/pre-step` listener before any other step work. That happens after a host keep-inbox interrupt ends a hold, or when other maintenance owned the Agent as its input arrived; the input that step claimed is outside the durable inbox while it waits. The turn passes at the holder's `agent/status` idle edge, when the holder leaves the registry, when `waitForChange()` gives it away, and once a grant's Agent is idle again without having used it.
+
+No Team operation waits for the turn while it holds one, which keeps the rotation free of deadlock ([decision](../../../.agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.md)): sends return at inbox acceptance, creation returns once the initial prompt is pending in the durable inbox, `waitForChange()` gives the turn away before it waits, and the Lead never waits for the turn. Disposal removes the gate's listeners and stops teammates, which cancels their holds with cleared inboxes; it then rejects any remaining turn waits with `TEAM_DISPOSED`.
 
 ### Durability model
 
@@ -163,6 +181,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Agent Teams subsystem](../../../docs/subsystems/agent-team.md) — durable Team types and the `ctx.agentTeams` service API.
 - [tool-agent-team package](../tool-agent-team/README.md) — the tools that let the model create, message, and coordinate teammates.
 - [Agent Teams Agent Note](../../../.agents/notes/implemented/feature/2026-08-05-agent-teams.md) — roster, mailbox, task, and shared-checkout decisions.
+- [Take-turns Agent Note](../../../.agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.md) — where the rotation holds teammates, why the Lead is exempt, and why it cannot deadlock.
 - [Experimental package reference](../AGENTS.md) — placement, publication, and dependency isolation.
 
 -----
@@ -181,7 +200,7 @@ The [Web UI](../client-ui-agent-team/README.md) reads the shared Session project
 
 #### What the model sees
 
-Each peer message is a user-role message prefixed with its sender name, followed by the original content blocks. Roster, task, and historical mailbox records remain log-only.
+Each peer message is a user-role message prefixed with its sender name, followed by the original content blocks. Roster, task, and historical mailbox records remain log-only. When the Team takes turns, a waiting teammate receives its accepted messages, in arrival order, when its turn starts.
 
 #### Token effect
 
@@ -205,6 +224,10 @@ These limits describe what a team cannot do yet or what needs special operationa
 - **Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse.
 - **No automatic ownership release** — inactivity, interruption, process exit, and failed work do not release a task owner.
 - **No send retry guarantee** — Team does not retain or deduplicate new attempts; concurrent processes over one Team are unsupported. Historical queued messages that never reached their target are not delivered.
+- **Process-local turn order** — the turn queue is not durable. After a restart, messages a waiting teammate had accepted stay pending in its inbox, and the teammate runs them only when it next receives a message.
+- **The working teammate holds the rotation** — long commands, slow model requests, and prompts that wait for a human keep every waiting teammate waiting; the Lead can interrupt the working teammate.
+- **Claimed input of a held step** — a step that starts without the turn has already claimed its input, so cancelling that turn or a process exit before the turn arrives loses the input. Only steps that start outside a hold reach this state.
+- **Waiting is not shown in the browser** — the Web panel derives teammate activity from Session status, so it shows a waiting teammate as inactive.
 
 <a id="dev-note"></a>
 ### Dev Note

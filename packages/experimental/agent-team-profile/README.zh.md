@@ -50,6 +50,20 @@ dsh plugin --profile web add @deepseek-ai/dsh-experimental-agent-team-profile
 
 在 Web 和 Desktop 会话中，[Team UI](../client-ui-agent-team/README.zh.md) 显示成员列表与共享任务看板，并可打开成员会话。同一个组合包开关控制工具与浏览器 UI。插件页通过组合包的 `package.json.icon` 声明读取其[图标](icon.svg)，组合包禁用时也会显示。
 
+### 一次只运行一个 teammate
+
+teammate 默认并行运行。要让它们[轮流工作](../agent-team/README.zh.md#taking-turns)，请在 profile 的 `cordis.patch.yml` 中为 `agent-team` 行设置 `takeTurns: true`。补丁条目会替换该行的全部配置，因此需要重新写出组合包的其他设置：
+
+```yaml
+- id: agent-team
+  config:
+    maxMembers: 8
+    maxTasks: 256
+    maxMessageBytes: 65536
+    disposalTimeoutMs: 5000
+    takeTurns: true
+```
+
 -----
 
 <a id="understand-the-implementation"></a>

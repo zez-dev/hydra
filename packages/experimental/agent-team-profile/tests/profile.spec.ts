@@ -42,7 +42,7 @@ describe('Agent Teams profile bundle', () => {
     const inserted = patches.flatMap(patch => patch.insert ?? [])
     expect(inserted.find(entry => entry.id === 'agent-team')).toMatchObject({
       name: '@deepseek-ai/dsh-experimental-agent-team',
-      config: { maxMembers: 8 },
+      config: { maxMembers: 8, takeTurns: false },
     })
     expect(inserted.find(entry => entry.id === 'tool-agent-team')).toMatchObject({
       name: '@deepseek-ai/dsh-experimental-tool-agent-team',
