@@ -97,6 +97,23 @@ function sumTokens(nodes: TokenMeasurement['nodes']): number {
 }
 
 /**
+ * Heuristic tokens from the latest assistant message to the end of the surface:
+ * the step a summary leaves in place, with the results the model has not read yet.
+ * @param session - the agent-owned session.
+ * @param measurement - current surface measurement.
+ * @returns the summed tokens of that step, or of every node when no assistant message exists.
+ */
+function latestStepTokens(session: Session, measurement: TokenMeasurement): number {
+  const nodes = measurement.nodes
+  let start = nodes.length - 1
+  // Surface nodes are current log seqs, so the events exist.
+  // Existing Session history read; migration deferred.
+  // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
+  while (start > 0 && session.eventAt(nodes[start]!.seq)!.type !== 'assistant/message') start -= 1
+  return sumTokens(nodes.slice(Math.max(start, 0)))
+}
+
+/**
  * Heuristic tokens of the surface nodes from `start` through `end`.
  * @param measurement - current surface measurement.
  * @param start - the range's first node.
@@ -699,39 +716,57 @@ export class BasicCompactionEngine extends CompactionEngine {
     if (fits(measurement)) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
-    // summary range, then remeasure through the singleton replay fold. Results
-    // the model has read go first; one it has not read is cut only when that
-    // does not clear pressure, and its marker tells the model how to see the cut span.
+    // summary range, then remeasure through the singleton replay fold. This
+    // pass cuts only results the model has read; a summary of older history
+    // may make room for the ones it has not.
     if (prune !== undefined) {
       prune.pruneSession(agent.session, 'read')
       measurement = meter.measure(agent.session, header)
-      if (!fits(measurement)) {
-        prune.pruneSession(agent.session, 'all')
-        measurement = meter.measure(agent.session, header)
-      }
     }
     if (fits(measurement)) return null
 
+    // Cutting a result the model has not read marks it with how to see the cut span.
+    let unreadCut = false
+    const cutUnread = (): boolean => {
+      if (prune === undefined || unreadCut) return false
+      unreadCut = true
+      prune.pruneSession(agent.session, 'all')
+      measurement = meter.measure(agent.session, header)
+      return fits(measurement)
+    }
+    // A summary leaves the latest step in place; when that step alone is over
+    // the threshold, no summary can make room, so its results are cut first.
+    const framing = measurement.estimatedTokens - measurement.surfaceTokens
+    const leastAfterSummary = Math.round(
+      (framing + latestStepTokens(agent.session, measurement) + pending) * this.densityFor(measurement, target),
+    )
+    if (leastAfterSummary >= threshold && cutUnread()) return null
+
     const condense = await this.pressureCondenser(agent, target, spec, signal)
     let result: CompactionResult | null = null
+    let exhausted = true
     for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
       const condensed = await condense(measurement)
       if (condensed === null) {
-        if (result === null && !requireBelowThreshold) return null
-        throw new Error(
-          'no safe compaction range can reduce context below threshold '
-          + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold})`,
-        )
+        exhausted = false
+        break
       }
       result = condensed
       measurement = meter.measure(agent.session, header)
       if (fits(measurement)) return result
     }
-
+    if (cutUnread()) return result
+    if (exhausted) {
+      throw new Error(
+        `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
+        + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold}; `
+        + `window ${spec.contextWindow}, output cap ${outputCap}, margin ${spec.marginTokens})`,
+      )
+    }
+    if (result === null && !requireBelowThreshold) return null
     throw new Error(
-      `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
-      + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold}; `
-      + `window ${spec.contextWindow}, output cap ${outputCap}, margin ${spec.marginTokens})`,
+      'no safe compaction range can reduce context below threshold '
+      + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold})`,
     )
   }
 

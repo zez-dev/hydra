@@ -102,7 +102,7 @@ With `dsh-command-compact` mounted, type `/compact` in a chat UI to condense imm
 
 ### Trimming oversized tool outputs
 
-Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation fits within the threshold, condensation skips the summary. Under pressure, results the model has already read are trimmed first; one it has not read yet is trimmed only when that leaves the request above the threshold. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
+Mount `dsh-compaction-tool-result-pruner` before this package to trim oversized tool results as part of condensation. Trimming makes no model call and can remove the need to summarize at all: when the trimmed conversation fits within the threshold, condensation skips the summary. Under pressure, results the model has already read are trimmed first; when that leaves the request above the threshold, older history is summarized before a result the model has not read is trimmed, except that one is trimmed at once when the latest step alone is over the threshold, since a summary keeps that step. Trimming only runs after a condensation trigger qualifies — a below-pressure conversation is never touched.
 
 -----
 
@@ -182,7 +182,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-After a successful step crosses the threshold, oversized tool results the model has read are first rewritten when the optional pruner is loaded, and those it has not read only when the request is still above the threshold; their marker tells the model to repeat the call with a narrower range. If summarization remains necessary, the next request receives the checkpoint preamble below, a blank line, `<compacted-summary>`, the data-dependent summary, and `</compacted-summary>`. Overflow recovery rebuilds the immediate retry from whatever replacement advanced the surface. A checkpoint replaces the selected older range and is followed by the retained recent units.
+After a successful step crosses the threshold, oversized tool results the model has read are first rewritten when the optional pruner is loaded, and those it has not read only when a summary cannot make room; their marker tells the model to repeat the call with a narrower range. If summarization remains necessary, the next request receives the checkpoint preamble below, a blank line, `<compacted-summary>`, the data-dependent summary, and `</compacted-summary>`. Overflow recovery rebuilds the immediate retry from whatever replacement advanced the surface. A checkpoint replaces the selected older range and is followed by the retained recent units.
 
 ##### Conversation checkpoint preamble
 

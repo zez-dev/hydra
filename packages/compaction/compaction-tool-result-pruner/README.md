@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-compaction-tool-result-pruner` keeps oversized tool output from filling the context window. Once a compaction trigger qualifies, it replaces over-budget text with a bounded head, a marker naming how many characters were cut, and a bounded tail; below-pressure conversations remain unchanged. Results the model has already read are trimmed first; one it has not read is cut only when pressure remains, and its marker says so. The complete original result remains in the session log for exact replay and inspection. Trimming makes no model call and may relieve enough token pressure to skip summarization.
+`dsh-compaction-tool-result-pruner` keeps oversized tool output from filling the context window. Once a compaction trigger qualifies, it replaces over-budget text with a bounded head, a marker naming how many characters were cut, and a bounded tail; below-pressure conversations remain unchanged. Results the model has already read are trimmed first; one it has not read is cut only as a last resort, and its marker says so. The complete original result remains in the session log for exact replay and inspection. Trimming makes no model call and may relieve enough token pressure to skip summarization.
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@ With these rows, oversized tool results are trimmed automatically as part of con
 
 ### What gets trimmed
 
-Each trimmed tool result keeps the configured head, a marker that names how many characters were cut, and the configured tail. Under pressure, results the model has already read — those before its latest answer — are trimmed first; a result it has not read yet is trimmed only when that does not relieve pressure, and its marker says the model has not read the cut span and should repeat the call with a narrower range. Overflow recovery trims every over-budget result. Rich content such as images and structured blocks keeps its order and all logged image-offload selections. The replacement keeps the tool call, step, errors, and metadata — only the text content changes. If a replacement cannot be recorded, the run fails and the trims already applied stay in place.
+Each trimmed tool result keeps the configured head, a marker that names how many characters were cut, and the configured tail. Under pressure, results the model has already read — those before its latest answer — are trimmed first; a result it has not read yet is trimmed only when a summary of older history cannot relieve pressure either, and its marker says the model has not read the cut span and should repeat the call with a narrower range. Overflow recovery trims every over-budget result. Rich content such as images and structured blocks keeps its order and all logged image-offload selections. The replacement keeps the tool call, step, errors, and metadata — only the text content changes. If a replacement cannot be recorded, the run fails and the trims already applied stay in place.
 
 ### Setting the size limits
 
@@ -57,7 +57,7 @@ Character counts are Unicode code points, so slicing never splits an emoji pair,
 
 ### When trimming runs
 
-Trimming only runs when a compaction trigger qualifies: `dsh-compaction-basic` invokes it after pressure or overflow is confirmed, before it selects what to condense. Under pressure it trims read results, remeasures, and trims unread ones only when the request is still above pressure; overflow recovery trims both at once. Below pressure nothing is trimmed, and trimming itself makes no model call.
+Trimming only runs when a compaction trigger qualifies: `dsh-compaction-basic` invokes it after pressure or overflow is confirmed, before it selects what to condense. Under pressure it trims read results and remeasures; when the request is still above pressure, `dsh-compaction-basic` summarizes older history first and has unread results trimmed only when no summary can make room, at once when the latest step alone is over the threshold, since a summary keeps that step. Overflow recovery trims both at once. Below pressure nothing is trimmed, and trimming itself makes no model call.
 
 -----
 
@@ -117,7 +117,7 @@ Once a compaction trigger qualifies, future requests see the retained head, a ma
 
 #### Token effect
 
-Each rewritten tool result has at most `thresholdChars` text code points, the marker at most 133 of them. A result the model has not read keeps its full size unless trimming read results leaves the request above pressure. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
+Each rewritten tool result has at most `thresholdChars` text code points, the marker at most 133 of them. A result the model has not read keeps its full size unless neither trimming read results nor a summary of older history makes room. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
 
 #### KV Cache effect
 

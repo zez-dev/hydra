@@ -209,11 +209,20 @@ function toolConversation(): Session {
   return session
 }
 
-/** One routed turn whose first tool result the model answered and whose second it has not read yet. */
-function readAndUnreadResults(): Session {
+/**
+ * One routed turn whose first tool result the model answered and whose second it has not read yet,
+ * after an optional opening request.
+ */
+function readAndUnreadResults(fresh = 600, request?: string): Session {
   const session = Session.create(SessionId('read-and-unread'))
   session.append('turn/start', { turn: 1 })
-  for (const [step, name, text] of [[1, 'answered', 'R'.repeat(3_000)], [2, 'fresh', 'U'.repeat(600)]] as const) {
+  if (request !== undefined) {
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: request }],
+      source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+  }
+  for (const [step, name, text] of [[1, 'answered', 'R'.repeat(3_000)], [2, 'fresh', 'U'.repeat(fresh)]] as const) {
     const callId = ToolCallId(name)
     session.append('step/start', { turn: 1, step })
     if (step === 1) {
@@ -1046,6 +1055,43 @@ describe('optional model-free tool-result pruning', () => {
     expect(JSON.stringify(session.deriveMessages())).toContain('before you read them')
   })
 
+  it('cuts a result the model has not read before any summary when its step alone is over the threshold', async () => {
+    const ctx = createContext(1_000)
+    void new ToolResultPruner(ctx, pruneConfig)
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      auto: false,
+      thresholdRatio: 0.5,
+      retainTokens: 50,
+    })
+    const session = readAndUnreadResults(3_000, 'older history '.repeat(90))
+
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    // The opening request was summarizable, but no summary could have made room for the fresh result.
+    expect(compact.calls).toHaveLength(0)
+    expect(JSON.stringify(session.deriveMessages())).toContain('before you read them')
+  })
+
+  it('cuts a result the model has not read last, when no summary range can make room', async () => {
+    const ctx = createContext(1_000)
+    void new ToolResultPruner(ctx, pruneConfig)
+    // Retention just under the threshold keeps the whole surface, so no summary range exists.
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      auto: false,
+      thresholdRatio: 0.5,
+      retainTokens: 499,
+    })
+    const session = readAndUnreadResults(1_000, 'older history '.repeat(90))
+
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    expect(compact.calls).toHaveLength(0)
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeLessThan(500)
+    expect(JSON.stringify(session.deriveMessages())).toContain('before you read them')
+  })
+
   it('keeps a result the model has not read whole when cutting read results clears pressure', async () => {
     const ctx = createContext(1_000)
     void new ToolResultPruner(ctx, pruneConfig)
@@ -1069,7 +1115,7 @@ describe('optional model-free tool-result pruning', () => {
     expect(messages).toContain('U'.repeat(600))
   })
 
-  it('summarizes the pruned surface when pruning is insufficient', async () => {
+  it('summarizes the pruned surface before cutting a result the model has not read', async () => {
     // The window must hold the surface plus the summarization request's own
     // cost, or the fit rule keeps a tail out of the range and needs more passes.
     const ctx = createContext(4_000)
@@ -1083,9 +1129,13 @@ describe('optional model-free tool-result pruning', () => {
     const session = toolConversation()
 
     expect(await compactIfNeeded(compact, session)).not.toBeNull()
-    expect(compact.calls).toHaveLength(1)
-    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle')
+    expect(compact.calls).toHaveLength(2)
+    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle to save context')
     expect(summarizedText(compact.calls[0]!.input)).not.toContain('result 1 '.repeat(300))
+    // The last turn's result has no answer after it, and the summaries made room for it whole.
+    const messages = JSON.stringify(session.deriveMessages())
+    expect(messages).toContain('result 3 '.repeat(300))
+    expect(messages).not.toContain('before you read them')
   })
 
   it('retains the original compaction-basic behavior without the optional plugin', async () => {
