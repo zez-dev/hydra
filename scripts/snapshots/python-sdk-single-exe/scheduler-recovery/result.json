@@ -8,6 +8,7 @@
       "turn/start",
       "agent/inbox/spliced",
       "step/start",
+      "compaction/pressure",
       "system/message",
       "user/message",
       "user/message",
@@ -45,6 +46,7 @@
       "session.event",
       "session.event",
       "session.event",
+      "session.event",
       "session.status"
     ]
   },
@@ -57,6 +59,7 @@
       "turn/start",
       "agent/inbox/spliced",
       "step/start",
+      "compaction/pressure",
       "user/message",
       "assistant/message",
       "step/end",
@@ -65,6 +68,7 @@
     "notificationMethods": [
       "session.event",
       "session.status",
+      "session.event",
       "session.event",
       "session.event",
       "session.event",

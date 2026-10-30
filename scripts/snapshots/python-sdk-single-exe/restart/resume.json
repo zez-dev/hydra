@@ -6,6 +6,7 @@
     "turn/start",
     "agent/inbox/spliced",
     "step/start",
+    "compaction/pressure",
     "user/message",
     "request/header",
     "request/context",

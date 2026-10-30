@@ -1656,6 +1656,9 @@ def smoke_sdk_snapshot_mode(
                 "id": "serial-created-fixture",
                 "name": str(Path(__file__).resolve().parents[1] / "packages/core/agent-loop/tests/fixtures/serial-created.mjs"),
             }]},
+            # Hydra's learning review of this run's qualifying turn starts a second job after the
+            # turn, which races the run's end; the scenario pins the tool call's job alone.
+            {"id": "learning", "disabled": True},
         ])
         with DeepSeekHarness(
             provider="deepseek-official",

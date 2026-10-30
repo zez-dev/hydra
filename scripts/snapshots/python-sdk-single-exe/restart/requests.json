@@ -20,10 +20,14 @@
     "toolNames": [
       "cordis_inspect_list",
       "cordis_inspect_query",
+      "doctor",
       "job_kill",
       "job_list",
       "job_output",
+      "knowledge_add",
+      "memory",
       "subagent",
+      "usage",
       "workflow",
       "working_directory"
     ]
@@ -49,10 +53,14 @@
     "toolNames": [
       "cordis_inspect_list",
       "cordis_inspect_query",
+      "doctor",
       "job_kill",
       "job_list",
       "job_output",
+      "knowledge_add",
+      "memory",
       "subagent",
+      "usage",
       "workflow",
       "working_directory"
     ]
