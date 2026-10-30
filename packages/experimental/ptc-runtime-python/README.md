@@ -45,7 +45,7 @@ The package's default export is the `PythonPtcRuntime` plugin. Its public surfac
 
 ### The wire
 
-Frames travel on the child's fd 3 as JSON-lines — one object per line — so stdout/stderr stay clear for the program's own output. Child → host: `boot-ack`, `call`, `log`, `done`. Host → child: `boot` (first frame, carrying every cap and the namespace declarations), `run` (after `boot-ack`, carrying only the program body), and one `reply` per `call`. A forged frame can carry both `value` and `error` on `done`, so a consumer must check `error` first and ignore `value` when it is set. A `log` frame's `open` flag marks an unterminated line committed by an explicit flush: the host appends the next log frame to the same entry, so `print('a', end='', flush=True); print('b')` reads back as one `'ab'` entry rather than a fake newline (the split-billing arithmetic lives in the fd-3 protocol Agent Note's wire-contract section). The one exception to merging is truncation: when a later over-budget frame trips the ledger, the already-billed prefix is committed as its own entry and the truncation marker follows it (the marker stays last, with no re-charge).
+Frames travel as JSON-lines — one object per line — so stdout/stderr stay clear for the program's own output. Child → host, on fd 3: `boot-ack`, `call`, `log`, `done`. Host → child, on fd 4: `boot` (first frame, carrying every cap and the namespace declarations), `run` (after `boot-ack`, carrying only the program body), and one `reply` per `call`. Each direction has its own pipe, so a host write that fails because the child exited cannot discard frames the child already wrote. A forged frame can carry both `value` and `error` on `done`, so a consumer must check `error` first and ignore `value` when it is set. A `log` frame's `open` flag marks an unterminated line committed by an explicit flush: the host appends the next log frame to the same entry, so `print('a', end='', flush=True); print('b')` reads back as one `'ab'` entry rather than a fake newline (the split-billing arithmetic lives in the fd-3 protocol Agent Note's wire-contract section). The one exception to merging is truncation: when a later over-budget frame trips the ledger, the already-billed prefix is committed as its own entry and the truncation marker follows it (the marker stays last, with no re-charge).
 
 ### What can go wrong
 
@@ -65,13 +65,13 @@ This section explains the design behind the backend; observable behavior is full
 
 ### Design concept
 
-One direction of trust: the host treats every inbound frame as hostile (model code can forge anything on fd 3) and REBUILDS it field by field before reading; the Python side trusts host replies. The bootstrap (`py/bootstrap.py`) runs the program as the body of an async function, so top-level `await` and `return` work; binding calls travel over fd 3 as JSON-lines and replies are paced across the pump so a flood of large replies cannot pin the host's fd-3 write buffer.
+One direction of trust: the host treats every inbound frame as hostile (model code can forge anything on fd 3) and REBUILDS it field by field before reading; the Python side trusts host replies. The bootstrap (`py/bootstrap.py`) runs the program as the body of an async function, so top-level `await` and `return` work; binding calls travel over fd 3 and their replies over fd 4 as JSON-lines, and replies are paced across the pump so a flood of large replies cannot pin the host's fd-4 write buffer.
 
-The shipped bootstrap and protocol sources reach the interpreter as UTF-8 JSON on trusted binary stdin, independently of sandbox temporary-directory mounts and locale text encoding. Model programs and binding traffic use fd 3. The host resolves the sandbox runner before spawning with only `TMPDIR` in the child environment. The wall deadline includes sandbox setup. The configured interpreter's load-time version probe runs outside confinement and executes no model code.
+The shipped bootstrap and protocol sources reach the interpreter as UTF-8 JSON on trusted binary stdin, independently of sandbox temporary-directory mounts and locale text encoding. Model programs and binding traffic use fds 3 and 4. The host resolves the sandbox runner before spawning with only `TMPDIR` in the child environment. The wall deadline includes sandbox setup. The configured interpreter's load-time version probe runs outside confinement and executes no model code.
 
 ### Wire contract
 
-The frames are `boot` / `run` (host → child) and `boot-ack` / `call` / `log` / `done` plus one `reply` per call (child → host). The `log` frame's `truncated` flag marks the frame that IS the child ledger's truncation marker, so the host stops capturing at the same point the child did instead of inferring it from its own budget. The `log` frame's `open` flag marks an unterminated line committed by an explicit flush: the host merges the next log frame into the same entry, so `print('a', end='', flush=True); print('b')` reads back as one `'ab'` entry rather than a fake newline (the split-billing arithmetic lives in the fd-3 protocol Agent Note's wire-contract section). The one exception to merging is truncation: the already-billed prefix is committed as its own entry and the truncation marker follows it (marker last, no re-charge). `done.error.kind` is one of `exception`, `invalid-output`, `output-limit`, or `timeout` from the CPU check after model code returns; wall deadlines, aborts, and substrate death are observed host-side.
+The frames are `boot` / `run` plus one `reply` per call (host → child, fd 4) and `boot-ack` / `call` / `log` / `done` (child → host, fd 3). The `log` frame's `truncated` flag marks the frame that IS the child ledger's truncation marker, so the host stops capturing at the same point the child did instead of inferring it from its own budget. The `log` frame's `open` flag marks an unterminated line committed by an explicit flush: the host merges the next log frame into the same entry, so `print('a', end='', flush=True); print('b')` reads back as one `'ab'` entry rather than a fake newline (the split-billing arithmetic lives in the fd-3 protocol Agent Note's wire-contract section). The one exception to merging is truncation: the already-billed prefix is committed as its own entry and the truncation marker follows it (marker last, no re-charge). `done.error.kind` is one of `exception`, `invalid-output`, `output-limit`, or `timeout` from the CPU check after model code returns; wall deadlines, aborts, and substrate death are observed host-side.
 
 ### Lossless JSON crossing
 
@@ -79,7 +79,7 @@ Completion values and binding arguments cross as exact JSON: values serialize wi
 
 ### Mirror alignment
 
-`tests/protocol-mirror.e2e.ts` spawns a real `python3` and asserts, against `src/protocol.ts`, both `PROTOCOL_FD` / the truncation-marker text and each `TypedDict`'s required/optional wire field set in `py/protocol.py`, so a renamed or dropped field — or one side making a field optional the other requires — fails the test. Field *types* are not compared across the language boundary; that residue stays with review plus the backend's real-subprocess suite (`tests/runtime.spec.ts`).
+`tests/protocol-mirror.e2e.ts` spawns a real `python3` and asserts, against `src/protocol.ts`, both protocol fds (`CHILD_TO_HOST_FD`, `HOST_TO_CHILD_FD`) / the truncation-marker text and each `TypedDict`'s required/optional wire field set in `py/protocol.py`, so a renamed or dropped field — or one side making a field optional the other requires — fails the test. Field *types* are not compared across the language boundary; that residue stays with review plus the backend's real-subprocess suite (`tests/runtime.spec.ts`).
 
 ### Source map
 
@@ -87,8 +87,8 @@ Completion values and binding arguments cross as exact JSON: values serialize wi
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `PythonPtcRuntime` — spawn, frame pump, budgets, containment, teardown; re-exports the protocol vocabulary |
 | [`src/protocol.ts`](src/protocol.ts) | Host side: frame codec, hostile-frame validators, lossless-JSON meters, shared marker text |
-| [`py/bootstrap.py`](py/bootstrap.py) | Child side: fd-3 channel, program execution, binding dispatch, ledger and settlement |
-| [`py/protocol.py`](py/protocol.py) | Python side: `PROTOCOL_FD`, `TypedDict` frame mirrors, `log_truncation_marker` |
+| [`py/bootstrap.py`](py/bootstrap.py) | Child side: fd-3/fd-4 channel, program execution, binding dispatch, ledger and settlement |
+| [`py/protocol.py`](py/protocol.py) | Python side: `CHILD_TO_HOST_FD` / `HOST_TO_CHILD_FD`, `TypedDict` frame mirrors, `log_truncation_marker` |
 | [`tests/runtime.spec.ts`](tests/runtime.spec.ts) | Real-subprocess suite: budgets, containment, hostile frames, name rebinding |
 | [`tests/protocol-mirror.e2e.ts`](tests/protocol-mirror.e2e.ts) | Cross-language mirror test against a real `python3` |
 

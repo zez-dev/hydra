@@ -20,17 +20,17 @@ CPython PTC 运行时位于 `packages/experimental/ptc-runtime-python`，以 `@d
 - **`encodeJsonPlain` / `checkDoneValue` / `hasUnsafeIntegerToken` / `hasNonLosslessNumber`** 是 lossless-JSON 编解码器与计量器。它们迭代遍历（显式栈，非递归），使低于字节预算的深层值能完整穿越；`checkDoneValue` 把字节计量和数字无损性折进一次遍历，在新增入栈子节点之前就拒绝超预算 payload；字符串与 key 由非分配的转义尺寸扫描（`jsonStringBytesUpTo`）计量，从不物化转义副本。它不会重新约束帧自身的宽度：`done.value` 在检查运行时已经过 `JSON.parse`，因此消费 runtime 必须在解析前限制 fd-3 字节数。超出安全范围的整数型 double 通过 `BigInt` 数字序列化，穿越的是精确整数而非 `String()` 的舍入形式。
 - **`logTruncationMarker`** 产出日志 ledger 耗尽字节预算时发出的带内标记文本。
 
-`py/protocol.py` 用 `TypedDict` 镜像消息形状，并重新声明两侧都会 EXECUTE 的两个面——`PROTOCOL_FD = 3` 与 `log_truncation_marker`——文本逐字节一致。
+`py/protocol.py` 用 `TypedDict` 镜像消息形状，并重新声明两侧都会 EXECUTE 的两个面——协议 fd（`CHILD_TO_HOST_FD = 3`、`HOST_TO_CHILD_FD = 4`）与 `log_truncation_marker`——文本逐字节一致。
 
 该包随协议一起交付 runtime，同时保持独立可构建。`check-workspace-constraints` 会无条件读取每个 `packages/<group>/<pkg>/package.json`，coverage 检查则会在包目录存在时立即覆盖该包。
 
 ## Wire contract
 
-帧是 fd 3 上的 JSON-lines，每行一个对象，让 stdout/stderr 空出给程序自己的输出。Child → host：`boot-ack`、`call`、`log`、`done`。Host → child：`boot`（首帧）、`run`（在 `boot-ack` 之后）、以及每个 `call` 对应一个 `reply`。`log` 帧的 `truncated` 标志标记那个本身就是子进程 ledger 截断标记的帧，使 host 在与子进程相同的点停止捕获，而不是从自己的预算去推断。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主持有它并把下一个帧追加到同一条目，因此显式 flush 后接更多文本读回为一行而不是假换行。唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。合并条目的线上成本恰好计费一次，在两侧按片段增量分摊（k 个片段 O(k)，绝不对整个持有重走）：首片段付完整 JSON 字符串成本加分隔符，每个续接与闭合帧只付内容；宿主精确成本 cap 是首片段 `logBudget - 1`（账本预留字节，与 `admit` 一致）、续接或闭合帧 `logBudget + 2`（不含两个引号计费），且 `jsonStringCostUpTo` 在低于 2 字节 cap 时返回 `undefined`；子进程按 `_open_started` 单独键控拆分计费，因此闭合帧按合并尾部计费。`done.error.kind` 是 `exception`、`invalid-output`、`output-limit` 或模型代码返回后 CPU 检查产生的 `timeout` 之一；wall 截止、abort 和 substrate 死亡在 host 侧观测。返回后的 CPU 检查会在强制信号终止前尝试通过 fd 3 报告诊断，因为沙箱 launcher 可能把该信号转换为有歧义的退出码。普通软限制到期保留默认的 `SIGXCPU` 终止行为，不安装 Python handler，因此原生调用不能把强制执行延后到 Python 恢复运行。这些帧仍是不可信的结果报告；内核资源限制独立强制执行 CPU 上限。
+帧是 JSON-lines，每行一个对象，让 stdout/stderr 空出给程序自己的输出。Child → host，经 fd 3：`boot-ack`、`call`、`log`、`done`。Host → child，经 fd 4：`boot`（首帧）、`run`（在 `boot-ack` 之后）、以及每个 `call` 对应一个 `reply`。两个方向各用一条管道，因此子进程退出导致的 host 写入失败不会丢弃子进程已写出的帧。`log` 帧的 `truncated` 标志标记那个本身就是子进程 ledger 截断标记的帧，使 host 在与子进程相同的点停止捕获，而不是从自己的预算去推断。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主持有它并把下一个帧追加到同一条目，因此显式 flush 后接更多文本读回为一行而不是假换行。唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。合并条目的线上成本恰好计费一次，在两侧按片段增量分摊（k 个片段 O(k)，绝不对整个持有重走）：首片段付完整 JSON 字符串成本加分隔符，每个续接与闭合帧只付内容；宿主精确成本 cap 是首片段 `logBudget - 1`（账本预留字节，与 `admit` 一致）、续接或闭合帧 `logBudget + 2`（不含两个引号计费），且 `jsonStringCostUpTo` 在低于 2 字节 cap 时返回 `undefined`；子进程按 `_open_started` 单独键控拆分计费，因此闭合帧按合并尾部计费。`done.error.kind` 是 `exception`、`invalid-output`、`output-limit` 或模型代码返回后 CPU 检查产生的 `timeout` 之一；wall 截止、abort 和 substrate 死亡在 host 侧观测。返回后的 CPU 检查会在强制信号终止前尝试通过 fd 3 报告诊断，因为沙箱 launcher 可能把该信号转换为有歧义的退出码。普通软限制到期保留默认的 `SIGXCPU` 终止行为，不安装 Python handler，因此原生调用不能把强制执行延后到 Python 恢复运行。这些帧仍是不可信的结果报告；内核资源限制独立强制执行 CPU 上限。
 
 ## Mirror alignment
 
-`py/protocol.py` 与 `src/protocol.ts` 一致规定：`LogMessage` 携带 `truncated`，`DoneMessage.error` 携带 `kind`，`Namespace` 可以携带 `errorClass`。`tests/protocol-mirror.e2e.ts` 启动真实 `python3`，对照 `src/protocol.ts` 断言 `PROTOCOL_FD`、`log_truncation_marker` 以及每个 `TypedDict` 的必填和可选 wire 字段集。字段改名、删除或必填／可选性不一致都会使测试失败。字段*类型*不跨语言边界比较；这项缺口由评审和 runtime 的真实子进程套件（`runtime.spec.ts`）负责。
+`py/protocol.py` 与 `src/protocol.ts` 一致规定：`LogMessage` 携带 `truncated`，`DoneMessage.error` 携带 `kind`，`Namespace` 可以携带 `errorClass`。`tests/protocol-mirror.e2e.ts` 启动真实 `python3`，对照 `src/protocol.ts` 断言两个协议 fd、`log_truncation_marker` 以及每个 `TypedDict` 的必填和可选 wire 字段集。字段改名、删除或必填／可选性不一致都会使测试失败。字段*类型*不跨语言边界比较；这项缺口由评审和 runtime 的真实子进程套件（`runtime.spec.ts`）负责。
 
 ## Alternatives considered
 

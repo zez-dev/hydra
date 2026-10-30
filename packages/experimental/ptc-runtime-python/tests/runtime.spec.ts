@@ -508,7 +508,7 @@ describe('PythonPtcRuntime — seam descriptors and misuse', () => {
   })
 
   it('rejects loading this Unix-only backend on Windows', async () => {
-    // The bootstrap needs the POSIX `resource` module, a positional fd 3, and
+    // The bootstrap needs the POSIX `resource` module, positional fds 3 and 4, and
     // negative-PID process-group signals — none on Windows. The constructor
     // must throw at load rather than register ctx.ptcRuntime and defer the
     // failure to the first run.
@@ -2888,7 +2888,7 @@ describe('PythonPtcRuntime — programs and bindings', () => {
     // the `encodeJsonPlain` frame, one into the pipe write. Slicing each field
     // to `maxValueBytes` code units first makes an 8 MiB forged name a
     // 128-byte reply. The observable effect is the reply the child then has to
-    // READ: its fd-3 reader is unbuffered, so `readline` consumes an oversized
+    // READ: its fd-4 reader is unbuffered, so `readline` consumes an oversized
     // reply one `read(2)` per byte and the run's own legitimate call never gets
     // answered — measured under a 60 s ceiling, the 8 MiB case timed out and a
     // 64 MiB case cost the host 509.9 MiB of heap against 120.3 MiB with the
@@ -5085,7 +5085,7 @@ describe('PythonPtcRuntime — hostile peer', () => {
   it('paces concurrent binding replies instead of queueing every frame at once', async () => {
     // Binding resolution carries no seam-level byte cap. Before pacing, a program
     // resolving several large values in one `asyncio.gather` round encoded them
-    // all in the same turn and queued every frame in fd 3's writable buffer,
+    // all in the same turn and queued every frame in fd 4's writable buffer,
     // which exhausted the host heap and killed the whole process rather than
     // failing the run. Replies are now encoded one at a time, waiting for
     // `drain` when the pipe is full.
@@ -5112,7 +5112,7 @@ describe('PythonPtcRuntime — hostile peer', () => {
   }, 90_000)
 
   it('drops queued binding replies when the child dies mid-drain, without hanging', async () => {
-    // drainReplies waits for `drain` when fd 3's buffer is full. If the child
+    // drainReplies waits for `drain` when fd 4's buffer is full. If the child
     // exits while a reply is queued, the pipe never emits `drain` again — the
     // wait must also settle on `close`/`error`/destroyed, or `draining` stays
     // true and the queue is pinned with the closure forever. The program fills
@@ -5125,7 +5125,7 @@ describe('PythonPtcRuntime — hostile peer', () => {
     const result = await runtime.run(runtime.resolve({
       program: [
         'import asyncio',
-        // Resolve a reply big enough to backpressure fd 3, then exit without
+        // Resolve a reply big enough to backpressure fd 4, then exit without
         // reading it: the child's `close` lands while the host still waits for
         // `drain`, exercising the destroyed-pipe branch of the reply drain.
         'pending = asyncio.create_task(tools.chunk({}))',
@@ -5140,8 +5140,33 @@ describe('PythonPtcRuntime — hostile peer', () => {
     expect(result.value).toBe('done')
   }, 30_000)
 
+  it('keeps the completion when the reply write fails after the child has exited', async () => {
+    // The program posts `done` and exits while the host is still producing the
+    // reply to a call it never awaits. The binding holds the host's event loop
+    // for 1 s, longer than the program's 50 ms sleep plus interpreter exit, so
+    // the reply write fails on a closed pipe before the host reads `done`. The
+    // failed write must not discard the frames the child already sent.
+    const chunk = 'A'.repeat(4 * 1024 * 1024)
+    const { runtime } = await setup({ maxWallMs: 10_000 })
+    const result = await runtime.run(runtime.resolve({
+      program: [
+        'import asyncio',
+        'pending = asyncio.create_task(tools.chunk({}))',
+        'await asyncio.sleep(0.05)',
+        'return "done"',
+      ].join('\n'),
+      bindings: [{ global: 'tools', functions: { chunk: () => {
+        const until = Date.now() + 1000
+        while (Date.now() < until) { /* hold the event loop past the child's exit */ }
+        return Promise.resolve(chunk)
+      } } }],
+    }))
+    expect(result.error).toBeUndefined()
+    expect(result.value).toBe('done')
+  }, 30_000)
+
   it('caps the pending reply backlog when a child floods calls without reading its replies', async () => {
-    // drainReplies writes one reply at a time and waits for `drain` when fd 3's
+    // drainReplies writes one reply at a time and waits for `drain` when fd 4's
     // buffer is full. A child that never reads its replies (it only writes
     // call frames, never draining the reply side) leaves the pipe full, so
     // every call frame it keeps sending resolves a binding and adds a reply the
@@ -5149,7 +5174,7 @@ describe('PythonPtcRuntime — hostile peer', () => {
     // clock, pinning each binding result in host memory. The cap settles the
     // run as worker-exit instead, mirroring the frame cap's treatment of an
     // oversized frame. The child floods 5000 sequential valid calls and never
-    // reads fd 3 (its reply pump is starved by the synchronous write loop and
+    // reads fd 4 (its reply pump is starved by the synchronous write loop and
     // the blocking sleep); the pipe buffer absorbs ~1600 tiny replies, so the
     // pending backlog crosses MAX_PENDING_REPLIES long before maxWallMs, and
     // the run must settle worker-exit with the reply-queue message, not a
@@ -5163,7 +5188,7 @@ describe('PythonPtcRuntime — hostile peer', () => {
         '    view = memoryview(frame % i)',
         '    while view:',
         '        view = view[os.write(3, view):]',
-        // Keep the child alive without reading fd 3: the run must settle via
+        // Keep the child alive without reading fd 4: the run must settle via
         // the reply-backlog cap, not by the child finishing or exiting.
         'time.sleep(30)',
         'return "unreachable"',
