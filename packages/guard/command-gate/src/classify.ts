@@ -1,6 +1,8 @@
 /**
- * The rule table. Each rule reads parsed argv and answers for one command;
- * the line's verdict is the worst its commands produced.
+ * The rule table. Each rule reads parsed argv and answers for one command in
+ * one working directory; a command's verdict is the worst any rule gave it in
+ * any directory it may run in, and the line's verdict is the worst its
+ * commands produced.
  *
  * Two severities, drawn from what can be recovered afterwards. A command that
  * destroys uncommitted work or rewrites history inside the workspace is
@@ -27,6 +29,12 @@ const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'python', 'pyt
 /** Fetchers whose output is code when piped into an interpreter. */
 const FETCHERS = new Set(['curl', 'wget'])
 
+/** Programs that create or overwrite each path they name. */
+const WRITERS = new Set(['mv', 'cp', 'tee', 'truncate', 'install', 'ln', 'rsync', 'touch', 'mkdir'])
+
+/** `find` actions that run the command written after them on each match. */
+const FIND_RUNNERS = new Set(['-exec', '-execdir', '-ok', '-okdir'])
+
 /** Package managers whose global mode installs outside the workspace. */
 const GLOBAL_INSTALLERS: Record<string, readonly string[]> = {
   npm: ['install', 'i', 'add'],
@@ -49,6 +57,9 @@ const GLOBAL_INSTALLERS: Record<string, readonly string[]> = {
 
 /** Glob metacharacters that make one operand stand for many files. */
 const GLOB = /[*?[]/
+
+/** Where a refused delete or write may go instead, shared by the outside-the-workspace reasons. */
+const INSTEAD = 'inside the workspace or a temporary directory such as `/tmp`.'
 
 /**
  * Join a path against the command's directory without touching the disk.
@@ -82,15 +93,23 @@ export function within(path: string, root: string): boolean {
 type Placement = 'temporary' | 'workspace' | 'outside'
 
 /**
- * Classify where a path operand would write.
+ * Classify where a path operand would write. The narrower root decides: a
+ * temporary root at or inside the workspace marks scratch space, while one
+ * that encloses the workspace, such as `/tmp` around a workspace under it,
+ * leaves the workspace protected.
  * @param operand - the path as written.
  * @param context - workspace, working directory, and temporary roots.
  * @returns which region the operand belongs to.
  */
 function placement(operand: string, context: CommandContext): Placement {
   const path = resolvePath(context.cwd, operand)
-  if (context.temporaryRoots.some(root => within(path, resolvePath(context.cwd, root)))) return 'temporary'
-  return within(path, context.workspace) ? 'workspace' : 'outside'
+  const workspaces = [context.workspace, ...context.workspaceAliases]
+  const inWorkspace = workspaces.some(workspace => within(path, workspace))
+  const temporary = context.temporaryRoots
+    .map(root => resolvePath(context.cwd, root))
+    .some(root => within(path, root) && (!inWorkspace || workspaces.some(workspace => within(root, workspace))))
+  if (temporary) return 'temporary'
+  return inWorkspace ? 'workspace' : 'outside'
 }
 
 /** Operands of a command: every word that is not a flag. */
@@ -107,55 +126,158 @@ function hasFlag(command: SimpleCommand, shorts: string, longs: readonly string[
   })
 }
 
-/** The git subcommand, skipping `-C dir` and similar leading options. */
-function gitSubcommand(command: SimpleCommand): string | undefined {
+/**
+ * A refusal or question whose reason names the command gate, so the model
+ * does not take it for the sandbox.
+ * @param verdict - what the gate does with the command.
+ * @param rule - the stable rule id.
+ * @param text - what the command would do and what to do instead.
+ * @returns the classification.
+ */
+function classified(verdict: Exclude<CommandVerdict, 'allow'>, rule: string, text: string): Classification {
+  return { verdict, rule, reason: `Command gate: ${text}` }
+}
+
+/** The refusal of a delete that reaches past the workspace and temporary roots. */
+function deleteOutside(): Classification {
+  return classified('deny', 'rm-destructive', `this deletes files outside the workspace. Delete only ${INSTEAD}`)
+}
+
+/** One `git` command: its subcommand, the words after it, and where `-C` moved it. */
+interface GitCommand {
+  readonly subcommand: string
+  readonly rest: readonly string[]
+  /** Absolute directory git runs in once every `-C` before the subcommand applies. */
+  readonly directory: string
+}
+
+/**
+ * Read a `git` command: skip its global options and the value of `-c`, follow
+ * each `-C dir`, and find the subcommand.
+ * @param command - the simple command under test.
+ * @param cwd - the directory the command runs in.
+ * @returns the parsed command, or `undefined` for another program or a bare `git`.
+ */
+function gitCommand(command: SimpleCommand, cwd: string): GitCommand | undefined {
+  if (basename(command.argv[0]) !== 'git') return undefined
+  let directory = cwd
   for (let index = 1; index < command.argv.length; index += 1) {
     const word = command.argv[index] as string
-    if (word === '-C' || word === '-c') {
+    if (word === '-c') {
+      index += 1
+      continue
+    }
+    if (word === '-C') {
+      const value = command.argv[index + 1]
+      if (value === undefined) return undefined
+      directory = resolvePath(directory, value)
       index += 1
       continue
     }
     if (word.startsWith('-')) continue
-    return word
+    return { subcommand: word, rest: command.argv.slice(index + 1), directory }
   }
   return undefined
+}
+
+/**
+ * Whether git options include one of the given ones, written long, long with
+ * `=value`, or as a letter in a short bundle such as `-qf`. A bundle ends at the
+ * first letter that takes a value, because the rest of the word is that value:
+ * `-bfix` names the branch `fix`.
+ * @param words - the option words to search.
+ * @param letters - short option letters that match.
+ * @param longs - long options that match.
+ * @param valued - short option letters that take a value.
+ * @returns true when one of the options is present.
+ */
+function gitOption(words: readonly string[], letters: string, longs: readonly string[], valued: string): boolean {
+  return words.some((word) => {
+    if (longs.some(long => word === long || word.startsWith(`${long}=`))) return true
+    if (!word.startsWith('-') || word.startsWith('--')) return false
+    for (const letter of word.slice(1)) {
+      if (letters.includes(letter)) return true
+      if (valued.includes(letter)) return false
+    }
+    return false
+  })
+}
+
+/**
+ * Whether a `git checkout` operand can only be a path. No branch name starts
+ * with `/` or `.`, ends with `/`, or holds a glob character, and a leading `:`
+ * is pathspec magic.
+ * @param operand - the operand as written.
+ * @returns true when no branch can have that name.
+ */
+function pathOnly(operand: string): boolean {
+  return operand.startsWith('/') || operand.startsWith('.') || operand.startsWith(':') || operand.endsWith('/') || GLOB.test(operand)
+}
+
+/**
+ * The options of a git subcommand: its words before `--`, after which every
+ * word is a path.
+ * @param rest - the words after the subcommand.
+ * @returns the words before `--`, or all of them when there is none.
+ */
+function gitOptions(rest: readonly string[]): readonly string[] {
+  const separator = rest.indexOf('--')
+  return separator === -1 ? rest : rest.slice(0, separator)
+}
+
+/**
+ * The question for a git command forced to overwrite the working tree.
+ * @param command - the subcommand and option as shown, such as `checkout --force`.
+ * @returns the confirm classification.
+ */
+function forcedDiscard(command: string): Classification {
+  return classified('confirm', 'git-discard-worktree',
+    `\`git ${command}\` discards any uncommitted edits in the working tree. Commit or stash first.`)
+}
+
+/**
+ * Judge `git checkout`, which overwrites working-tree files when forced or
+ * given a path. A bare operand that names an existing file or directory is a
+ * path; one that does not is a branch, and switching branches keeps edits.
+ * @param git - the parsed git command.
+ * @param context - the filesystem check.
+ * @returns a confirm verdict when the command can discard edits, else `undefined`.
+ */
+function gitCheckout(git: GitCommand, context: CommandContext): Classification | undefined {
+  const options = gitOptions(git.rest)
+  if (gitOption(options, 'f', ['--force'], 'bB')) return forcedDiscard('checkout --force')
+  if (gitOption(options, 'bB', ['--orphan'], '')) return undefined
+  const paths = options.length < git.rest.length - 1
+    || gitOption(options, '', ['--pathspec-from-file'], '')
+    || options.some(word => !word.startsWith('-') && (pathOnly(word) || context.exists(resolvePath(git.directory, word))))
+  if (!paths) return undefined
+  return classified('confirm', 'git-discard-worktree', '`git checkout` on a path overwrites it, discarding any uncommitted '
+    + 'edits to it. Commit or stash first, or use `git switch` to change branches.')
 }
 
 /** One rule's answer, or undefined when the rule does not apply. */
 type Rule = (command: SimpleCommand, context: CommandContext) => Classification | undefined
 
-/** The ordered rule table; the first match wins for a given command. */
+/** The rule table; among answers of equal severity, the earlier rule names the verdict. */
 const RULES: readonly Rule[] = [
   function remoteScriptExecution(command) {
     const program = basename(command.argv[0])
     if (!FETCHERS.has(program) || command.pipesInto === undefined) return undefined
     if (!INTERPRETERS.has(basename(command.pipesInto))) return undefined
-    return {
-      verdict: 'deny',
-      rule: 'remote-script-execution',
-      reason: 'Piping a download straight into an interpreter runs code nobody has read. '
-        + 'Download the script to a file, read it, then run it if it is what you expect.',
-    }
+    return classified('deny', 'remote-script-execution',
+      'piping a download into an interpreter runs code nobody has read. Save it to a file, read it, then run it.')
   },
 
   function machinePower(command) {
     const program = basename(command.argv[0])
     if (!['shutdown', 'reboot', 'halt', 'poweroff'].includes(program)) return undefined
-    return {
-      verdict: 'deny',
-      rule: 'machine-power',
-      reason: `\`${program}\` would end this session and every other program on the machine. It is never part of a task.`,
-    }
+    return classified('deny', 'machine-power', `\`${program}\` would stop the machine, ending this session. No task needs it.`)
   },
 
   function diskWrite(command) {
     const program = basename(command.argv[0])
     if (program === 'dd' || program.startsWith('mkfs')) {
-      return {
-        verdict: 'deny',
-        rule: 'disk-write',
-        reason: `\`${program}\` writes raw devices and can destroy the filesystem. Use ordinary file tools inside the workspace.`,
-      }
+      return classified('deny', 'disk-write', `\`${program}\` writes raw devices and can destroy a filesystem. Use ordinary file tools instead.`)
     }
     return undefined
   },
@@ -176,128 +298,115 @@ const RULES: readonly Rule[] = [
       || (program === 'yarn' && subcommand === 'global')
       || ['cargo', 'gem', 'go'].includes(program)
     if (!global) return undefined
-    return {
-      verdict: 'deny',
-      rule: 'global-package-install',
-      reason: `Installing \`${program}\` packages outside the workspace changes the machine for every other project. `
-        + 'Add the dependency to this project instead, or ask the user to install it.',
-    }
+    return classified('deny', 'global-package-install', `a global \`${program}\` install changes the machine for every project. `
+      + 'Add the dependency to this project, or ask the user to install it.')
   },
 
   function rmDestructive(command, context) {
     if (basename(command.argv[0]) !== 'rm') return undefined
-    if (!hasFlag(command, 'rRf', ['--recursive', '--force'])) return undefined
-    const targets = operands(command)
-    if (targets.length === 0) return undefined
-    const places = targets.map(target => placement(target, context))
+    // Under `xargs` more paths arrive on standard input, so the line does not name them all.
+    const unknownTargets = command.argumentsFromInput === true
+    if (!unknownTargets && !hasFlag(command, 'rRf', ['--recursive', '--force'])) return undefined
+    const places = operands(command).map(target => placement(target, context))
+    if (places.includes('outside')) return deleteOutside()
+    if (unknownTargets) {
+      return classified('confirm', 'rm-destructive',
+        '`xargs rm` deletes paths that are not known until it runs. List them first, then remove them by name.')
+    }
     if (places.every(place => place === 'temporary')) return undefined
-    if (places.some(place => place === 'outside')) {
-      return {
-        verdict: 'deny',
-        rule: 'rm-destructive',
-        reason: 'This would delete files outside the workspace, which no task needs. '
-          + 'Delete inside the workspace, or use a temporary directory.',
-      }
+    return classified('confirm', 'rm-destructive', '`rm -r`/`-f` in the workspace cannot be undone for any file that was never committed. '
+      + 'Commit first, or remove exact paths without `-r`/`-f`.')
+  },
+
+  function findDeletion(command, context) {
+    if (basename(command.argv[0]) !== 'find') return undefined
+    const words = command.argv.slice(1)
+    const deletes = words.some((word, index) => word === '-delete'
+      || (FIND_RUNNERS.has(word) && basename(words[index + 1] ?? '') === 'rm'))
+    if (!deletes) return undefined
+    // The starting paths come before the expression, after any `-H`, `-L`, or
+    // `-P`; without one, `find` starts from the current directory.
+    const roots: string[] = []
+    for (const word of words) {
+      if (roots.length === 0 && /^-[HLP]$/.test(word)) continue
+      if (word.startsWith('-') || word === '!' || word === '(') break
+      roots.push(word)
     }
-    return {
-      verdict: 'confirm',
-      rule: 'rm-destructive',
-      reason: 'A recursive or forced delete removes files no commit holds, so no commit can bring them back. '
-        + 'Commit what matters first, or delete the exact paths without `-r`/`-f`.',
-    }
+    const places = (roots.length === 0 ? ['.'] : roots).map(root => placement(root, context))
+    if (places.includes('outside')) return deleteOutside()
+    if (places.every(place => place === 'temporary')) return undefined
+    return classified('confirm', 'rm-destructive', 'deleting with `find` in the workspace cannot be undone for any file that was never committed. '
+      + 'Commit first, or remove exact paths with `rm`.')
   },
 
   function writeOutsideWorkspace(command, context) {
     const program = basename(command.argv[0])
-    if (!['mv', 'cp', 'tee', 'truncate', 'install', 'ln', 'rsync'].includes(program)) return undefined
+    if (!WRITERS.has(program)) return undefined
     const targets = operands(command)
     // For a copy or move the destination is the last operand; for the rest
     // every operand is written.
     const written = ['mv', 'cp', 'rsync'].includes(program) ? targets.slice(-1) : targets
     if (!written.some(target => placement(target, context) === 'outside')) return undefined
-    return {
-      verdict: 'deny',
-      rule: 'write-outside-workspace',
-      reason: `\`${program}\` would write outside the workspace, where nothing can undo it. Keep the destination inside the workspace.`,
-    }
+    return classified('deny', 'write-outside-workspace', `\`${program}\` would write outside the workspace. Write ${INSTEAD}`)
   },
 
-  function gitRules(command) {
-    if (basename(command.argv[0]) !== 'git') return undefined
-    const subcommand = gitSubcommand(command)
-    if (subcommand === undefined) return undefined
-    const rest = command.argv.slice(command.argv.indexOf(subcommand) + 1)
-    if (subcommand === 'reset' && rest.includes('--hard')) {
-      return {
-        verdict: 'confirm',
-        rule: 'git-reset-hard',
-        reason: '`git reset --hard` throws away every uncommitted change, which no commit holds. '
-          + 'Commit or stash first.',
+  function gitRules(command, context) {
+    const git = gitCommand(command, context.cwd)
+    if (git === undefined) return undefined
+    const { subcommand, rest } = git
+    switch (subcommand) {
+      case 'reset':
+        if (!rest.includes('--hard')) return undefined
+        return classified('confirm', 'git-reset-hard',
+          '`git reset --hard` discards every uncommitted change in the working tree. Commit or stash first.')
+      case 'checkout':
+        return gitCheckout(git, context)
+      case 'switch':
+        if (!gitOption(gitOptions(rest), 'f', ['--force', '--discard-changes'], 'cC')) return undefined
+        return forcedDiscard('switch --discard-changes')
+      case 'restore': {
+        // `--staged` alone resets only the index; the working tree keeps its edits.
+        const options = gitOptions(rest)
+        if (gitOption(options, 'S', ['--staged'], 's') && !gitOption(options, 'W', ['--worktree'], 's')) return undefined
+        return classified('confirm', 'git-discard-worktree',
+          '`git restore` overwrites working-tree files, discarding any uncommitted edits to them. Commit or stash first.')
       }
-    }
-    if (subcommand === 'checkout' || subcommand === 'restore') {
-      // `-b`, `--staged`, and a bare branch switch keep the working tree.
-      if (rest.includes('-b') || rest.includes('-B') || rest.includes('--staged')) return undefined
-      const discards = rest.includes('--') || rest.some(word => word === '.' || word.includes('/') || word.endsWith('.ts'))
-      if (subcommand === 'restore' ? true : discards) {
-        return {
-          verdict: 'confirm',
-          rule: 'git-discard-worktree',
-          reason: `\`git ${subcommand}\` on a path discards uncommitted edits to it, which no commit holds. `
-            + 'Commit them first if they matter.',
-        }
+      case 'stash': {
+        const action = rest.find(word => !word.startsWith('-'))
+        if (action !== 'drop' && action !== 'clear') return undefined
+        return classified('confirm', 'git-stash-drop',
+          `\`git stash ${action}\` deletes stashed changes, which no branch holds. Apply what you need first, or ask the user.`)
       }
-      return undefined
-    }
-    if (subcommand === 'clean' && hasFlag(command, 'fdx', ['--force'])) {
-      return {
-        verdict: 'confirm',
-        rule: 'git-clean',
-        reason: '`git clean` deletes untracked files, including new work that was never committed. '
-          + 'Run it with `-n` first to see what would go.',
+      case 'clean':
+        if (!hasFlag(command, 'fdx', ['--force'])) return undefined
+        return classified('confirm', 'git-clean',
+          '`git clean` deletes untracked files, which no commit holds. Run `git clean -n` first to see what it would remove.')
+      case 'push': {
+        const forced = rest.some(word => word === '--force' || word === '-f' || word.startsWith('--force-with-lease'))
+          || rest.some(word => word.startsWith('+') && word.length > 1)
+        if (!forced) return undefined
+        return classified('confirm', 'git-force-push',
+          'a force push replaces the remote branch and can drop commits others rely on. Push normally, or ask the user first.')
       }
+      case 'rebase':
+        if (rest.some(word => ['--abort', '--quit', '--continue', '--skip'].includes(word))) return undefined
+        return classified('confirm', 'git-history-rewrite', '`git rebase` rewrites existing commits. Prefer a merge, or ask the user first.')
+      case 'filter-branch':
+      case 'reflog':
+        if (subcommand === 'reflog' && !rest.includes('expire')) return undefined
+        return classified('confirm', 'git-history-rewrite', `\`git ${subcommand}\` rewrites or drops history. Ask the user first.`)
+      // Every other subcommand keeps the working tree and history.
+      default:
+        return undefined
     }
-    if (subcommand === 'push') {
-      const forced = rest.some(word => word === '--force' || word === '-f' || word.startsWith('--force-with-lease'))
-        || rest.some(word => word.startsWith('+') && word.length > 1)
-      if (forced) {
-        return {
-          verdict: 'confirm',
-          rule: 'git-force-push',
-          reason: 'A force push rewrites what the remote holds and can destroy commits others rely on. '
-            + 'Push normally, or ask the user before rewriting a published branch.',
-        }
-      }
-      return undefined
-    }
-    if (subcommand === 'rebase' && !rest.some(word => ['--abort', '--quit', '--continue', '--skip'].includes(word))) {
-      return {
-        verdict: 'confirm',
-        rule: 'git-history-rewrite',
-        reason: '`git rebase` rewrites commits, so a commit recorded against the old history no longer applies. '
-          + 'Prefer a merge, or ask the user first.',
-      }
-    }
-    if (subcommand === 'filter-branch' || (subcommand === 'reflog' && rest.includes('expire'))) {
-      return {
-        verdict: 'confirm',
-        rule: 'git-history-rewrite',
-        reason: `\`git ${subcommand}\` rewrites or drops history that no later commit can restore.`,
-      }
-    }
-    return undefined
   },
 
   function recursivePermissions(command) {
     const program = basename(command.argv[0])
     if (program !== 'chmod' && program !== 'chown') return undefined
     if (!hasFlag(command, 'R', ['--recursive'])) return undefined
-    return {
-      verdict: 'confirm',
-      rule: program === 'chmod' ? 'chmod-recursive' : 'chown-recursive',
-      reason: `A recursive \`${program}\` rewrites permissions across a whole tree and is easy to get wrong. `
-        + 'Name the exact files instead.',
-    }
+    return classified('confirm', program === 'chmod' ? 'chmod-recursive' : 'chown-recursive',
+      `a recursive \`${program}\` changes a whole tree at once. Name the exact files instead.`)
   },
 
   function inplaceEdit(command) {
@@ -308,57 +417,50 @@ const RULES: readonly Rule[] = [
     const files = operands(command).slice(program === 'sed' ? 1 : 0)
     const many = files.length > 1 || files.some(file => GLOB.test(file))
     if (!many) return undefined
-    return {
-      verdict: 'confirm',
-      rule: 'inplace-edit-many',
-      reason: `An in-place \`${program}\` across several files rewrites each one with no copy of what it replaced. `
-        + 'Edit the files through the file tools, which record what changed.',
-    }
+    return classified('confirm', 'inplace-edit-many',
+      `an in-place \`${program}\` across several files changes them all at once. Edit them with the file tools instead.`)
   },
 
-  function truncatingRedirect(command, context) {
+  function redirectOutsideWorkspace(command, context) {
     for (const redirection of command.redirections) {
-      if (redirection.operator !== '>') continue
-      if (NULL_SINKS.has(redirection.target)) continue
-      // Only the destination matters. A `>` inside the workspace is ordinary
-      // work — writing a script, capturing build output — and cannot be told
-      // apart from clobbering a source file without reading the disk, so
-      // flagging every one of them would stop far more real work than it saves.
+      if (redirection.operator === '<' || NULL_SINKS.has(redirection.target)) continue
+      // Only the destination matters. A `>` or `>>` inside the workspace is
+      // ordinary work — writing a script, capturing build output — and cannot
+      // be told apart from clobbering a source file without reading the disk,
+      // so flagging every one of them would stop far more real work than it saves.
       if (placement(redirection.target, context) !== 'outside') continue
-      return {
-        verdict: 'deny',
-        rule: 'write-outside-workspace',
-        reason: `Redirecting output to \`${redirection.target}\` writes outside the workspace. Keep the target inside it.`,
-      }
+      return classified('deny', 'write-outside-workspace',
+        `redirecting into \`${redirection.target}\` writes outside the workspace. Write ${INSTEAD}`)
     }
     return undefined
   },
 ]
 
 /**
- * Classify one already-parsed command.
+ * Classify one already-parsed command in every directory it may run in.
  * @param command - the simple command under test.
- * @param context - workspace, temporary roots, and configured overrides.
- * @returns the matching classification, or an allow when no rule applies.
+ * @param context - workspace, temporary roots, filesystem check, and
+ *   configured overrides; `cwd` is where the command's line starts.
+ * @returns the worst classification any rule gave, or an allow when none applies.
  */
 export function classifyCommand(command: SimpleCommand, context: CommandContext): Classification {
   const words = command.argv
   for (const prefix of context.denyExtra) {
     if (prefix.length > 0 && prefix.every((word, index) => words[index] === word)) {
-      return {
-        verdict: 'deny',
-        rule: 'deny-extra',
-        reason: `\`${prefix.join(' ')}\` is blocked by this deployment's command policy.`,
-      }
+      return classified('deny', 'deny-extra', `\`${prefix.join(' ')}\` is blocked by this deployment's command policy.`)
     }
   }
-  for (const rule of RULES) {
-    const found = rule(command, context)
-    if (found === undefined) continue
-    if (context.allow.includes(found.rule)) return allowed()
-    return found
+  const directories = new Set((command.directories ?? [[]]).map(chain => chain.reduce(resolvePath, context.cwd)))
+  let worst = allowed()
+  for (const cwd of directories) {
+    for (const rule of RULES) {
+      const found = rule(command, { ...context, cwd })
+      // An allowed rule steps aside; the other rules still judge the command.
+      if (found === undefined || context.allow.includes(found.rule)) continue
+      if (SEVERITY[found.verdict] > SEVERITY[worst.verdict]) worst = found
+    }
   }
-  return allowed()
+  return worst
 }
 
 /** The neutral classification every unmatched command gets. */
@@ -370,7 +472,8 @@ function allowed(): Classification {
  * Classify a whole command line: parse it, judge each command it would run,
  * and answer with the worst verdict found.
  * @param line - the command line as the model wrote it.
- * @param context - workspace, temporary roots, and configured overrides.
+ * @param context - workspace, temporary roots, filesystem check, and
+ *   configured overrides.
  * @returns the line's classification.
  */
 export function classifyCommandLine(line: string, context: CommandContext): Classification {

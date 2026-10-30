@@ -33,10 +33,16 @@ kind: "package-bundle"
 dsh --profile headless "run the tests"
 ```
 
-agent 会完成该任务，把提供方的每个非空推理（reasoning）增量流式写入 stderr 的 `dsh: reasoning:` 段，然后把最终答案写入 stdout 并退出。连续推理增量保持在同一段中；提供方未给尾换行时，runner 会在后续输出前结束该段。没有推理内容的成功运行保持 stderr 为空；失败时退出码为 1，并以 `dsh: <code>: <message>` 向 stderr 写入错误。任务来自位置参数，参数省略或为单独的 `-` 时则来自 stdin；空白位置参数或空管道会在任何执行开始之前被拒绝。位置参数会原样作为任务，stdin 不会被读取，因此想让管道内容进入提示词时，请把完整提示写进管道；管道任务会原样发送，包括结尾换行。
+agent 会完成该任务，把提供方的每个非空推理（reasoning）增量流式写入 stderr 的 `dsh: reasoning:` 段，然后把最终答案写入 stdout 并退出。连续推理增量保持在同一段中；提供方未给尾换行时，runner 会在后续输出前结束该段。没有推理内容的成功运行保持 stderr 为空；最终轮次未完成的运行退出码为 1，并向 stderr 写入一行说明原因的 `dsh:` 行，例如模型失败时为 `dsh: <code>: <message>`，轮次被取消时为 `dsh: aborted: <cause>`。任务来自位置参数，参数省略或为单独的 `-` 时则来自 stdin；空白位置参数或空管道会在任何执行开始之前被拒绝。位置参数会原样作为任务，stdin 不会被读取，因此想让管道内容进入提示词时，请把完整提示写进管道；管道任务会原样发送，包括结尾换行。
 
 ```sh
 { echo "Summarize these changes:"; git diff --stat; } | dsh --profile headless
+```
+
+任务若指名一个已注册的斜杠命令，则像 Web 输入框那样运行该命令，而不是向模型发送提示；其结果写入 stdout，命令失败时退出码为 1，并向 stderr 写入 `dsh: /<name>: <error>`。未指名任何已注册命令的文本（例如以 `/` 开头的路径）按普通任务处理。
+
+```sh
+dsh --profile headless "/doctor"
 ```
 
 任务与运行选项使用以下设置：
@@ -123,7 +129,7 @@ runner 是核心 API 载体之上的直接驱动器：它确定 Agent 标识—�
 
 ### 运行流程
 
-runner 等待整个应用结算（`ctx.get('loader')?.await()`），确保已组合的工具与适配器不会半挂载，在读取 stdin 前验证请求的权限预设、审批服务与 CLI 目录授权，解析任务和共享的 [`agentDefaultModel`](../../core/agent-default-model/README.zh.md) 选择，然后确定 Agent 标识：默认是全新的 `session-<uuid>`，或是 `--session-id` 指名的持久化 Session——通过 [`sessionQuery`](../../session-query/session-query/README.zh.md) 沿用，日志不存在时拒绝。它先应用所选预设，再应用显式审批策略，然后把任务作为用户消息提交。Auto 根据消息已有的 user source 判断任务权威。不带 `--json` 时，它把该 Agent 的非空推理增量流式写入 stderr；带 `--json` 时改为投影本次运行。它等待子级工作，并在结束前复核父级仍空闲且 Session 序号未变，让结算通知可以驱动父级生成最终答案。收件箱消息处于停放状态的空闲子级不会延迟完成；进程关闭时丢弃这些未领取消息。随后它对会话执行 flush，并把所属区间（从 `firstSeq` 起）折叠为最后一条非空 `assistant/message` 文本与最后一轮的终止原因。未闭合的最后一轮没有终止原因，不能继承更早的完成结果。最后，它把最终文本写入 stdout（或 `final` 事件）并请求退出。
+runner 等待整个应用结算（`ctx.get('loader')?.await()`），确保已组合的工具与适配器不会半挂载，在读取 stdin 前验证请求的权限预设、审批服务与 CLI 目录授权，解析任务和共享的 [`agentDefaultModel`](../../core/agent-default-model/README.zh.md) 选择，然后确定 Agent 标识：默认是全新的 `session-<uuid>`，或是 `--session-id` 指名的持久化 Session——通过 [`sessionQuery`](../../session-query/session-query/README.zh.md) 沿用，日志不存在时拒绝。它先应用所选预设，再应用显式审批策略，然后把任务作为用户消息提交；[commands](../../interaction/commands/README.zh.md) 服务能解析的任务改为作为该命令运行，不产生模型消息，命令启动的轮次与任务的轮次一样会被等待。Auto 根据消息已有的 user source 判断任务权威。不带 `--json` 时，它把该 Agent 的非空推理增量流式写入 stderr；带 `--json` 时改为投影本次运行。它等待子级工作，并在结束前复核父级仍空闲且 Session 序号未变，让结算通知可以驱动父级生成最终答案。收件箱消息处于停放状态的空闲子级不会延迟完成；进程关闭时丢弃这些未领取消息。在最后这次复核时，它会解除处于激活且已布防（armed）状态的目标，使目标轮次驱动器不会启动即将退出的进程无法完成的轮次；该目标在日志中保持激活，供长期运行的宿主恢复。组合了 [learning](../../learning/learning/README.md) 服务时，它会等待最后一轮的复盘（`ctx.learning.settled`），否则进程退出会取消该复盘；该复盘有自己的截止时间，无人等待的后台作业不会被等待。随后它对会话执行 flush，并把所属区间（从 `firstSeq` 起）折叠为最后一条非空 `assistant/message` 文本与最后一轮的终止原因。[auto-continue](../../guard/auto-continue/README.md) 在输出上限之后续写的答案会与其续写部分拼接；对不带结果的子 agent 结算通知（子级在给父级发送消息后随即结束，或未留下结束消息）所作的回答会接在前一个答案之后，而不是替换它，因为这类通知只是确认父级可能已经报告过的工作。未闭合的最后一轮没有终止原因，不能继承更早的完成结果。最后，它把最终文本写入 stdout（或 `final` 事件）并请求退出。
 
 ### 基于 base 的 patch 内容
 
@@ -131,7 +137,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 ### 退出映射
 
-最终 `turn/end` 完成时退出码为 0；任何其他结果——aborted、error，或所属区间内没有轮次——退出码为 1。结束原因为 `error` 时还会向 stderr 写入 `dsh: <code>: <message>`。若实时 Agent 失败后没有提交更晚的 `turn/end`，则视为直接驱动器失败，包括汇总轮次的开始或结束无法持久化；更早的已完成轮次不能使该次运行成功。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件，不发出 `final` 事件。
+最终 `turn/end` 完成时退出码为 0。最终轮次以 `max-tokens` 结束、但 auto-continue 续写了每个被截断的答案且最后一个答案正常结束时，退出码同样为 0；该轮次保留 `max-tokens` 原因，因为任一步骤达到上限后该原因就保持不变。任何其他结果——aborted、error、仍在上限处被截断的答案，或所属区间内没有轮次——退出码为 1，且未完成的最终轮次会向 stderr 写入一行：error 时为 `dsh: <code>: <message>`，取消时为 `dsh: aborted: <cause>`（钩子的原因原样输出，例如花费守卫的原因），或者 `dsh: max-tokens: the answer stopped at the output limit`，或者 `dsh: turn ended: <kind>`。斜杠命令成功且未启动轮次时退出码为 0，失败时退出码为 1 并输出 `dsh: /<name>: <error>`。被解除的目标会向 stderr 追加 `dsh: goal "<objective>" is still active; …`，不改变退出码。若实时 Agent 失败后没有提交更晚的 `turn/end`，则视为直接驱动器失败，包括汇总轮次的开始或结束无法持久化；更早的已完成轮次不能使该次运行成功。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件，不发出 `final` 事件。
 
 ### 源码地图
 
@@ -178,7 +184,7 @@ runner 不向请求前缀添加任何内容；它只是驱动组合出的配置�
 
 这些限制告诉你 headless 何时不适用、它需要 `dsh` 启动器提供什么。它们是当前包约束，不是通用的 CLI（命令行界面）对比或任务积压。
 
-- **每次运行一个任务**——任务得到回答后进程即退出；没有交互式后续，因此多步工作请拆成多次运行。
+- **每次运行一个任务**——任务得到回答后进程即退出；没有交互式后续，因此多步工作请拆成多次运行。该次运行创建的目标保持激活，但在此不会获得后续轮次；请在 Web 应用等长期运行的宿主中恢复它。
 - **持久化历史可能缺少后台 job 的最后一条结算**——进程销毁可能在有主 job 结算前停止 Session 路由或关闭写句柄，正常结束和信号关停也可能如此；[job 生命周期约定](../../../docs/subsystems/jobs.zh.md#session-lifecycle-records)说明消费方如何保留不完整区间。
 - **自定义 startup**——禁用 `headless-startup` 的组合必须[直接配置策略](../../../docs/upgrade-guide/v0.2.1-rc.2/headless-policy-composition/guide.zh.md)。
 - **Windows 额外根目录**——ACL 后端在工具执行时拒绝带额外根目录的子进程调用，不会阻止模型请求。文件系统工具独立执行这些授权。参见[平台限制](../../sandbox/sandbox-local/README.zh.md)。

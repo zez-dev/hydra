@@ -209,6 +209,43 @@ function toolConversation(): Session {
   return session
 }
 
+/** One routed turn whose first tool result the model answered and whose second it has not read yet. */
+function readAndUnreadResults(): Session {
+  const session = Session.create(SessionId('read-and-unread'))
+  session.append('turn/start', { turn: 1 })
+  for (const [step, name, text] of [[1, 'answered', 'R'.repeat(3_000)], [2, 'fresh', 'U'.repeat(600)]] as const) {
+    const callId = ToolCallId(name)
+    session.append('step/start', { turn: 1, step })
+    if (step === 1) {
+      session.append('request/header', {
+        header: { config: { provider: MODEL, model: MODEL } },
+        reason: 'initial',
+      })
+    }
+    session.append('assistant/message', {
+      stream: [],
+      turn: 1,
+      step,
+      message: createMessage({
+        role: 'assistant',
+        content: [{ type: 'tool-call', id: callId, name: 'read', arguments: '{}' }],
+        source: {
+          kind: 'model',
+          ...{ provider: MODEL, model: MODEL },
+        },
+      }),
+    }, { surfaceOp: 'append' })
+    session.append('tool/call', { turn: 1, step, callId, name: 'read', arguments: '{}' })
+    session.append('tool/result', {
+      turn: 1,
+      step,
+      message: createToolResultMessage({ callId, content: [{ type: 'text', text }], isError: false }),
+    }, { surfaceOp: 'append' })
+    session.append('step/end', { turn: 1, step })
+  }
+  return session
+}
+
 /** One closed routed tool step followed by an open turn for rewrite events. */
 function oversizedToolResult(chars = 3_000, withCompactablePrompt = false): Session {
   const session = Session.create(SessionId(`oversized-tool-${chars}`))
@@ -967,7 +1004,7 @@ describe('pressure measurement and retention', () => {
 })
 
 describe('optional model-free tool-result pruning', () => {
-  const pruneConfig = { thresholdChars: 100, headChars: 20, tailChars: 10 }
+  const pruneConfig = { thresholdChars: 200, headChars: 20, tailChars: 10 }
 
   it('does not prune a below-pressure session opportunistically', async () => {
     const ctx = createContext(10_000)
@@ -1005,6 +1042,31 @@ describe('optional model-free tool-result pruning', () => {
     expect(ctx.tokenMeter.measure(session).totalTokens).toBeLessThan(500)
     expect(compact.calls).toHaveLength(0)
     expect(session.surface.replaceGeneration).toBe(1)
+    // The only oversized result has no answer after it, so its marker says the model has not read the cut span.
+    expect(JSON.stringify(session.deriveMessages())).toContain('before you read them')
+  })
+
+  it('keeps a result the model has not read whole when cutting read results clears pressure', async () => {
+    const ctx = createContext(1_000)
+    void new ToolResultPruner(ctx, pruneConfig)
+    const compact = new TestCompactionEngine(ctx, {
+      headroomTokens: 0,
+      maxTokens: 8192,
+      auto: false,
+      thresholdRatio: 0.5,
+      retainTokens: 50,
+    })
+    const session = readAndUnreadResults()
+    const unread = session.surface.nodes.at(-1)
+
+    expect(ctx.tokenMeter.measure(session).totalTokens).toBeGreaterThanOrEqual(500)
+    expect(await compactIfNeeded(compact, session)).toBeNull()
+    expect(compact.calls).toHaveLength(0)
+    expect(session.surface.nodes.at(-1)).toBe(unread)
+    const messages = JSON.stringify(session.deriveMessages())
+    expect(messages).toContain('characters cut from the middle to save context')
+    expect(messages).not.toContain('before you read them')
+    expect(messages).toContain('U'.repeat(600))
   })
 
   it('summarizes the pruned surface when pruning is insufficient', async () => {
@@ -1022,7 +1084,7 @@ describe('optional model-free tool-result pruning', () => {
 
     expect(await compactIfNeeded(compact, session)).not.toBeNull()
     expect(compact.calls).toHaveLength(1)
-    expect(summarizedText(compact.calls[0]!.input)).toContain('tool result middle pruned')
+    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle')
     expect(summarizedText(compact.calls[0]!.input)).not.toContain('result 1 '.repeat(300))
   })
 
@@ -2200,7 +2262,7 @@ describe('automatic listener and loader composition', () => {
   it('authorizes overflow retry when pruning alone advances an indivisible surface', async () => {
     const ctx = createContext(10_000)
     void new ToolResultPruner(ctx, {
-      thresholdChars: 100,
+      thresholdChars: 200,
       headChars: 20,
       tailChars: 10,
     })
@@ -2221,7 +2283,7 @@ describe('automatic listener and loader composition', () => {
   it('continues overflow recovery with summarization on the pruned surface', async () => {
     const ctx = createContext(10_000)
     void new ToolResultPruner(ctx, {
-      thresholdChars: 100,
+      thresholdChars: 200,
       headChars: 20,
       tailChars: 10,
     })
@@ -2238,7 +2300,7 @@ describe('automatic listener and loader composition', () => {
     expect(await recover(ctx, agent(session, MODEL), overflow())).toBe(true)
     expect(session.snapshotEvents().some(event => event.type === 'compaction/summary')).toBe(true)
     expect(compact.calls).toHaveLength(1)
-    expect(summarizedText(compact.calls[0]!.input)).toContain('tool result middle pruned')
+    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle')
   })
 
   it('retries from a durable prune when later overflow summarization throws', async () => {
@@ -2246,7 +2308,7 @@ describe('automatic listener and loader composition', () => {
     const warnings: string[] = []
     ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
     void new ToolResultPruner(ctx, {
-      thresholdChars: 100,
+      thresholdChars: 200,
       headChars: 20,
       tailChars: 10,
     })
@@ -2271,7 +2333,7 @@ describe('automatic listener and loader composition', () => {
     const ctx = createContext(10_000)
     const controller = new AbortController()
     void new ToolResultPruner(ctx, {
-      thresholdChars: 100,
+      thresholdChars: 200,
       headChars: 20,
       tailChars: 10,
     })

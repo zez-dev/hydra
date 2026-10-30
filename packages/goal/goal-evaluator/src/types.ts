@@ -33,6 +33,12 @@ export interface GoalEvaluationEventData {
   readonly messages: readonly Message[]
   /** Output-token cap sent. */
   readonly maxTokens: number
+  /**
+   * The route's lowest selectable reasoning effort, requested so the cap goes to
+   * the verdict; absent when the route offers none or the request asked at the
+   * route's default effort.
+   */
+  readonly reasoningEffort?: string
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

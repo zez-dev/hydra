@@ -1,25 +1,63 @@
 /**
  * Shell-line parsing sufficient to classify what will actually run. A rule
  * reads argv, never the raw string, so a destructive command cannot hide
- * behind `&&`, a pipeline, a subshell, `$( )`, or a `sh -c` payload.
+ * behind `&&`, a pipeline, a subshell, a compound command such as `if` or
+ * `for`, `$( )`, or a `sh -c` or `eval` payload.
  *
- * This is not a shell. It resolves quoting, operators, redirections, and the
- * nesting forms listed above; it does not expand variables or globs, and a
- * word that came from `$VAR` reaches the classifier unexpanded. A rule
- * therefore treats an unresolvable operand as unknown rather than safe.
+ * This is not a shell. It resolves quoting, escapes, line continuations,
+ * operators, redirections, and the nesting forms listed above, and it records
+ * where a literal `cd` moves the commands after it; it does not expand
+ * variables or globs, and a word that came from `$VAR` reaches the classifier
+ * unexpanded. A rule therefore treats an unresolvable operand as unknown
+ * rather than safe.
  * @module
  */
 
 import type { Redirection, SimpleCommand } from './types.ts'
 
-/** One word plus whether the source quoted it, so operators stay literal. */
+/** One word plus whether the source quoted or escaped it, so operators stay literal. */
 interface Word {
   readonly text: string
   readonly quoted: boolean
 }
 
+/** A `$( )` or backtick payload and the index of the token it appears in. */
+interface Substitution {
+  readonly line: string
+  readonly token: number
+}
+
 /** Operators that end a simple command. */
 const OPERATORS = new Set(['&&', '||', ';', '|', '&', '\n'])
+
+/**
+ * Operators after which a later command can run although a `cd` earlier in
+ * the same `&&` chain failed.
+ */
+const CHAIN_BREAKS = new Set(['||', ';', '&', '\n'])
+
+/**
+ * Reserved words that negate a pipeline or open, continue, or close a
+ * compound command such as `if`, `while`, `for … do`, or `{ }`. In command
+ * position they are syntax, so the word after them is the program.
+ */
+const RESERVED = new Set(['!', '{', '}', 'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'esac'])
+
+/** One possible working directory: the `cd` targets that lead to it, in order. */
+type Chain = readonly string[]
+
+/** Every working directory a command may run in. */
+type Directories = readonly Chain[]
+
+/** The directories of a command that runs where its line starts. */
+const START: Directories = [[]]
+
+/**
+ * How many possible working directories one line keeps. Each `cd` whose
+ * success the line leaves open doubles them, so past this bound the parser
+ * stops following later `cd` commands rather than growing without limit.
+ */
+const MAX_DIRECTORIES = 16
 
 /** Shells whose `-c` argument is another command line. */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash'])
@@ -157,14 +195,15 @@ function isDashC(word: string): boolean {
 
 /**
  * Split a line into words and operators, honouring single quotes, double
- * quotes, and backslash escapes, and collecting nested `$( )` and backtick
- * payloads for separate parsing.
+ * quotes, backslash escapes, and line continuations, and collecting nested
+ * `$( )` and backtick payloads for separate parsing.
  * @param line - the raw command line.
- * @returns the words and operators in order, plus every nested payload found.
+ * @returns the words and operators in order, a subshell's `(` and `)` among
+ *   them, plus every nested payload found with the token it belongs to.
  */
-function tokenize(line: string): { tokens: Word[]; nested: string[] } {
+function tokenize(line: string): { tokens: Word[]; nested: Substitution[] } {
   const tokens: Word[] = []
-  const nested: string[] = []
+  const nested: Substitution[] = []
   let current = ''
   let started = false
   let quoted = false
@@ -174,15 +213,21 @@ function tokenize(line: string): { tokens: Word[]; nested: string[] } {
     started = false
     quoted = false
   }
+  // The word being built becomes the next token, so its payloads carry that index.
+  const substitute = (payload: string): void => {
+    nested.push({ line: payload, token: tokens.length })
+  }
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index] as string
     if (char === '\\') {
       const next = line[index + 1]
-      if (next !== undefined) {
-        current += next
-        started = true
-        index += 1
-      }
+      index += 1
+      // A backslash before a newline joins the two lines; before anything
+      // else it makes the character literal, so `\;` is a word, not an operator.
+      if (next === undefined || next === '\n') continue
+      current += next
+      started = true
+      quoted = true
       continue
     }
     if (char === "'" || char === '"') {
@@ -191,7 +236,7 @@ function tokenize(line: string): { tokens: Word[]; nested: string[] } {
       if (char === '"') {
         // A double-quoted `$( )` or backtick substitution still runs; a
         // single-quoted one does not.
-        nested.push(...substitutions(body))
+        for (const payload of substitutions(body)) substitute(payload)
         current += body.replace(DOUBLE_QUOTED_ESCAPE, '$1')
       } else {
         current += body
@@ -203,22 +248,23 @@ function tokenize(line: string): { tokens: Word[]; nested: string[] } {
     }
     if (char === '$' && line[index + 1] === '(') {
       const end = matchingParen(line, index + 1)
-      nested.push(line.slice(index + 2, end))
+      substitute(line.slice(index + 2, end))
       index = end
       started = true
       continue
     }
     if (char === '`') {
       const end = closingQuote(line, index)
-      nested.push(line.slice(index + 1, end))
+      substitute(line.slice(index + 1, end))
       index = end
       started = true
       continue
     }
     if (char === '(' || char === ')') {
-      // A subshell body is an ordinary command line at this level.
+      // A subshell runs in a child shell; both edges stay visible so a `cd`
+      // inside it does not move the commands after it.
       push()
-      tokens.push({ text: '\n', quoted: false })
+      tokens.push({ text: char, quoted: false })
       continue
     }
     if (char === ' ' || char === '\t') {
@@ -338,32 +384,115 @@ function substitutions(body: string): string[] {
 }
 
 /**
+ * Every chain in the given directory sets once, in first-seen order.
+ * @param sets - directory sets to combine.
+ * @returns the combined set without repeated chains.
+ */
+function union(...sets: Directories[]): Directories {
+  const kept = new Map<string, Chain>()
+  for (const set of sets) {
+    for (const chain of set) kept.set(chain.join('\0'), chain)
+  }
+  return [...kept.values()]
+}
+
+/**
+ * The directory a `cd` names, when the line spells it out. `cd` alone, `cd -`,
+ * a `~` path, and a word holding an expansion or a substitution depend on the
+ * environment, so they name none.
+ * @param args - the words after `cd`.
+ * @returns the target as written, or `undefined` when it is not literal.
+ */
+function cdTarget(args: readonly string[]): string | undefined {
+  const target = args.find(word => !word.startsWith('-'))
+  if (target === undefined || target === '' || target.startsWith('~') || /[$`]/.test(target)) return undefined
+  return target
+}
+
+/**
  * Parse one command line into the simple commands it would run, flattening
- * pipelines, chains, subshells, substitutions, and `sh -c` payloads.
+ * pipelines, chains, subshells, compound commands, substitutions, and `sh -c`
+ * and `eval` payloads.
  * @param line - the raw command line.
  * @returns every simple command the line would execute, in written order.
  */
 export function parseCommandLine(line: string): SimpleCommand[] {
+  return parseLine(line, START)
+}
+
+/**
+ * Parse a command line whose first command may run in any of `start`.
+ * @param line - the raw command line.
+ * @param start - where the line begins, relative to the directory the whole
+ *   classified line starts in.
+ * @returns every simple command the line would execute, in written order.
+ */
+function parseLine(line: string, start: Directories): SimpleCommand[] {
   const { tokens, nested } = tokenize(line)
-  const commands: SimpleCommand[] = []
+  const drafts: { readonly command: SimpleCommand; readonly piped: boolean }[] = []
+  const payloads: { readonly line: string; readonly start: Directories }[] = []
   let argv: string[] = []
   let redirections: Redirection[] = []
   let pending: Redirection['operator'] | undefined
+  let negated = false
+  let previous = ''
+  // Where the next command may run, and where a later one may run once the
+  // current `&&` chain breaks, since a `cd` inside that chain may have failed.
+  let here = start
+  let fallback: Directories | undefined
+  const subshells: { readonly here: Directories; readonly fallback: Directories | undefined }[] = []
 
-  const flush = (piped: boolean): void => {
+  // Move past a `cd` that runs in this shell. Only `&&` guarantees the `cd`
+  // succeeded before the next command runs, and not after a `!`, which
+  // inverts its status.
+  const follow = (args: readonly string[], operator: string): void => {
+    const target = cdTarget(args)
+    if (target === undefined) return
+    const moved = union(here.map(chain => target.startsWith('/') ? [target] : [...chain, target]))
+    const either = union(here, moved)
+    if (either.length > MAX_DIRECTORIES) return
+    fallback = fallback === undefined ? either : union(fallback, either)
+    here = operator === '&&' && !negated ? moved : either
+  }
+
+  const flush = (operator: string): void => {
     const [program, ...rest] = argv
     // A redirection with no command word still opens its target, as the
     // shell's null command does, so it is kept under an empty program.
     if (program !== undefined || redirections.length > 0) {
-      commands.push({ argv: [program ?? '', ...rest], redirections, ...piped ? { pipesInto: 'pending' } : {} })
+      const where = here.length === 1 && here.every(chain => chain.length === 0) ? {} : { directories: here }
+      drafts.push({ command: { argv: [program ?? '', ...rest], redirections, ...where }, piped: operator === '|' })
+      // A pipeline stage and a background job run in a child shell, so their `cd` moves nothing after them.
+      if (program === 'cd' && previous !== '|' && operator !== '|' && operator !== '&') follow(rest, operator)
+    }
+    if (CHAIN_BREAKS.has(operator) && fallback !== undefined) {
+      here = union(fallback, here)
+      fallback = undefined
     }
     argv = []
     redirections = []
+    negated = false
+    previous = operator
   }
 
-  for (const token of tokens) {
+  for (const [index, token] of tokens.entries()) {
+    for (const payload of nested) {
+      if (payload.token === index) payloads.push({ line: payload.line, start: here })
+    }
+    if (!token.quoted && (token.text === '(' || token.text === ')')) {
+      flush(token.text)
+      if (token.text === '(') {
+        subshells.push({ here, fallback })
+        fallback = undefined
+        continue
+      }
+      // A `)` that closes no subshell, such as a `case` pattern's, changes nothing.
+      const outer = subshells.pop()
+      if (outer !== undefined) ({ here, fallback } = outer)
+      continue
+    }
     if (!token.quoted && OPERATORS.has(token.text)) {
-      flush(token.text === '|')
+      flush(token.text)
       continue
     }
     if (!token.quoted && (token.text === '>' || token.text === '>>' || token.text === '<')) {
@@ -377,52 +506,59 @@ export function parseCommandLine(line: string): SimpleCommand[] {
     }
     // `NAME=value` words before the program set its environment.
     if (argv.length === 0 && ASSIGNMENT.test(token.text)) continue
+    if (argv.length === 0 && !token.quoted && RESERVED.has(token.text)) {
+      if (token.text === '!') negated = true
+      continue
+    }
     argv.push(token.text)
   }
-  flush(false)
+  flush('')
 
   // Resolve each pipe's downstream program now that the next command is known.
-  const resolved: SimpleCommand[] = commands.map((command, index) => {
-    if (command.pipesInto !== 'pending') return command
-    const next = commands[index + 1]
-    const downstream = next === undefined ? undefined : effectiveProgram(next.argv)
-    return downstream === undefined
-      ? { argv: command.argv, redirections: command.redirections }
-      : { argv: command.argv, redirections: command.redirections, pipesInto: downstream }
+  const resolved = drafts.map(({ command, piped }, index): SimpleCommand => {
+    const next = drafts[index + 1]
+    return piped && next !== undefined ? { ...command, pipesInto: effectiveProgram(next.command.argv) } : command
   })
 
   const expanded: SimpleCommand[] = []
   for (const command of resolved) expanded.push(...withRunCommands(command))
-  for (const payload of nested) expanded.push(...parseCommandLine(payload))
+  for (const payload of payloads) expanded.push(...parseLine(payload.line, payload.start))
   return expanded
 }
 
 /**
- * One command followed by every command it runs in turn: a `sh -c "…"`
- * payload, and the command a wrapper program such as `sudo` or `env` runs.
- * The outer command stays in the list, so a rule naming the shell or the
+ * One command followed by every command it runs in turn: a `sh -c "…"` or
+ * `eval` payload, and the command a wrapper program such as `sudo` or `env`
+ * runs. The outer command stays in the list, so a rule naming the shell or the
  * wrapper itself still sees it; the wrapped command keeps its pipe edge and
- * leaves the redirections to the outer command.
+ * directories, leaves the redirections to the outer command, and under `xargs`
+ * is marked as taking more arguments from its input.
  * @param command - a parsed simple command.
  * @returns the command and the commands it runs, outermost first.
  */
 function withRunCommands(command: SimpleCommand): SimpleCommand[] {
   const found: SimpleCommand[] = [command]
-  if (SHELLS.has(basename(command.argv[0]))) {
+  const start = command.directories ?? START
+  const program = basename(command.argv[0])
+  if (SHELLS.has(program)) {
     const flag = command.argv.findIndex(word => isDashC(word))
     const payload = flag === -1 ? undefined : command.argv[flag + 1]
-    if (payload !== undefined) found.push(...parseCommandLine(payload))
+    if (payload !== undefined) found.push(...parseLine(payload, start))
   }
+  // `eval` joins its arguments into one line and runs it.
+  if (program === 'eval') found.push(...parseLine(command.argv.slice(1).join(' '), start))
   const inner = wrappedCommand(command.argv)
   if (inner === undefined) return found
   if ('line' in inner) {
-    found.push(...parseCommandLine(inner.line))
+    found.push(...parseLine(inner.line, start))
     return found
   }
   found.push(...withRunCommands({
     argv: inner.argv,
     redirections: [],
     ...command.pipesInto === undefined ? {} : { pipesInto: command.pipesInto },
+    ...command.directories === undefined ? {} : { directories: command.directories },
+    ...command.argumentsFromInput === true || program === 'xargs' ? { argumentsFromInput: true as const } : {},
   }))
   return found
 }

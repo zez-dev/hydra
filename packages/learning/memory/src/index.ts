@@ -201,6 +201,7 @@ function installRecall(
   config: Pick<Config, 'maxRecallBytes' | 'recallLimit' | 'alwaysRecallKinds' | 'recallMinMatchedTerms' | 'recallScoreFloor' | 'recallNoteCoverage'>,
 ): void {
   const always = new Set(config.alwaysRecallKinds ?? DEFAULT_ALWAYS_RECALL_KINDS)
+  const alwaysKinds = [...always]
   const limit = config.recallLimit ?? DEFAULT_RECALL_LIMIT
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
@@ -228,7 +229,7 @@ function installRecall(
       }),
     ].filter(entry => !view.visibleIds.has(entry.id))
     // An entry already in view is never sent again, and a later block points at the rules the first one states.
-    const { text, ids } = renderRecallDetailed(selected, config.maxRecallBytes, view.visibleDigest !== undefined)
+    const { text, ids } = renderRecallDetailed(selected, config.maxRecallBytes, alwaysKinds, view.visibleDigest !== undefined)
     if (text.length === 0) return withoutPending()
     const digest = digestRecall(text)
     if (pending !== undefined && digestRecall(recallText(pending)) === digest) return decision

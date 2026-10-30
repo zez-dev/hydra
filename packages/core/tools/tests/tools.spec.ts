@@ -949,6 +949,20 @@ describe('ToolRuntime', () => {
       expect(result.content[0]).toMatchObject({ text: 'Error: tool "echo" requires approval, but no approval channel is available' })
     })
 
+    it('keeps the reason approval was asked for when nobody answers', async () => {
+      const ctx = await approvalSetup()
+      ctx.on('tools/pre-execute', async (_exec, _next): Promise<PreToolDecision> => ({
+        kind: 'ask',
+        reason: 'The command gate asks before a recursive delete.',
+      }))
+
+      const result = await executeToolFixture(ctx, { signal: testToolSignal, callId: ToolCallId('c1'), name: 'echo', arguments: {}, agent: fakeAgent() })
+      expect(result.isError).toBe(true)
+      expect(result.content[0]).toMatchObject({
+        text: 'Error: tool "echo" requires approval, but no approval channel is available. The command gate asks before a recursive delete.',
+      })
+    })
+
     it('denies an agent-less execution without asking — nothing to route or audit through', async () => {
       const ctx = await approvalSetup()
       let asked = false

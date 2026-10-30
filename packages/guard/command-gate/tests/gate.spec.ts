@@ -1,3 +1,7 @@
+import { realpathSync } from 'node:fs'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -18,10 +22,14 @@ import * as CommandGate from '@deepseek-ai/dsh-command-gate'
 import type { Config } from '@deepseek-ai/dsh-command-gate'
 
 let context: Context | undefined
+/** A real workspace directory a test created, removed after it. */
+let workspaceRoot: string | undefined
 
 afterEach(async () => {
   await context?.fiber.dispose()
   context = undefined
+  if (workspaceRoot !== undefined) await rm(workspaceRoot, { recursive: true, force: true })
+  workspaceRoot = undefined
 })
 
 const signal = new AbortController().signal
@@ -187,13 +195,53 @@ describe('the gate decides inside the executor', () => {
   })
 })
 
+// The classifier resolves POSIX paths, so these cases need a POSIX filesystem.
+describe.skipIf(process.platform === 'win32')('the gate reads where the command runs', () => {
+  it('asks before git checkout overwrites a file that exists, and lets a branch switch run', async () => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'dsh-command-gate-exists-'))
+    await writeFile(join(workspaceRoot, 'notes.txt'), 'draft')
+    const ctx = await setup()
+    const agent = await fakeAgent(ctx, 'gate-exists', { cwd: workspaceRoot })
+    const refused = await run(ctx, agent, 'git checkout notes.txt')
+    expect(refused.isError).toBe(true)
+    expect((refused.content[0] as { text: string }).text).toContain('Command gate: `git checkout` on a path overwrites it')
+    expect((await run(ctx, agent, 'git checkout main')).isError).toBe(false)
+    expect(ran).toEqual(['git checkout main'])
+  })
+
+  it('keeps the workspace protected when a command names it by its resolved path', async () => {
+    workspaceRoot = await mkdtemp(join(tmpdir(), 'dsh-command-gate-alias-'))
+    const ctx = await setup()
+    const agent = await fakeAgent(ctx, 'gate-alias', { cwd: workspaceRoot })
+    const refused = await run(ctx, agent, `rm -rf ${realpathSync.native(workspaceRoot)}/build`)
+    expect(refused.isError).toBe(true)
+    expect((refused.content[0] as { text: string }).text).toContain('Command gate: `rm -r`/`-f` in the workspace')
+    expect(ran).toEqual([])
+  })
+
+  it('lets commands write and delete in the platform temporary directories under either spelling', async () => {
+    const ctx = await setup()
+    const agent = await fakeAgent(ctx)
+    const lines = [
+      'awk 1 server.log > /tmp/w.log',
+      `rm -rf ${realpathSync.native('/tmp')}/dsh-command-gate-scratch`,
+      `rm -rf ${tmpdir()}/dsh-command-gate-scratch`,
+      `cp a ${realpathSync.native(tmpdir())}/b`,
+    ]
+    for (const line of lines) expect((await run(ctx, agent, line)).isError).toBe(false)
+    expect(ran).toEqual(lines)
+    expect((await run(ctx, agent, 'rm -rf /etc/dsh-command-gate-scratch')).isError).toBe(true)
+  })
+})
+
 describe('a confirm verdict without a human', () => {
   it('denies when no approval service is composed and unattendedMode is deny', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx)
     const result = await run(ctx, agent, 'git reset --hard')
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toMatch(/commit|stash|rollback/i)
+    expect((result.content[0] as { text: string }).text)
+      .toBe('Error: Command gate: `git reset --hard` discards every uncommitted change in the working tree. Commit or stash first.')
     expect(ran).toEqual([])
   })
 

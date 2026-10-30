@@ -347,7 +347,8 @@ record(finding: ResearchFinding, source: JournalEntrySource): Promise<void>
 announceBreakthrough(journal: Journal, text: string): void
 
 /**
- * Re-rank a journal's open hypotheses with one logged scoring request. A
+ * Re-rank a journal's open hypotheses with a logged scoring request, sent once
+ * more at the route's default effort when the lowest-effort answer has no text. A
  * disabled scoring config, an absent route, a failed request, and an
  * unreadable answer are each logged and leave the recorded scores unchanged.
  * @param store - the store holding the journal.

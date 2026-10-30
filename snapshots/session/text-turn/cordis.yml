@@ -33,6 +33,12 @@
 - id: session-title-llm
   disabled: true
 
+# A recorded session holds no answer for the learning review's auxiliary
+# request, which the headless runner now waits for; the learning package's
+# own tests cover turn reviews.
+- id: learning
+  disabled: true
+
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
   config:

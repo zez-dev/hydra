@@ -640,7 +640,7 @@ export class BasicCompactionEngine extends CompactionEngine {
         }
         const prune = this.ctx.get('toolResultPruner')
         if (prune !== undefined) {
-          prune.pruneSession(agent.session)
+          prune.pruneSession(agent.session, 'all')
           measurement = meter.measure(agent.session)
         }
         // The summarizer replays the prefix it condenses, so a tail stays out of
@@ -699,10 +699,16 @@ export class BasicCompactionEngine extends CompactionEngine {
     if (fits(measurement)) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
-    // summary range, then remeasure through the singleton replay fold.
+    // summary range, then remeasure through the singleton replay fold. Results
+    // the model has read go first; one it has not read is cut only when that
+    // does not clear pressure, and its marker tells the model how to see the cut span.
     if (prune !== undefined) {
-      prune.pruneSession(agent.session)
+      prune.pruneSession(agent.session, 'read')
       measurement = meter.measure(agent.session, header)
+      if (!fits(measurement)) {
+        prune.pruneSession(agent.session, 'all')
+        measurement = meter.measure(agent.session, header)
+      }
     }
     if (fits(measurement)) return null
 

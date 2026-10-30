@@ -466,7 +466,11 @@ export class ToolExecutionPipeline {
         approvalCancelled: true,
       }
       case 'unavailable': return {
-        decision: { kind: 'deny', reason: `tool "${exec.name}" requires approval, but no approval channel is available` },
+        // The asker's reason is the only explanation the model gets when nobody can answer.
+        decision: {
+          kind: 'deny',
+          reason: `tool "${exec.name}" requires approval, but no approval channel is available${ask.reason === undefined ? '' : `. ${ask.reason}`}`,
+        },
         approvalCancelled: false,
       }
       default: return assertNever(outcome, 'ApprovalOutcome')

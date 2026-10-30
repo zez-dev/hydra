@@ -24,6 +24,9 @@ import { AgentModel, modelSelectionProjectionDefinition } from '@deepseek-ai/dsh
 import { createInboxStub, provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { apply, Config } from '../src/index.ts'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { createSettlementMessage } from '@deepseek-ai/dsh-subagent/src/continuation-messages.ts'
+// Declares the auto-continue message source the continuation cases record.
+import type {} from '@deepseek-ai/dsh-auto-continue'
 import { internals } from '../src/runner-internals.ts'
 
 const originalInternals = { ...internals }
@@ -684,7 +687,7 @@ describe('headless runner', () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, undefined, false) },
     })
-    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: '' })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: aborted: cancelled by the user\n' })
     await test.ctx.fiber.dispose()
   })
 
@@ -1337,5 +1340,273 @@ describe('headless runner', () => {
     expect(new Config({})).toEqual({})
     expect(new Config({ task: 'x', sessionId: 'session-x', json: true }))
       .toEqual({ task: 'x', sessionId: 'session-x', json: true })
+  })
+})
+
+/** Append one model step that answers `input` with `text`; its recorded stream finishes with `finish`. */
+function appendStep(
+  session: Session,
+  turn: number,
+  step: number,
+  input: UserMessage,
+  text: string,
+  finish: 'stop' | 'max-tokens',
+): void {
+  session.append('step/start', { turn, step })
+  session.append('user/message', input, { surfaceOp: 'append' })
+  session.append('assistant/message', {
+    stream: [{ type: 'chunk', time: 0, chunk: { type: 'finish', reason: { kind: finish } } }],
+    turn,
+    step,
+    message: createAssistantMessage({
+      content: [{ type: 'text', text }],
+      source: { provider: 'test-provider', model: 'test-model' },
+    }),
+  }, { surfaceOp: 'append' })
+  session.append('step/end', { turn, step })
+}
+
+/** The subagent runtime's notice that `child` finished, with its closing text omitted or included. */
+function settled(child: string, closing: 'omitted' | 'included'): UserMessage {
+  return createSettlementMessage(brandString<SessionId>(child), {
+    output: [{ type: 'text', text: 'the child result' }],
+    stopReason: 'completed',
+  }, true, closing === 'omitted')
+}
+
+/** The continuation request auto-continue steers after a cut answer. */
+function continuation(): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text: 'Continue exactly where you stopped.' }],
+    source: { kind: 'plugin:dsh-auto-continue' },
+  })
+}
+
+describe('headless runner outcome', () => {
+  it('keeps the answer before a reply to settlement notices alone, then adds that reply', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The findings.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        appendStep(session, 2, 1, settled('session-child', 'omitted'), 'Nothing new came in.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The findings.\n\nNothing new came in.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('replaces the answer when a settlement notice brings the child result', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Waiting for the child.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        appendStep(session, 2, 1, settled('session-child', 'included'), 'The child result, incorporated.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The child result, incorporated.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('replaces the answer when settlement notices arrive with other input', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Waiting for the child.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        session.append('user/message', settled('session-child', 'omitted'), { surfaceOp: 'append' })
+        appendStep(session, 2, 1, createUserMessage({
+          content: [{ type: 'text', text: 'Agent session-child sent a message: the result' }],
+          source: { kind: 'agent-message', form: 'relay', senderSessionId: brandString<SessionId>('session-child') },
+        }), 'The final summary.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The final summary.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('joins an answer auto-continue carried past the output limit and exits 0', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The first half, ', 'max-tokens')
+        appendStep(session, 1, 2, continuation(), 'and the second half.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The first half, and the second half.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 and says why when the answer still stopped at the output limit', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The first half, ', 'max-tokens')
+        appendStep(session, 1, 2, continuation(), 'still cut', 'max-tokens')
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({
+      code: 1,
+      out: 'The first half, still cut\n',
+      err: 'dsh: max-tokens: the answer stopped at the output limit\n',
+    })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('prints why an aborted turn stopped', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Fixing the next file.', 'stop')
+        session.append('turn/end', {
+          turn: 1,
+          reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'spend-guard: session token budget reached' } },
+        })
+      },
+    })
+    expect(await test.run()).toMatchObject({
+      code: 1,
+      out: 'Fixing the next file.\n',
+      err: 'dsh: aborted: spend-guard: session token budget reached\n',
+    })
+    await test.ctx.fiber.dispose()
+  })
+
+  it.each([
+    [{ kind: 'parent' }, 'cancelled by the parent agent'],
+    [{ kind: 'disposed' }, 'the agent was disposed'],
+    [{ kind: 'legacy' }, 'cancelled'],
+  ] as const)('names a %o cancellation on stderr', async (cause, phrase) => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Partway.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: cause } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: 'Partway.\n', err: `dsh: aborted: ${phrase}\n` })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('names any other ending of the final turn as recorded', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, '', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'blocked' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: turn ended: blocked\n' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('prints the answer of a turn a slash command starts after the command text', async () => {
+    const test = await bench({ afterPrompt() {} }, { task: '/learn from README.md' })
+    test.ctx.provide('commands', {
+      execute: (agent: Agent) => {
+        appendTurn(agent.session, 1, createUserMessage({ content: [{ type: 'text', text: 'learn' }], source: { kind: 'user' } }),
+          'Filed two notes.', true)
+        return Promise.resolve({ commandId: 'command-1', result: { kind: 'success', text: 'Learning from README.md.' } })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'Learning from README.md.\nFiled two notes.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('runs a known slash command without sending it to the model', async () => {
+    let prompted = false
+    const test = await bench({ afterPrompt() { prompted = true } }, { task: '/doctor' })
+    const lines: string[] = []
+    test.ctx.provide('commands', {
+      execute: (_agent: Agent, line: string) => {
+        lines.push(line)
+        return Promise.resolve({ commandId: 'command-1', result: { kind: 'success', text: 'All checks pass.' } })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'All checks pass.\n', err: '', order: ['flush', 'exit'] })
+    expect(lines).toEqual(['/doctor'])
+    expect(prompted).toBe(false)
+    await test.ctx.fiber.dispose()
+  })
+
+  it('sends a task the commands service does not resolve to the model', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'answered by the model', true) },
+    }, { task: '/Users/someone/project has a failing test' })
+    test.ctx.provide('commands', { execute: () => Promise.resolve(undefined) } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'answered by the model\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 with the error a slash command reports', async () => {
+    const test = await bench({ afterPrompt() {} }, { task: '/kb add docs' })
+    test.ctx.provide('commands', {
+      execute: () => Promise.resolve({ commandId: 'command-1', result: { kind: 'error', text: 'no such folder: docs' } }),
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: /kb: no such folder: docs\n' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('stops an armed goal from starting another round before the run flushes and exits', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'Round one is done.', true) },
+    })
+    const flushesAtDisarm: number[] = []
+    test.ctx.provide('goals', {
+      get: () => ({ objective: 'make every test pass', phase: 'active', activation: 'armed' }),
+      disarm: () => { flushesAtDisarm.push(test.output().order.length); return undefined },
+    } as never)
+    expect(await test.run()).toMatchObject({
+      code: 0,
+      out: 'Round one is done.\n',
+      err: 'dsh: goal "make every test pass" is still active; this headless run answered one task, so the goal\'s next round did not start\n',
+    })
+    expect(flushesAtDisarm).toEqual([0])
+    await test.ctx.fiber.dispose()
+  })
+
+  it('leaves a goal that is not armed alone', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'Goal completed.', true) },
+    })
+    let disarms = 0
+    test.ctx.provide('goals', {
+      get: () => ({ objective: 'make every test pass', phase: 'complete', activation: 'disarmed' }),
+      disarm: () => { disarms += 1; return undefined },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'Goal completed.\n', err: '' })
+    expect(disarms).toBe(0)
+    await test.ctx.fiber.dispose()
+  })
+})
+
+describe('headless runner with a learning review', () => {
+  it('waits for the last turn\'s learning review before it flushes and exits', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'All tests pass.', true) },
+    })
+    const reviewed: string[] = []
+    const flushesAtSettle: number[] = []
+    test.ctx.provide('learning', {
+      settled: (sessionId: string) => {
+        reviewed.push(sessionId)
+        return new Promise<void>((resolve) => {
+          setTimeout(() => { flushesAtSettle.push(test.output().order.length); resolve() }, 20)
+        })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'All tests pass.\n', err: '', order: ['flush', 'exit'] })
+    expect(reviewed).toHaveLength(1)
+    expect(flushesAtSettle).toEqual([0])
+    await test.ctx.fiber.dispose()
   })
 })

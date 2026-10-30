@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createToolResultMessage, LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createToolResultMessage, LlmAdapter, ReasoningEffortId, ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmResolvedModelInfo, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -15,17 +16,39 @@ import * as Evaluator from '@deepseek-ai/dsh-goal-evaluator'
 import { collectEvidence, parseVerdict, renderWorkspaceEvidence } from '@deepseek-ai/dsh-goal-evaluator'
 import type { WorkspaceChanges, WorkspaceChangesSummary } from '@deepseek-ai/dsh-workspace-changes'
 
+/** Answers each request with the script's chunks; the route offers `efforts` as its reasoning efforts, or none when absent. */
 class ScriptedAdapter extends LlmAdapter {
   readonly requests: GenerateOptions[] = []
-  constructor(private readonly script: () => StreamChunk[]) {
+  constructor(private readonly script: (options: GenerateOptions) => StreamChunk[], private readonly efforts?: readonly string[]) {
     super()
+  }
+
+  override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+    return Promise.resolve({
+      provider, id: model, name: model,
+      ...this.efforts === undefined ? {} : { reasoning: { efforts: this.efforts.map(id => ({ id: ReasoningEffortId(id), name: id })) } },
+    })
   }
 
   override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
-    yield * this.script()
+    yield * this.script(options)
   }
 }
+
+/** A route whose model lookup fails while its requests still dispatch. */
+class UnresolvableAdapter extends ScriptedAdapter {
+  override resolveModel(): Promise<LlmResolvedModelInfo> {
+    return Promise.reject(new Error('model lookup unavailable'))
+  }
+
+  override prepareCall(provider: string, model: string): Promise<PreparedAdapterCall> {
+    return Promise.resolve({ model: { provider, id: model, name: model }, stream: options => this.stream(options) })
+  }
+}
+
+/** The efforts of a route that cannot turn thinking off, such as Claude Sonnet 5.5 and Opus 5.5. */
+const ALWAYS_THINKING_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 function textChunks(text: string): StreamChunk[] {
   return [
@@ -34,6 +57,19 @@ function textChunks(text: string): StreamChunk[] {
     { type: 'block-end', index: 0, block: { type: 'text', text } },
     { type: 'finish', reason: { kind: 'stop' } },
   ]
+}
+
+/** An answer filed entirely as reasoning, ending with the given finish. */
+function reasoningOnly(text: string, kind: 'stop' | 'max-tokens'): StreamChunk[] {
+  return [
+    { type: 'block-start', index: 0, blockType: 'reasoning' },
+    { type: 'reasoning-delta', index: 0, text },
+    { type: 'finish', reason: { kind } },
+  ]
+}
+
+function evaluationEvents(session: Session) {
+  return session.snapshotEvents().flatMap(event => event.type === 'session/goal-evaluation' ? [event.data] : [])
 }
 
 async function setup(adapter: LlmAdapter, workspaceChanges?: WorkspaceChanges): Promise<{ ctx: Context; agent: Agent; session: Session }> {
@@ -186,18 +222,57 @@ describe('update_goal complete gate', () => {
     expect(adapter.requests).toHaveLength(1)
   })
 
-  it('fails closed naming the cause when the evaluation is cut at the cap or asks for a tool', async () => {
+  it('asks the route for its lowest reasoning effort and logs it, so a route that cannot turn thinking off answers within the cap', async () => {
+    // At its default effort the route's reasoning fills the cap; at its lowest the verdict fits.
+    const adapter = new ScriptedAdapter(options => options.reasoningEffort === undefined
+      ? reasoningOnly('weighing every tool result at length', 'max-tokens')
+      : textChunks('{"verdict":"achieved","reasons":["the tests pass"]}'), ALWAYS_THINKING_EFFORTS)
+    const { ctx, agent, session } = await setup(adapter)
+    const goal = ctx.goals.create(agent, { objective: 'ship it' })
+    const result = await complete(ctx, agent, goal.id, goal.revision)
+    expect(result.isError).toBe(false)
+    expect(adapter.requests.map(request => [request.reasoningEffort, request.maxTokens])).toEqual([['low', 256]])
+    expect(evaluationEvents(session)).toMatchObject([{ reasoningEffort: 'low', maxTokens: 256 }])
+  })
+
+  it('asks once more at the route\'s default effort when the lowest effort leaves no answer text', async () => {
+    const verdict = '{"verdict":"achieved","reasons":["all done"]}'
+    const adapter = new ScriptedAdapter(options => options.reasoningEffort === undefined ? textChunks(verdict) : reasoningOnly(verdict, 'stop'), ['off', 'high'])
+    const { ctx, agent, session } = await setup(adapter)
+    const goal = ctx.goals.create(agent, { objective: 'ship it' })
+    const result = await complete(ctx, agent, goal.id, goal.revision)
+    expect(result.isError).toBe(false)
+    expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['off', undefined])
+    const logged = evaluationEvents(session)
+    expect(logged.map(data => data.reasoningEffort)).toEqual(['off', undefined])
+    expect(logged[1]).not.toHaveProperty('reasoningEffort')
+  })
+
+  it('asks a route that offers no lower effort, or whose model lookup fails, once at its default effort', async () => {
+    for (const adapter of [new ScriptedAdapter(() => textChunks('')), new UnresolvableAdapter(() => textChunks(''))]) {
+      const { ctx, agent, session } = await setup(adapter)
+      const goal = ctx.goals.create(agent, { objective: 'ship it' })
+      const result = await complete(ctx, agent, goal.id, goal.revision)
+      expect(result.content.map(block => block.type === 'text' ? block.text : '').join('')).toContain('unreadable')
+      expect(adapter.requests).toHaveLength(1)
+      expect(adapter.requests[0]).not.toHaveProperty('reasoningEffort')
+      expect(evaluationEvents(session)[0]).not.toHaveProperty('reasoningEffort')
+    }
+  })
+
+  it('fails closed naming the cause after one request when the evaluation is cut at the cap or asks for a tool', async () => {
     for (const [kind, cause] of [
       ['max-tokens', 'goal-evaluator: evaluation output reached maxOutputTokens'],
       ['tool-calls', 'goal-evaluator: evaluation model unexpectedly requested a tool'],
     ] as const) {
-      const adapter = new ScriptedAdapter(() => [{ type: 'finish', reason: { kind } }])
+      const adapter = new ScriptedAdapter(() => [{ type: 'finish', reason: { kind } }], ALWAYS_THINKING_EFFORTS)
       const { ctx, agent } = await setup(adapter)
       const goal = ctx.goals.create(agent, { objective: 'ship it' })
       const result = await complete(ctx, agent, goal.id, goal.revision)
       expect(result.isError).toBe(true)
       expect(result.content.map(block => block.type === 'text' ? block.text : '').join('')).toContain(`goal completion was not evaluated (${cause})`)
       expect(ctx.goals.get(agent)).toMatchObject({ phase: 'active' })
+      expect(adapter.requests.map(request => request.reasoningEffort)).toEqual(['low'])
     }
   })
 

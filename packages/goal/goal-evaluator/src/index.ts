@@ -1,6 +1,6 @@
 /**
  * Independent goal evaluation. When the model calls `update_goal` with
- * `action: complete`, one logged auxiliary model request judges the objective
+ * `action: complete`, a logged auxiliary model request judges the objective
  * against the session's recent tool results; a `not-yet` verdict denies the
  * completion with the evaluator's reasons, so the goal stays active and the
  * model reads what is missing. Human `/goal` completion never passes through
@@ -13,7 +13,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { auxiliaryRoute, createUserMessage, streamText } from '@deepseek-ai/dsh-llm'
+import { auxiliaryRoute, createUserMessage, lowestReasoningEffort, streamText } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
@@ -53,7 +53,7 @@ export interface Config {
   evidenceEvents: number
   /** Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted. */
   maxWorkspaceChangeEntries: number
-  /** Output-token cap for the evaluation request. */
+  /** Output-token cap of each evaluation request; a route that cannot turn thinking off spends part of it on reasoning. */
   maxOutputTokens: number
   /** Deadline for one evaluation request, in milliseconds. */
   timeoutMs: number
@@ -74,7 +74,10 @@ export const Config: z<Config> = z.object({
 })
 
 /**
- * Run one logged evaluation request for the goal.
+ * Run the logged evaluation of the goal: one request at the route's lowest
+ * selectable reasoning effort, so a thinking route spends the output cap on
+ * the verdict, and one more at the route's default effort when that answer
+ * has no text.
  * @param ctx - plugin context.
  * @param config - plugin configuration.
  * @param agent - the agent completing its goal.
@@ -83,7 +86,7 @@ export const Config: z<Config> = z.object({
  * @param workspace - recorded workspace-change summaries of earlier turns, oldest first.
  * @param signal - the tool call's cancellation.
  * @returns the parsed verdict, or `undefined` when the model's answer was not a verdict.
- * @throws when no route resolves or the request fails.
+ * @throws when no route resolves or a request fails, including an answer cut at `maxOutputTokens`.
  */
 export async function evaluateGoal(
   ctx: Context,
@@ -112,29 +115,43 @@ export async function evaluateGoal(
     }],
     source: { kind: 'plugin:dsh-goal-evaluator' },
   })]
-  using callDeadline = deadline(signal, config.timeoutMs, GOAL_EVALUATION_TIMEOUT_CODE)
-  const options: GenerateOptions = {
-    provider: route.provider,
-    model: route.model,
-    messages,
-    system: EVALUATION_SYSTEM_PROMPT,
-    maxTokens: config.maxOutputTokens,
-    sessionId: session.id,
-    purpose: 'goal-evaluate',
-    signal: callDeadline.signal,
+  const ask = async (lowerEffort: boolean): Promise<{ text: string; lowered: boolean }> => {
+    using callDeadline = deadline(signal, config.timeoutMs, GOAL_EVALUATION_TIMEOUT_CODE)
+    // The effort is a preference: a route that cannot be resolved fails loud in the request itself.
+    const reasoningEffort = lowerEffort
+      ? await ctx.llm.resolveModelInfo(route.provider, route.model, callDeadline.signal)
+        .then(info => lowestReasoningEffort(info), (_unresolvedRoute: unknown) => undefined)
+      : undefined
+    const effort = reasoningEffort === undefined ? {} : { reasoningEffort }
+    const options: GenerateOptions = {
+      provider: route.provider,
+      model: route.model,
+      messages,
+      system: EVALUATION_SYSTEM_PROMPT,
+      maxTokens: config.maxOutputTokens,
+      ...effort,
+      sessionId: session.id,
+      purpose: 'goal-evaluate',
+      signal: callDeadline.signal,
+    }
+    session.append('session/goal-evaluation', {
+      goalId: goal.id,
+      revision: goal.revision,
+      route,
+      system: EVALUATION_SYSTEM_PROMPT,
+      messages,
+      maxTokens: config.maxOutputTokens,
+      ...effort,
+    }, { ignorable: true })
+    const text = await streamText(ctx.llm.stream(options), callDeadline.signal, {
+      maxTokens: () => new Error('goal-evaluator: evaluation output reached maxOutputTokens'),
+      toolCalls: () => new Error('goal-evaluator: evaluation model unexpectedly requested a tool'),
+    })
+    return { text, lowered: reasoningEffort !== undefined }
   }
-  session.append('session/goal-evaluation', {
-    goalId: goal.id,
-    revision: goal.revision,
-    route,
-    system: EVALUATION_SYSTEM_PROMPT,
-    messages,
-    maxTokens: config.maxOutputTokens,
-  }, { ignorable: true })
-  const text = await streamText(ctx.llm.stream(options), callDeadline.signal, {
-    maxTokens: () => new Error('goal-evaluator: evaluation output reached maxOutputTokens'),
-    toolCalls: () => new Error('goal-evaluator: evaluation model unexpectedly requested a tool'),
-  })
+  const answer = await ask(true)
+  // Some servers file a reply asked not to think entirely as reasoning; the route's default effort keeps it in the text.
+  const text = answer.lowered && answer.text.trim().length === 0 ? (await ask(false)).text : answer.text
   return parseVerdict(text)
 }
 

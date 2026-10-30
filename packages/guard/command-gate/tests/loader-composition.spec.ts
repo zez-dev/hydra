@@ -1,7 +1,7 @@
 // Real composition: the gate booted from a cordis.yml through the Loader
 // beside the actual bash tool and its local executor, driven by a scripted
-// adapter that calls bash twice. Proves a denied command never reaches the
-// shell while the safe one does, with the workspace as the only evidence.
+// adapter that calls bash three times. Proves a refused command never reaches
+// the shell while the safe ones do, with the files on disk as the evidence.
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -108,17 +108,20 @@ async function boot(): Promise<Context> {
 }
 
 describe('command gate real Loader composition through cordis.yml', () => {
-  it('keeps a destructive command out of the shell and lets the safe one run', async () => {
+  it('keeps a destructive command out of the shell and lets the safe ones run', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-command-gate-loader-'))
+    // The workspace sits under the platform temporary directory, which stays
+    // protected because the workspace is the narrower root.
     const workspace = join(root, 'workspace')
-    const outside = join(root, 'outside')
+    const scratch = join(root, 'scratch')
     await mkdir(workspace, { recursive: true })
-    await mkdir(outside, { recursive: true })
-    await writeFile(join(outside, 'keepme'), 'x')
+    await mkdir(scratch, { recursive: true })
+    await writeFile(join(workspace, 'keepme'), 'x')
     const ctx = await boot()
     const adapter = new MockAdapter([
-      toolCallResponse('call-1', 'bash', { command: `rm -rf ${outside}`, description: 'clean up' }),
+      toolCallResponse('call-1', 'bash', { command: 'rm -rf keepme', description: 'clean up' }),
       toolCallResponse('call-2', 'bash', { command: 'echo kept > kept.txt', description: 'write a file' }),
+      toolCallResponse('call-3', 'bash', { command: `echo note > ${scratch}/note.txt`, description: 'write scratch' }),
       textResponse('done'),
     ])
     ctx.llm.registerAdapter(['mock'], adapter)
@@ -133,17 +136,16 @@ describe('command gate real Loader composition through cordis.yml', () => {
     const events = agent.session.snapshotEvents()
     const blocked = events.filter(event => event.type === 'command-gate/blocked')
     expect(blocked).toHaveLength(1)
-    expect(blocked[0]?.data).toMatchObject({ tool: 'bash', rule: 'rm-destructive', verdict: 'deny' })
+    // No approval service is composed, so the confirm verdict is refused.
+    expect(blocked[0]?.data).toMatchObject({ tool: 'bash', command: 'rm -rf keepme', rule: 'rm-destructive', verdict: 'confirm' })
 
     const results = events.filter(event => event.type === 'tool/result')
-    const [refused, ran] = results.map(event => event.data.message.content
+    const [refused] = results.map(event => event.data.message.content
       .map(block => block.type === 'text' ? block.text : '').join(''))
-    expect(refused).toContain('outside the workspace')
-    expect(results[0]?.data.message).toMatchObject({ isError: true })
-    expect(results[1]?.data.message).toMatchObject({ isError: false })
-    expect(ran).not.toContain('outside the workspace')
+    expect(refused).toContain('Command gate: `rm -r`/`-f` in the workspace')
+    expect(results.map(event => event.data.message)).toMatchObject([{ isError: true }, { isError: false }, { isError: false }])
     // The refused command never reached a shell, so its target survives.
-    expect(await readdir(outside)).toContain('keepme')
-    expect(await readdir(workspace)).toContain('kept.txt')
+    expect(await readdir(workspace)).toEqual(expect.arrayContaining(['keepme', 'kept.txt']))
+    expect(await readdir(scratch)).toEqual(['note.txt'])
   })
 })

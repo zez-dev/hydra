@@ -765,7 +765,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-command-gate`
 
 - `inject`: `tools` · `commands`
-- `source`: [`packages/guard/command-gate/src/index.ts:39`](../packages/guard/command-gate/src/index.ts)
+- `source`: [`packages/guard/command-gate/src/index.ts:41`](../packages/guard/command-gate/src/index.ts)
 
 ```ts config-catalog
 /** Command-gate configuration. */
@@ -786,7 +786,10 @@ export interface Config {
   allow: string[]
   /** Extra command prefixes to deny, each written as it would be typed. */
   denyExtra: string[]
-  /** Absolute paths where destroying files is expected, such as a scratch root. */
+  /**
+   * Absolute paths where destroying files is expected, such as a scratch root.
+   * `/tmp` and the operating system's temporary directory always count too.
+   */
   temporaryRoots: string[]
 }
 ```
@@ -1027,7 +1030,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-doctor`
 
 - `inject`: `commands` · `llm`
-- `source`: [`packages/boot/doctor/src/index.ts:46`](../packages/boot/doctor/src/index.ts)
+- `source`: [`packages/boot/doctor/src/index.ts:53`](../packages/boot/doctor/src/index.ts)
 
 ```ts config-catalog
 /** Doctor configuration. */
@@ -1795,7 +1798,7 @@ export interface Config {
   evidenceEvents: number
   /** Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted. */
   maxWorkspaceChangeEntries: number
-  /** Output-token cap for the evaluation request. */
+  /** Output-token cap of each evaluation request; a route that cannot turn thinking off spends part of it on reasoning. */
   maxOutputTokens: number
   /** Deadline for one evaluation request, in milliseconds. */
   timeoutMs: number
@@ -1886,7 +1889,7 @@ export interface Config {
 
 - `inject`: `agentDefaultModel` · `agents` · `sessions`
 - `refs`: [`ApprovalPolicy`](subsystems/approval.md)
-- `source`: [`packages/bundle/headless/src/index.ts:48`](../packages/bundle/headless/src/index.ts)
+- `source`: [`packages/bundle/headless/src/index.ts:53`](../packages/bundle/headless/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the task and run options resolved from this app's injected provider service. */
@@ -3526,7 +3529,7 @@ export interface Config {
 export interface ScoringConfig {
   /** Whether an auxiliary request re-ranks open hypotheses after each experiment. */
   enabled: boolean
-  /** Output cap of one scoring request. */
+  /** Output cap of each scoring request; a route that cannot turn thinking off spends part of it on reasoning. */
   maxOutputTokens: number
   /** Deadline of one scoring request in milliseconds. */
   timeoutMs: number

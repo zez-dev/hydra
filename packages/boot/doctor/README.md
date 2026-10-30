@@ -22,7 +22,9 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-`/doctor` runs every check and prints the table. `/doctor --probe` adds one tiny live model request per configured route and reports its latency or the classified failure (authentication, context, network). `/doctor --fix` creates the workspace folders the Hydra plugins expect; it changes nothing else, and no flag ever writes configuration.
+`/doctor` runs every check and prints the table. `/doctor --probe` adds one tiny live model request to the default route, or to the `provider/model` route the command names, and reports its latency or the classified failure (authentication, context, network). `/doctor --fix` creates the workspace folders the Hydra plugins expect; it changes nothing else, and no flag ever writes configuration.
+
+A check that throws does not stop the report: it becomes one `fail` row, named `could not run` (or `probe` for the probe), whose detail names the error and whose fix points at the full error in the log under `$DSH_HOME/logs`. Every other check still runs.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -33,7 +35,7 @@ The report has ten sections; `skills` appears only when `dsh-skill-lock` is moun
 | Section | Checks |
 |---|---|
 | `about` | Always first: the Hydra release (`HYDRA_VERSION`), the DeepSeek Harness release it is based on, the Node.js version, and the platform, so a pasted report identifies the build |
-| `credentials` | Each configured route's key reference resolves; with `--probe`, one live request per route. The key itself is never read into the report |
+| `credentials` | `DEEPSEEK_API_KEY` and the `apiKeyEnv` reference of each provider on every enabled `dsh-llm-pi-ai` Loader row resolve, through `ctx.credentials` when mounted and the process environment otherwise; with `--probe`, one live request. The key itself is never read into the report |
 | `tools` | `argumentCoercion: lenient` and `nullableParameters: flat` on the tools row, and `requireDescription: false` on the shell tools |
 | `sandbox` | On Linux, the bubblewrap probe and `kernel.apparmor_restrict_unprivileged_userns`, plus whether the Landlock runner binary is present |
 | `native` | Whether this platform's `system.node` addon loads |
@@ -50,13 +52,13 @@ The report has ten sections; `skills` appears only when `dsh-skill-lock` is moun
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Plugin entry: `ctx.doctor`, the `/doctor` command, route and config reads, the probe |
+| [`src/index.ts`](src/index.ts) | Plugin entry: `ctx.doctor`, the `/doctor` command, Loader row and service reads, per-check failure containment, the probe |
 | [`src/tools.ts`](src/tools.ts) | The `./tools` entry: the `doctor` tool over `ctx.doctor` |
 | [`src/checks.ts`](src/checks.ts) | Pure checks over an injected environment, the probe-error classifier, the summary, and the table renderer |
 | [`src/host.ts`](src/host.ts) | The production environment over Node, the Landlock runner, and the addon path computed from injected platform facts |
 | [`src/types.ts`](src/types.ts) | `DoctorRow`, `DoctorReport`, `DoctorEnvironment`, and the injected-internals seam the tests replace |
 
-Every check reads through `DoctorEnvironment`, so the tests supply fake filesystem, spawn, and service answers instead of touching the host.
+Every host fact reads through `DoctorEnvironment`, so the tests supply fake filesystem and spawn answers instead of touching the host. Services and Loader rows are read through their real types, and [`tests/loader-composition.spec.ts`](tests/loader-composition.spec.ts) boots them through the Loader, including a dsh profile with the settings service that the web Models page writes provider profiles through.
 
 No invariant companion is published because each report is computed from the environment when it is requested, and nothing is kept between reports.
 
@@ -81,8 +83,8 @@ Append-only: the schema is fixed and results land as ordinary tool results.
 
 ## Known Limitations and Deferred Work
 
-- **Configuration rows read the loader config** — the tools and shell settings come from the composed configuration, so a plugin constructed directly in a test reports its row as unknown rather than reading the live instance.
-- **`--probe` spends tokens** — one small request per configured route, which is why probing is opt-in.
+- **Configuration rows read the loader config** — the tools and shell settings and each pi-ai provider's key reference come from the composed row configuration, so a plugin constructed directly in a test, outside the Loader, reports the tools rows as unknown and lists no pi-ai provider rather than reading the live instances.
+- **`--probe` spends tokens** — one small request to the probed route, which is why probing is opt-in.
 - **Plugin rows report state, not the Loader's reason** — a failed row points at the startup log instead of carrying the activation error, and a service whose plugin failed shows as absent.
 
 -----

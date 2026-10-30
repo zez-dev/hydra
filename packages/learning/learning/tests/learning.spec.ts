@@ -6,7 +6,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, {
   createUserMessage, LlmAdapter, ReasoningEffortId, ToolCallId, type GenerateOptions, type LlmResolvedModelInfo, type StreamChunk,
 } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
+import SessionStore, { SessionId, type Session, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -168,9 +168,14 @@ async function setup(adapter: LlmAdapter, config: Partial<Learning.Config> = {},
   return ctx
 }
 
-async function liveAgent(ctx: Context, id = 'learning-agent', cwd?: string): Promise<{ agent: Agent; session: Session }> {
+async function liveAgent(
+  ctx: Context,
+  id = 'learning-agent',
+  cwd?: string,
+  lineage: Pick<SessionHeader, 'parentSession' | 'origin' | 'delegationDepth'> = {},
+): Promise<{ agent: Agent; session: Session }> {
   const scope = ctx.plugin(() => {})
-  const session = ctx.sessions.create(SessionId(id), cwd === undefined ? undefined : { meta: { cwd } })
+  const session = ctx.sessions.create(SessionId(id), { meta: { ...cwd === undefined ? {} : { cwd }, ...lineage } })
   const agent: Agent = {
     id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
@@ -478,6 +483,57 @@ describe('extraction on turn/end', () => {
     await settled()
     expect(ctx.jobs.list(agent.session.id)).toEqual([])
     expect(adapter.requests).toHaveLength(0)
+  })
+
+  it('settles a session\'s pending review only once the review has filed its result', async () => {
+    const adapter = new DelayedAdapter(30, '[{"text":"Run pnpm test before pushing.","kind":"shortcut","tags":[]}]')
+    const ctx = await setup(adapter)
+    await withJobs(ctx)
+    const { session } = await liveAgent(ctx)
+    recordTurn(session, 1, 3)
+    // The review is pending from the turn's end, before its job starts.
+    const pending = ctx.learning.settled(session.id)
+    let done = false
+    void pending.then(() => { done = true })
+    await new Promise(resolve => setTimeout(resolve, 5))
+    expect(done).toBe(false)
+    await pending
+    expect(session.snapshotEvents().filter(event => event.type === 'session/learning-review').map(event => event.data))
+      .toEqual([{ turn: 1, outcome: { kind: 'candidates', count: 1 } }])
+  })
+
+  it('settles at once for a session whose turn gets no review', async () => {
+    const ctx = await setup(new ScriptedAdapter(() => textChunks('[]')))
+    await withJobs(ctx)
+    const { session } = await liveAgent(ctx)
+    recordTurn(session, 1, 1)
+    await ctx.learning.settled(session.id)
+    expect(session.snapshotEvents().some(event => event.type === 'session/learning-request')).toBe(false)
+  })
+
+  it('starts no review for a turn of a subagent child, which is disposed as soon as its turn ends', async () => {
+    const adapter = new ScriptedAdapter(() => textChunks('[{"text":"Run pnpm test before pushing.","kind":"shortcut","tags":[]}]'))
+    const ctx = await setup(adapter)
+    await withJobs(ctx)
+    const { agent, session } = await liveAgent(ctx, 'child-agent', '/work/alpha', {
+      parentSession: SessionId('parent-agent'), origin: 'subagent', delegationDepth: 1,
+    })
+    recordTurn(session, 1, 3)
+    await settled()
+    expect(ctx.jobs.list(agent.session.id)).toEqual([])
+    expect(adapter.requests).toHaveLength(0)
+    expect(ctx.memory.list()).toHaveLength(0)
+    expect(session.snapshotEvents().some(event => event.type === 'session/learning-request' || event.type === 'session/learning-review')).toBe(false)
+  })
+
+  it('reviews a turn of a session that names a parent session without being a subagent child', async () => {
+    const adapter = new ScriptedAdapter(() => textChunks('[{"text":"Run pnpm test before pushing.","kind":"shortcut","tags":[]}]'))
+    const ctx = await setup(adapter)
+    const { session } = await liveAgent(ctx, 'fork-agent', undefined, { parentSession: SessionId('source-agent') })
+    recordTurn(session, 1, 3)
+    await settled()
+    expect(adapter.requests).toHaveLength(1)
+    expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
   })
 
   it('asks a thinking route for its lowest reasoning effort so the cap goes to the answer', async () => {

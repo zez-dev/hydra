@@ -15,7 +15,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
-import { auxiliaryRoute, createUserMessage, streamText } from '@deepseek-ai/dsh-llm'
+import { auxiliaryRoute, createUserMessage, lowestReasoningEffort, streamText } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, Message } from '@deepseek-ai/dsh-llm'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
@@ -71,7 +71,7 @@ declare module '@deepseek-ai/cordis' {
 export interface ScoringConfig {
   /** Whether an auxiliary request re-ranks open hypotheses after each experiment. */
   enabled: boolean
-  /** Output cap of one scoring request. */
+  /** Output cap of each scoring request; a route that cannot turn thinking off spends part of it on reasoning. */
   maxOutputTokens: number
   /** Deadline of one scoring request in milliseconds. */
   timeoutMs: number
@@ -219,8 +219,11 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   /**
-   * Re-rank the journal's open hypotheses with one logged scoring request.
-   * Failures and unreadable answers are logged and leave scores untouched.
+   * Re-rank the journal's open hypotheses with a logged scoring request at the
+   * route's lowest selectable reasoning effort, so a thinking route spends the
+   * output cap on the scores, asked once more at the route's default effort
+   * when that answer has no text. Failures and unreadable answers are logged
+   * and leave scores untouched.
    */
   async function scoreHypotheses(store: JournalStore, slug: string, session: Session, signal: AbortSignal): Promise<void> {
     if (!config.scoring.enabled) return
@@ -240,26 +243,39 @@ export function apply(ctx: Context, config: Config): void {
       content: [{ type: 'text', text: renderScoringRequest(journal) }],
       source: { kind: RESEARCH_SOURCE_KIND },
     })]
-    try {
+    const ask = async (lowerEffort: boolean): Promise<{ text: string; lowered: boolean }> => {
       using callDeadline = deadline(signal, config.scoring.timeoutMs, RESEARCH_SCORE_TIMEOUT_CODE)
+      // The effort is a preference: a route that cannot be resolved fails loud in the request itself.
+      const reasoningEffort = lowerEffort
+        ? await llm.resolveModelInfo(route.provider, route.model, callDeadline.signal)
+          .then(info => lowestReasoningEffort(info), (_unresolvedRoute: unknown) => undefined)
+        : undefined
+      const logged: ResearchScoreEventData = {
+        slug, route, system: SCORING_SYSTEM_PROMPT, messages, maxTokens: config.scoring.maxOutputTokens,
+        ...reasoningEffort === undefined ? {} : { reasoningEffort },
+      }
+      session.append('session/research-score', logged, { ignorable: true })
       const options: GenerateOptions = {
         provider: route.provider,
         model: route.model,
         messages,
         system: SCORING_SYSTEM_PROMPT,
         maxTokens: config.scoring.maxOutputTokens,
+        ...reasoningEffort === undefined ? {} : { reasoningEffort },
         sessionId: session.id,
         purpose: 'research-score',
         signal: callDeadline.signal,
       }
-      const logged: ResearchScoreEventData = {
-        slug, route, system: SCORING_SYSTEM_PROMPT, messages, maxTokens: config.scoring.maxOutputTokens,
-      }
-      session.append('session/research-score', logged, { ignorable: true })
       const text = await streamText(llm.stream(options), callDeadline.signal, {
         maxTokens: () => new Error('scoring output reached maxOutputTokens'),
         toolCalls: () => new Error('scoring model unexpectedly requested a tool'),
       })
+      return { text, lowered: reasoningEffort !== undefined }
+    }
+    try {
+      const answer = await ask(true)
+      // Some servers file a reply asked not to think entirely as reasoning; the route's default effort keeps it in the text.
+      const text = answer.lowered && answer.text.trim().length === 0 ? (await ask(false)).text : answer.text
       const scores = parseScores(text)
       if (scores === undefined) {
         ctx.logger.warn(`research: scoring answer for "${slug}" was not a JSON array; scores unchanged`)

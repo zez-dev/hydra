@@ -60,10 +60,10 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:session-log-deepseek/delivery-accepted` | event | `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9` | [`{ type: "session-log-deepseek/delivery-accepted" }`](#persistence-type-sha256-d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9) |
 | `event:session/checkpoint-critic` | event | `43d7f814a545653c32a98194debefcfde498bd51c6d9c9189a9d48e5987f75ca` | [`{ type: "session/checkpoint-critic" }`](#persistence-type-sha256-43d7f814a545653c32a98194debefcfde498bd51c6d9c9189a9d48e5987f75ca) |
 | `event:session/end-seed` | event | `5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e` | [`{ type: "session/end-seed" }`](#persistence-type-sha256-5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e) |
-| `event:session/goal-evaluation` | event | `ca21147b007a857494b8febaecf8be66ababdf55169bf77225bc2fa9a47f638d` | [`{ type: "session/goal-evaluation" }`](#persistence-type-sha256-ca21147b007a857494b8febaecf8be66ababdf55169bf77225bc2fa9a47f638d) |
+| `event:session/goal-evaluation` | event | `9eb73c60b1f557075b1a2a943616ac09fafd06e73e7b7763aab794e4deebee0a` | [`{ type: "session/goal-evaluation" }`](#persistence-type-sha256-9eb73c60b1f557075b1a2a943616ac09fafd06e73e7b7763aab794e4deebee0a) |
 | `event:session/learning-request` | event | `459000197e80c20a986f9751ccc6b54ed1888c5e422523d4a05775530de7e87a` | [`{ type: "session/learning-request" }`](#persistence-type-sha256-459000197e80c20a986f9751ccc6b54ed1888c5e422523d4a05775530de7e87a) |
 | `event:session/learning-review` | event | `cd7cb3eb137116b2b88b684cd64592ea4dbf3374a5ab717f7ef8cb0c60cf17fa` | [`{ type: "session/learning-review" }`](#persistence-type-sha256-cd7cb3eb137116b2b88b684cd64592ea4dbf3374a5ab717f7ef8cb0c60cf17fa) |
-| `event:session/research-score` | event | `3ca068db4c6e57b2a2d6550a0fa378cdae36b63658ee33675853480e029837a6` | [`{ type: "session/research-score" }`](#persistence-type-sha256-3ca068db4c6e57b2a2d6550a0fa378cdae36b63658ee33675853480e029837a6) |
+| `event:session/research-score` | event | `993a2ada1bc3a942e38b09f182fdb72da315626aaf3fd5ef3f3b8b64623310c8` | [`{ type: "session/research-score" }`](#persistence-type-sha256-993a2ada1bc3a942e38b09f182fdb72da315626aaf3fd5ef3f3b8b64623310c8) |
 | `event:session/title` | event | `1b912703e2d64f91c99c675b8f805b01076c8325b905c1218ad81ef0b24909d5` | [`{ type: "session/title" }`](#persistence-type-sha256-1b912703e2d64f91c99c675b8f805b01076c8325b905c1218ad81ef0b24909d5) |
 | `event:session/title-llm-request` | event | `c62c89f7847e5be4349f2efa1194282e03e20eb58af33281adf635a7da36cae0` | [`{ type: "session/title-llm-request" }`](#persistence-type-sha256-c62c89f7847e5be4349f2efa1194282e03e20eb58af33281adf635a7da36cae0) |
 | `event:step/end` | event | `e0a787e6ec76c7c94fecbc501b489164ab0293db05bc947914077ad01e674f05` | [`{ type: "step/end" }`](#persistence-type-sha256-e0a787e6ec76c7c94fecbc501b489164ab0293db05bc947914077ad01e674f05) |
@@ -393,7 +393,7 @@ Source: [`packages/interaction/commands/src/types.ts:105`](../packages/interacti
 'command-gate/blocked': BlockedAttempt
 ```
 
-Source: [`packages/guard/command-gate/src/types.ts:86`](../packages/guard/command-gate/src/types.ts)
+Source: [`packages/guard/command-gate/src/types.ts:116`](../packages/guard/command-gate/src/types.ts)
 
 ### `compaction/*`
 
@@ -939,7 +939,7 @@ Source: [`packages/core/session/src/types.ts:457`](../packages/core/session/src/
 'session/goal-evaluation': GoalEvaluationEventData
 ```
 
-Source: [`packages/goal/goal-evaluator/src/types.ts:41`](../packages/goal/goal-evaluator/src/types.ts)
+Source: [`packages/goal/goal-evaluator/src/types.ts:47`](../packages/goal/goal-evaluator/src/types.ts)
 
 <a id="sessionlearning-request--log-only"></a>
 
@@ -953,7 +953,7 @@ Source: [`packages/goal/goal-evaluator/src/types.ts:41`](../packages/goal/goal-e
 'session/learning-request': LearningRequestEventData
 ```
 
-Source: [`packages/learning/learning/src/types.ts:88`](../packages/learning/learning/src/types.ts)
+Source: [`packages/learning/learning/src/types.ts:89`](../packages/learning/learning/src/types.ts)
 
 <a id="sessionlearning-review--log-only"></a>
 
@@ -967,7 +967,7 @@ Source: [`packages/learning/learning/src/types.ts:88`](../packages/learning/lear
 'session/learning-review': LearningReviewEventData
 ```
 
-Source: [`packages/learning/learning/src/types.ts:93`](../packages/learning/learning/src/types.ts)
+Source: [`packages/learning/learning/src/types.ts:94`](../packages/learning/learning/src/types.ts)
 
 <a id="sessionresearch-score--log-only"></a>
 
@@ -978,7 +978,7 @@ Source: [`packages/learning/learning/src/types.ts:93`](../packages/learning/lear
 'session/research-score': ResearchScoreEventData
 ```
 
-Source: [`packages/goal/research/src/types.ts:29`](../packages/goal/research/src/types.ts)
+Source: [`packages/goal/research/src/types.ts:35`](../packages/goal/research/src/types.ts)
 
 <a id="sessiontitle--log-only"></a>
 
@@ -3569,7 +3569,7 @@ Array of [`AssistantStreamRecord`](#persistence-type-sha256-33341aac09312300de5a
 
 SHA-256: `9eef799f7dbf5af2ef050d052de5942593e091eaebb2d3476cc9e3ce324c69dc`
 
-Sources: [`packages/guard/command-gate/src/types.ts:63`](../packages/guard/command-gate/src/types.ts)
+Sources: [`packages/guard/command-gate/src/types.ts:93`](../packages/guard/command-gate/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -3941,7 +3941,7 @@ Sources: [`packages/goal/goal/src/domain.ts:35`](../packages/goal/goal/src/domai
 | `operation` | required | `"clear"` |
 | `version` | required | `1` |
 
-<a id="persistence-type-sha256-94071eacac1c178e9bc5912ad20a3aec2a3d5b8f499d983ccbca82fc7e568e18"></a>
+<a id="persistence-type-sha256-709ede14494b70e5dac386ccd8a5f4d23392b4e8d6f24ef70fd5edd50c4ea3cc"></a>
 
 <a id="persistence-type-goalevaluationeventdata"></a>
 
@@ -3949,7 +3949,7 @@ Sources: [`packages/goal/goal/src/domain.ts:35`](../packages/goal/goal/src/domai
 
 ### `GoalEvaluationEventData`
 
-SHA-256: `94071eacac1c178e9bc5912ad20a3aec2a3d5b8f499d983ccbca82fc7e568e18`
+SHA-256: `709ede14494b70e5dac386ccd8a5f4d23392b4e8d6f24ef70fd5edd50c4ea3cc`
 
 Sources: [`packages/goal/goal-evaluator/src/types.ts:23`](../packages/goal/goal-evaluator/src/types.ts)
 
@@ -3958,6 +3958,7 @@ Sources: [`packages/goal/goal-evaluator/src/types.ts:23`](../packages/goal/goal-
 | `goalId` | required | `string` |
 | `maxTokens` | required | `number` |
 | `messages` | required | [`Message[]`](#persistence-type-sha256-8f7d1de84497fbf981946bf1c986ccd7806b0cca06d2a32bf83bf692b80fabaf) |
+| `reasoningEffort` | optional | `string` |
 | `revision` | required | `number` |
 | `route` | required | [`SessionTitleModelIdentity`](#persistence-type-sha256-07e1a58c58b593f507b8e7f25723bb0aa42baae6e00f5ecfddf28cb1e64d3235) |
 | `system` | required | `string` |
@@ -4326,7 +4327,7 @@ Array of [`JsonValue`](#persistence-type-sha256-c592ce75aab73fcab19c1d7845684c72
 
 SHA-256: `c6341c413ee459302cb2725b33555931c0e880e90433916b7fe300bbbe910715`
 
-Sources: [`packages/learning/learning/src/types.ts:44`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:45`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4348,7 +4349,7 @@ Sources: [`packages/learning/learning/src/types.ts:44`](../packages/learning/lea
 
 SHA-256: `d548187fe5955ab38d93e21d7154972c7218812986224d43378e24c7efe34678`
 
-Sources: [`packages/learning/learning/src/types.ts:75`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:76`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -4365,7 +4366,7 @@ Sources: [`packages/learning/learning/src/types.ts:75`](../packages/learning/lea
 
 SHA-256: `3b137b10560e093495d485f1cc549aea0829383d2c820c7de4ea0e27f097fee3`
 
-Sources: [`packages/learning/learning/src/types.ts:69`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:70`](../packages/learning/learning/src/types.ts)
 
 | kind | Form property | Other required fields | Full definition |
 |---|---|---|---|
@@ -5063,7 +5064,7 @@ One of:
 - `"resume"`
 - `"series"`
 
-<a id="persistence-type-sha256-b2598d2081e8937d97c85ffdddcebe3f0a1949e2d426c96a9503866858200062"></a>
+<a id="persistence-type-sha256-bb2635a0526ac6939196a1c4165c71b36599f153c98bfa050482f70422ab11bc"></a>
 
 <a id="persistence-type-packagesgoalresearchsrctypestsresearchscoreeventdata"></a>
 
@@ -5071,7 +5072,7 @@ One of:
 
 ### `ResearchScoreEventData`
 
-SHA-256: `b2598d2081e8937d97c85ffdddcebe3f0a1949e2d426c96a9503866858200062`
+SHA-256: `bb2635a0526ac6939196a1c4165c71b36599f153c98bfa050482f70422ab11bc`
 
 Sources: [`packages/goal/research/src/types.ts:17`](../packages/goal/research/src/types.ts)
 
@@ -5079,6 +5080,7 @@ Sources: [`packages/goal/research/src/types.ts:17`](../packages/goal/research/sr
 |---|---|---|
 | `maxTokens` | required | `number` |
 | `messages` | required | [`Message[]`](#persistence-type-sha256-8f7d1de84497fbf981946bf1c986ccd7806b0cca06d2a32bf83bf692b80fabaf) |
+| `reasoningEffort` | optional | `string` |
 | `route` | required | [`SessionTitleModelIdentity`](#persistence-type-sha256-07e1a58c58b593f507b8e7f25723bb0aa42baae6e00f5ecfddf28cb1e64d3235) |
 | `slug` | required | `string` |
 | `system` | required | `string` |
@@ -5271,7 +5273,7 @@ Sources: [`packages/session/session-title-llm/src/index.ts:37`](../packages/sess
 
 SHA-256: `07e1a58c58b593f507b8e7f25723bb0aa42baae6e00f5ecfddf28cb1e64d3235`
 
-Sources: [`packages/core/session/src/types.ts:293`](../packages/core/session/src/types.ts) · [`packages/goal/goal-evaluator/src/types.ts:29`](../packages/goal/goal-evaluator/src/types.ts) · [`packages/goal/research/src/types.ts:20`](../packages/goal/research/src/types.ts) · [`packages/learning/learning/src/types.ts:48`](../packages/learning/learning/src/types.ts) · [`packages/session/session-title/src/types.ts:20`](../packages/session/session-title/src/types.ts) · [`packages/subagent/tool-subagent/src/model-selection.ts:9`](../packages/subagent/tool-subagent/src/model-selection.ts)
+Sources: [`packages/core/session/src/types.ts:293`](../packages/core/session/src/types.ts) · [`packages/goal/goal-evaluator/src/types.ts:29`](../packages/goal/goal-evaluator/src/types.ts) · [`packages/goal/research/src/types.ts:20`](../packages/goal/research/src/types.ts) · [`packages/learning/learning/src/types.ts:49`](../packages/learning/learning/src/types.ts) · [`packages/session/session-title/src/types.ts:20`](../packages/session/session-title/src/types.ts) · [`packages/subagent/tool-subagent/src/model-selection.ts:9`](../packages/subagent/tool-subagent/src/model-selection.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7154,7 +7156,7 @@ Sources: [`packages/core/session/src/types.ts:211`](../packages/core/session/src
 
 SHA-256: `b18f096b84625a6920d9fcb98a28ab401c53228dc690ade4fc7db10f5f1320e3`
 
-Sources: [`packages/learning/learning/src/types.ts:70`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:71`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7281,7 +7283,7 @@ SHA-256: `ba4c40b4381e0dcdfab8fc9fc75b5c9b3e8f09ef56deeb1bec8e703b0ef8cd6d`
 
 SHA-256: `47c605ed810b4cb1e848035cdaf8421033d7b2b1d2b72391639ebb1e5aac1d4e`
 
-Sources: [`packages/learning/learning/src/types.ts:65`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:66`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7294,7 +7296,7 @@ Sources: [`packages/learning/learning/src/types.ts:65`](../packages/learning/lea
 
 SHA-256: `7deebb0cc688fdfa4f15ed00f6d59656ca670eac5ccf43de58d80d7a6e05f920`
 
-Sources: [`packages/learning/learning/src/types.ts:72`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:73`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7320,7 +7322,7 @@ Sources: [`packages/session/session-title/src/types.ts:29`](../packages/session/
 
 SHA-256: `fc689b52cc6d3a9b758bbe3220f826cd1b963beffd5d3b8ee6908f30ef3d65d1`
 
-Sources: [`packages/learning/learning/src/types.ts:71`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:72`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -7515,7 +7517,7 @@ SHA-256: `88841202942c7683b3b7e5ea6a796047ec326b6701ac23e58cc236d85613b9fa`
 
 SHA-256: `93a7fecf22293f5103b45e3e4614f50aa2f64926297df139ded1c98f7fdd380d`
 
-Sources: [`packages/learning/learning/src/types.ts:62`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:63`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8396,7 +8398,7 @@ SHA-256: `db06ef35b27a38425046b2228fa6bce9582abe140d781d363137eb2f4d233a1c`
 
 SHA-256: `ed8140f3ce8ad1ce7b189eb4955ea58b45cf5acf4f14161134a164b3d6365ff1`
 
-Sources: [`packages/learning/learning/src/types.ts:63`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:64`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -8409,7 +8411,7 @@ Sources: [`packages/learning/learning/src/types.ts:63`](../packages/learning/lea
 
 SHA-256: `b479b54d83b73e54f1b32fe36dc8511d30d426f7377a2a26a8a136a56345fafd`
 
-Sources: [`packages/learning/learning/src/types.ts:64`](../packages/learning/learning/src/types.ts)
+Sources: [`packages/learning/learning/src/types.ts:65`](../packages/learning/learning/src/types.ts)
 
 | Property | Presence | Type |
 |---|---|---|
@@ -10011,17 +10013,17 @@ SHA-256: `5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e`
 | `time` | required | `number` |
 | `type` | required | `"session/end-seed"` |
 
-<a id="persistence-type-sha256-ca21147b007a857494b8febaecf8be66ababdf55169bf77225bc2fa9a47f638d"></a>
+<a id="persistence-type-sha256-9eb73c60b1f557075b1a2a943616ac09fafd06e73e7b7763aab794e4deebee0a"></a>
 
 <a id="persistence-type-eventsessiongoal-evaluation"></a>
 
 ### `{ type: "session/goal-evaluation" }`
 
-SHA-256: `ca21147b007a857494b8febaecf8be66ababdf55169bf77225bc2fa9a47f638d`
+SHA-256: `9eb73c60b1f557075b1a2a943616ac09fafd06e73e7b7763aab794e4deebee0a`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`GoalEvaluationEventData`](#persistence-type-sha256-94071eacac1c178e9bc5912ad20a3aec2a3d5b8f499d983ccbca82fc7e568e18) |
+| `data` | required | [`GoalEvaluationEventData`](#persistence-type-sha256-709ede14494b70e5dac386ccd8a5f4d23392b4e8d6f24ef70fd5edd50c4ea3cc) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |
@@ -10059,17 +10061,17 @@ SHA-256: `cd7cb3eb137116b2b88b684cd64592ea4dbf3374a5ab717f7ef8cb0c60cf17fa`
 | `time` | required | `number` |
 | `type` | required | `"session/learning-review"` |
 
-<a id="persistence-type-sha256-3ca068db4c6e57b2a2d6550a0fa378cdae36b63658ee33675853480e029837a6"></a>
+<a id="persistence-type-sha256-993a2ada1bc3a942e38b09f182fdb72da315626aaf3fd5ef3f3b8b64623310c8"></a>
 
 <a id="persistence-type-eventsessionresearch-score"></a>
 
 ### `{ type: "session/research-score" }`
 
-SHA-256: `3ca068db4c6e57b2a2d6550a0fa378cdae36b63658ee33675853480e029837a6`
+SHA-256: `993a2ada1bc3a942e38b09f182fdb72da315626aaf3fd5ef3f3b8b64623310c8`
 
 | Property | Presence | Type |
 |---|---|---|
-| `data` | required | [`ResearchScoreEventData`](#persistence-type-sha256-b2598d2081e8937d97c85ffdddcebe3f0a1949e2d426c96a9503866858200062) |
+| `data` | required | [`ResearchScoreEventData`](#persistence-type-sha256-bb2635a0526ac6939196a1c4165c71b36599f153c98bfa050482f70422ab11bc) |
 | `ignorable` | optional | `true` |
 | `seq` | required | `number` |
 | `time` | required | `number` |

@@ -2128,9 +2128,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
   },
   {
     key: 'learning',
-    summary: 'The `ctx.learning` service: the promotion path `/learn skill` and the Web card share.',
-    description: 'The `ctx.learning` service: the promotion path `/learn skill` and the Web card share.',
+    summary: 'The `ctx.learning` service: the promotion path `/learn skill` and the Web card share, and turn-review settlement.',
+    description: 'The `ctx.learning` service: the promotion path `/learn skill` and the Web card share, and turn-review settlement.',
     methods: [
+      {
+        signature: 'settled(sessionId: SessionId): Promise<void>',
+        description: 'Wait for the turn review that the session\'s latest finished turn started. The review is pending from that turn\'s `turn/end`, before its job starts, so a one-shot host that awaits this before exiting does not cancel it.',
+        parameters: [{ name: 'sessionId', description: 'the session whose review to wait for.' }],
+        returns: 'a promise that settles when the review has filed its result, failed, or been cancelled or yielded, bounded by the review\'s own deadline; it settles at once when no review is pending.',
+      },
       {
         signature: 'promote(id: MemoryEntryId, name: string): Promise<string>',
         description: 'Write one memory entry as `<skillsRoot>/<name>/SKILL.md`, register it live when a skill registry is mounted, and mark the entry `promoted`.',
@@ -3151,7 +3157,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'scoreHypotheses(store: JournalStore, slug: string, session: Session, signal: AbortSignal): Promise<void>',
-        description: 'Re-rank a journal\'s open hypotheses with one logged scoring request. A disabled scoring config, an absent route, a failed request, and an unreadable answer are each logged and leave the recorded scores unchanged.',
+        description: 'Re-rank a journal\'s open hypotheses with a logged scoring request, sent once more at the route\'s default effort when the lowest-effort answer has no text. A disabled scoring config, an absent route, a failed request, and an unreadable answer are each logged and leave the recorded scores unchanged.',
         parameters: [{ name: 'store', description: 'the store holding the journal.' }, { name: 'slug', description: 'the journal slug.' }, { name: 'session', description: 'session the request is logged against and whose route is reused by default.' }, { name: 'signal', description: 'cancellation of the caller\'s tool call or round.' }],
         returns: 'resolves once the scores are written or the attempt is abandoned.',
       },
@@ -4746,15 +4752,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'total Unicode code points across text blocks.',
       },
       {
-        signature: 'pruneContent(blocks: readonly ContentBlock[]): ContentBlock[] | null',
+        signature: 'pruneContent(blocks: readonly ContentBlock[], read: boolean): ContentBlock[] | null',
         description: 'Replace an over-budget text middle while retaining rich-block order. Text slicing is by Unicode code point, not UTF-16 code unit, so a retained boundary cannot split a surrogate pair. Grapheme clusters may still split.',
-        parameters: [{ name: 'blocks', description: 'original tool-result content.' }],
+        parameters: [{ name: 'blocks', description: 'original tool-result content.' }, { name: 'read', description: 'whether a model request already carried `blocks`; it selects the marker.' }],
         returns: 'pruned content, or `null` when the text is within budget.',
       },
       {
-        signature: 'pruneSession(session: Session): PruneResult',
-        description: 'Prune every over-budget tool result from one stable current-surface snapshot. Each replacement preserves the complete event data except for `content`, cites the shadowed node so replay can recover the replacement input, and is immediately preceded by a `compaction/prune` shadow-price event pricing the shadowed node through the injected token meter, so pure consumers can subtract it without per-node state.',
-        parameters: [{ name: 'session', description: 'session whose current surface is rewritten.' }],
+        signature: 'pruneSession(session: Session, scope: PruneScope): PruneResult',
+        description: 'Prune the over-budget tool results `scope` selects from one stable current-surface snapshot. A request carries the whole surface, so a result is read when an assistant message follows it there; a replacement keeps its node\'s position, so it is judged where the original stood. Each replacement preserves the complete event data except for `content`, cites the shadowed node so replay can recover the replacement input, and is immediately preceded by a `compaction/prune` shadow-price event pricing the shadowed node through the injected token meter, so pure consumers can subtract it without per-node state.',
+        parameters: [{ name: 'session', description: 'session whose current surface is rewritten.' }, { name: 'scope', description: 'whether results the model has not read may be cut too.' }],
         returns: 'landed replacements and aggregate Unicode-code-point savings.',
         throws: ['when the session rejects a replacement; replacements committed earlier in the pass remain durable.'],
       },
@@ -8868,6 +8874,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PruneResult',
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
+  },
+  {
+    name: 'PruneScope',
+    declaration: 'export type PruneScope = \'read\' | \'all\';',
   },
   {
     name: 'PtcBindingErrorClass',

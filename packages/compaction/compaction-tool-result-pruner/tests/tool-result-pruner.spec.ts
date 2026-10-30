@@ -8,20 +8,22 @@ import {
   SessionId,
   SessionSeq,
 } from '@deepseek-ai/dsh-session'
-import type { SurfaceEvent } from '@deepseek-ai/dsh-session'
+import type { SurfaceEvent, ToolResultMessage } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TokenMeter from '@deepseek-ai/dsh-token-meter'
 import ToolResultPruner, {
   codePointLength,
   DEFAULTS,
-  PRUNE_MARKER,
+  pruneMarker,
   resolveConfig,
 } from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 import type { ToolResultPruneConfig } from '@deepseek-ai/dsh-compaction-tool-result-pruner'
 
 const MODEL = 'test-model'
+/** The longest marker: an unread span of the largest countable size. */
+const LONGEST = codePointLength(pruneMarker(Number.MAX_SAFE_INTEGER, false))
 const SMALL: ToolResultPruneConfig = {
-  thresholdChars: 50,
+  thresholdChars: 200,
   headChars: 4,
   tailChars: 3,
 }
@@ -81,13 +83,13 @@ describe('tool-result pruning configuration', () => {
   it('preserves a logged image offload when pruning the same result later', () => {
     const session = Session.create(SessionId('prune-offloaded'), undefined, undefined, undefined, [imageOffloadProjection])
     const seq = appendToolStep(session, 1, 'shot', [
-      { type: 'text', text: 'x'.repeat(200) },
+      { type: 'text', text: 'x'.repeat(300) },
       { type: 'image', attachment: {
         attachmentId: `sha256:${'a'.repeat(64)}` as never, mediaType: 'image/png', bytes: 1, width: 1, height: 1,
       } },
     ])
     session.append('image/offload', { targets: [{ seq: SessionSeq(seq), imageIndexes: [0] }] })
-    const pruned = service().pruneSession(session)
+    const pruned = service().pruneSession(session, 'all')
     expect(pruned.pruned).toHaveLength(1)
     const replacement = session.snapshotEvents().at(-1)!
     expect(replacement.type).toBe('tool/result')
@@ -97,10 +99,10 @@ describe('tool-result pruning configuration', () => {
   })
 
   it('resolves detached immutable defaults and partial overrides', () => {
-    const raw = { thresholdChars: 100, headChars: 20, tailChars: 10 }
+    const raw = { thresholdChars: 200, headChars: 20, tailChars: 10 }
     const resolved = resolveConfig(raw)
     raw.headChars = 1
-    expect(resolved).toEqual({ thresholdChars: 100, headChars: 20, tailChars: 10 })
+    expect(resolved).toEqual({ thresholdChars: 200, headChars: 20, tailChars: 10 })
     expect(Object.isFrozen(resolved)).toBe(true)
     expect(DEFAULTS).toEqual({ thresholdChars: 8192, headChars: 4096, tailChars: 1024 })
     expect(Object.isFrozen(DEFAULTS)).toBe(true)
@@ -118,6 +120,18 @@ describe('tool-result pruning configuration', () => {
       expect(() => resolveConfig(config as ToolResultPruneConfig)).toThrow(pattern)
     }
   })
+
+  it('leaves room for the longest marker, which names an unread span', () => {
+    expect(resolveConfig({ thresholdChars: 7 + LONGEST, headChars: 4, tailChars: 3 }).thresholdChars).toBe(7 + LONGEST)
+    expect(() => resolveConfig({ thresholdChars: 6 + LONGEST, headChars: 4, tailChars: 3 }))
+      .toThrow(/headChars \+ marker \+ tailChars/)
+  })
+
+  it('names the removed amount and, for a span the model has not read, how to see it', () => {
+    expect(pruneMarker(25, true)).toBe('\n\n[... 25 characters cut from the middle to save context ...]\n\n')
+    expect(pruneMarker(25, false)).toBe('\n\n[... 25 characters cut from the middle before you read them; '
+      + 'repeat the call with a narrower range to see them ...]\n\n')
+  })
 })
 
 describe('ToolResultPruner content transform', () => {
@@ -128,20 +142,20 @@ describe('ToolResultPruner content transform', () => {
       { type: 'reasoning', text: 'not measured' },
     ] satisfies ContentBlock[]
     expect(prune.measureContent(blocks)).toBe(3)
-    expect(prune.pruneContent(blocks)).toBeNull()
+    expect(prune.pruneContent(blocks, true)).toBeNull()
     expect(codePointLength('a😀b')).toBe(3)
-    // Thirty emoji are sixty UTF-16 code units but thirty code points: within the threshold of 50.
-    expect(prune.pruneContent([{ type: 'text', text: '😀'.repeat(30) }])).toBeNull()
+    // 150 emoji are 300 UTF-16 code units but 150 code points: within the threshold of 200.
+    expect(prune.pruneContent([{ type: 'text', text: '😀'.repeat(150) }], true)).toBeNull()
   })
 
   it('keeps configured head and tail without splitting surrogate pairs', () => {
     const prune = service()
-    const result = prune.pruneContent([{ type: 'text', text: '😀'.repeat(60) }])
+    const result = prune.pruneContent([{ type: 'text', text: '😀'.repeat(300) }], true)
     expect(result).toEqual([{
       type: 'text',
-      text: `${'😀'.repeat(4)}${PRUNE_MARKER}${'😀'.repeat(3)}`,
+      text: `${'😀'.repeat(4)}${pruneMarker(293, true)}${'😀'.repeat(3)}`,
     }])
-    expect(prune.measureContent(result!)).toBeLessThanOrEqual(50)
+    expect(prune.measureContent(result!)).toBeLessThanOrEqual(200)
     expect(result![0]).toMatchObject({ type: 'text' })
     expect((result![0] as { text: string }).text).not.toContain('\uFFFD')
   })
@@ -156,30 +170,30 @@ describe('ToolResultPruner content transform', () => {
       arguments: '{}',
     }
     const result = prune.pruneContent([
-      { type: 'text', text: 'A'.repeat(40) },
+      { type: 'text', text: 'A'.repeat(100) },
       reasoning,
-      { type: 'text', text: 'B'.repeat(30) },
+      { type: 'text', text: 'B'.repeat(100) },
       call,
-      { type: 'text', text: 'C'.repeat(30) },
-    ])
+      { type: 'text', text: 'C'.repeat(100) },
+    ], true)
     expect(result).toEqual([
-      { type: 'text', text: `AAAA${PRUNE_MARKER}` },
+      { type: 'text', text: `AAAA${pruneMarker(293, true)}` },
       reasoning,
       call,
       { type: 'text', text: 'CCC' },
     ])
-    expect(prune.measureContent(result!)).toBeLessThanOrEqual(50)
+    expect(prune.measureContent(result!)).toBeLessThanOrEqual(200)
   })
 
   it('supports zero-sized head and tail while still shrinking', () => {
     const prune = service({
-      thresholdChars: codePointLength(PRUNE_MARKER),
+      thresholdChars: LONGEST,
       headChars: 0,
       tailChars: 0,
     })
-    const result = prune.pruneContent([{ type: 'text', text: 'x'.repeat(100) }])
-    expect(result).toEqual([{ type: 'text', text: PRUNE_MARKER }])
-    expect(prune.measureContent(result!)).toBe(prune.config.thresholdChars)
+    const result = prune.pruneContent([{ type: 'text', text: 'x'.repeat(300) }], false)
+    expect(result).toEqual([{ type: 'text', text: pruneMarker(300, false) }])
+    expect(prune.measureContent(result!)).toBeLessThanOrEqual(prune.config.thresholdChars)
   })
 })
 
@@ -188,7 +202,7 @@ describe('ToolResultPruner session transaction', () => {
     const session = Session.create(SessionId('preserve'))
     const originalSeq = appendToolStep(session, 1, 'one', [{
       type: 'text',
-      text: 'x'.repeat(100),
+      text: 'x'.repeat(300),
     }], {
       isError: true,
       error: { name: 'ExitError', code: 'EXIT_1' },
@@ -199,12 +213,12 @@ describe('ToolResultPruner session transaction', () => {
       turn: 2,
     })
 
-    const result = service().pruneSession(session)
+    const result = service().pruneSession(session, 'all')
     expect(result.pruned).toHaveLength(1)
     expect(result.charsRemoved).toBeGreaterThan(0)
     const entry = result.pruned[0]!
-    expect(entry).toMatchObject({ originalSeq, callId: ToolCallId('one'), charsBefore: 100 })
-    expect(entry.charsAfter).toBeLessThanOrEqual(50)
+    expect(entry).toMatchObject({ originalSeq, callId: ToolCallId('one'), charsBefore: 300 })
+    expect(entry.charsAfter).toBeLessThanOrEqual(200)
 
     const original = session.snapshotEvents()[originalSeq]!
     const replacement = session.snapshotEvents()[entry.replacementSeq]! as SurfaceEvent
@@ -212,7 +226,7 @@ describe('ToolResultPruner session transaction', () => {
       type: 'tool/result',
       data: {
         message: {
-          content: [{ type: 'text', text: 'x'.repeat(100) }],
+          content: [{ type: 'text', text: 'x'.repeat(300) }],
         },
       },
     })
@@ -252,15 +266,15 @@ describe('ToolResultPruner session transaction', () => {
 
   it('prunes multiple results, skips short ones, and converges in one pass', () => {
     const session = Session.create(SessionId('multiple'))
-    appendToolStep(session, 1, 'a', [{ type: 'text', text: 'A'.repeat(100) }])
+    appendToolStep(session, 1, 'a', [{ type: 'text', text: 'A'.repeat(300) }])
     appendToolStep(session, 2, 'b', [{ type: 'text', text: 'short' }])
-    appendToolStep(session, 3, 'c', [{ type: 'text', text: 'C'.repeat(80) }])
+    appendToolStep(session, 3, 'c', [{ type: 'text', text: 'C'.repeat(250) }])
     session.append('turn/start', {
       turn: 4,
     })
     const prune = service()
-    const first = prune.pruneSession(session)
-    const second = prune.pruneSession(session)
+    const first = prune.pruneSession(session, 'all')
+    const second = prune.pruneSession(session, 'all')
     expect(first.pruned.map(entry => entry.callId)).toEqual([ToolCallId('a'), ToolCallId('c')])
     expect(first.charsRemoved).toBe(
       first.pruned.reduce((sum, entry) => sum + entry.charsBefore - entry.charsAfter, 0),
@@ -270,13 +284,59 @@ describe('ToolResultPruner session transaction', () => {
 
   it('replays to the identical pruned model messages', () => {
     const session = Session.create(SessionId('replay'))
-    appendToolStep(session, 1, 'a', [{ type: 'text', text: 'A'.repeat(100) }])
+    appendToolStep(session, 1, 'a', [{ type: 'text', text: 'A'.repeat(300) }])
     session.append('turn/start', {
       turn: 2,
     })
-    service().pruneSession(session)
+    service().pruneSession(session, 'all')
     const replay = Session.create(session.id, session.snapshotEvents())
     expect(replay.deriveMessages()).toEqual(session.deriveMessages())
     expect(replay.surface.replaceGeneration).toBe(session.surface.replaceGeneration)
   })
+
+  it('cuts only results a later model answer follows when the scope is read', () => {
+    const session = Session.create(SessionId('read-scope'))
+    const read = appendToolStep(session, 1, 'read', [{ type: 'text', text: 'R'.repeat(300) }])
+    const unread = appendToolStep(session, 2, 'unread', [{ type: 'text', text: 'U'.repeat(300) }])
+    const result = service().pruneSession(session, 'read')
+    expect(result.pruned.map(entry => entry.originalSeq)).toEqual([read])
+    expect(session.surface.nodes).toContain(unread)
+    expect(prunedText(session, result.pruned[0]!.replacementSeq)).toBe(`RRRR${pruneMarker(293, true)}RRR`)
+  })
+
+  it('marks a result the model has not read when the scope is all', () => {
+    const session = Session.create(SessionId('all-scope'))
+    const read = appendToolStep(session, 1, 'read', [{ type: 'text', text: 'R'.repeat(300) }])
+    const unread = appendToolStep(session, 2, 'unread', [{ type: 'text', text: 'U'.repeat(300) }])
+    const result = service().pruneSession(session, 'all')
+    expect(result.pruned.map(entry => entry.originalSeq)).toEqual([read, unread])
+    expect(prunedText(session, result.pruned[0]!.replacementSeq)).toBe(`RRRR${pruneMarker(293, true)}RRR`)
+    expect(prunedText(session, result.pruned[1]!.replacementSeq)).toBe(`UUUU${pruneMarker(293, false)}UUU`)
+  })
+
+  it('judges a replaced result by its surface position, not its sequence number', () => {
+    const session = Session.create(SessionId('replaced-read'))
+    const first = appendToolStep(session, 1, 'first', [{ type: 'text', text: 'F'.repeat(300) }])
+    appendToolStep(session, 2, 'second', [{ type: 'text', text: 'short' }])
+    const original = session.snapshotEvents()[first]!
+    if (original.type !== 'tool/result') throw new Error('original is not a tool/result')
+    // Appended after the second answer, the replacement keeps the first result's place on the surface.
+    const message = session.deriveEventMessage(original) as ToolResultMessage
+    const replaced = session.append('tool/result', {
+      ...original.data,
+      message: { ...message, content: [{ type: 'text', text: 'G'.repeat(300) }] },
+    }, {
+      surfaceOp: { op: 'replace', startSeq: SessionSeq(first), endSeq: SessionSeq(first) },
+      sourceEventSeqs: [SessionSeq(first)],
+    })
+    const result = service().pruneSession(session, 'read')
+    expect(result.pruned.map(entry => entry.originalSeq)).toEqual([replaced.seq])
+    expect(prunedText(session, result.pruned[0]!.replacementSeq)).toBe(`GGGG${pruneMarker(293, true)}GGG`)
+  })
 })
+
+function prunedText(session: Session, seq: number): string {
+  const block = session.deriveEventMessage(session.snapshotEvents()[seq]!)!.content[0]!
+  if (block.type !== 'text') throw new Error('the pruned result does not start with text')
+  return block.text
+}

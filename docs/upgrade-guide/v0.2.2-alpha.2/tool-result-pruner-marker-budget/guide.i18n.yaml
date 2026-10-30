@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-alpha.2/tool-result-pruner-marker-budget/guide.md
+/:
+  en: 56fde63b962e24f6
+  zh: 18c253673f278614
+/tool-result-pruner-budgets-leave-room-for-a-longer-marker:
+  en: 84058dc12fae84ac
+  zh: ead44a6b810a6f98
+/tool-result-pruner-budgets-leave-room-for-a-longer-marker/change:
+  en: 7ab03481a0206fd5
+  zh: 1a208fbf99b9e15a
+/tool-result-pruner-budgets-leave-room-for-a-longer-marker/migration:
+  en: 2333f2b7e0767145
+  zh: 9e3fd60fac6c829f

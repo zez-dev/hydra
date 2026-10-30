@@ -353,18 +353,34 @@ function taskFromSession(log: string): string | undefined {
   return undefined
 }
 
+/** The runner's answer: the last nonempty assistant text, after the answer before it when only result-free settlement notices prompted it. */
 function finalTextFromSession(log: string): string {
-  const messages = records(log).flatMap((record) => {
-    if (record.type !== 'assistant/message') return []
+  let text = ''
+  let notices = false
+  let otherInput = false
+  for (const record of records(log)) {
     const data = record.data as JsonObject | undefined
-    const message = data?.message as JsonObject | undefined
-    return message === undefined ? [] : [message]
-  })
-  const content = messages.at(-1)?.content
-  if (!Array.isArray(content)) return ''
-  return (content as JsonObject[])
-    .flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])
-    .join('')
+    if (record.type === 'turn/start') {
+      notices = false
+      otherInput = false
+    } else if (record.type === 'user/message') {
+      const bare = (data?.source as JsonObject | undefined)?.kind === 'subagent-settled'
+        && Array.isArray(data?.content) && data.content.length === 2
+      if (bare) notices = true
+      else otherInput = true
+    } else if (record.type === 'tool/result') {
+      otherInput = true
+    } else if (record.type === 'assistant/message') {
+      const content = (data?.message as JsonObject | undefined)?.content
+      const joined = Array.isArray(content)
+        ? (content as JsonObject[]).flatMap(block => block.type === 'text' && typeof block.text === 'string' ? [block.text] : []).join('')
+        : ''
+      if (joined !== '') text = notices && !otherInput && text !== '' ? `${text}\n\n${joined}` : joined
+      notices = false
+      otherInput = false
+    }
+  }
+  return text
 }
 
 function turnReasonFromSession(log: string): JsonObject | undefined {
@@ -458,12 +474,61 @@ function stderrFromSession(log: string): string {
   }
   close()
   const reason = turnReasonFromSession(log)
-  if (reason?.kind !== 'error') return output
-  const error = reason.error as JsonObject | undefined
-  if (typeof error?.code !== 'string' || typeof error.message !== 'string') {
-    throw new Error('headless snapshot error reason has no code and message')
+  if (reason === undefined || reason.kind === 'completed') return output
+  if (reason.kind === 'max-tokens' && continuedPastCut(log)) return output
+  return `${output}${turnEndNotice(reason)}`
+}
+
+/** The headless runner's stderr line for a final turn that did not complete. */
+function turnEndNotice(reason: JsonObject): string {
+  switch (reason.kind) {
+    case 'error': {
+      const error = reason.error as JsonObject | undefined
+      if (typeof error?.code !== 'string' || typeof error.message !== 'string') {
+        throw new Error('headless snapshot error reason has no code and message')
+      }
+      return `dsh: ${error.code}: ${error.message}\n`
+    }
+    case 'aborted': return `dsh: aborted: ${cancelPhrase(reason.reason as JsonObject | undefined)}\n`
+    case 'max-tokens': return 'dsh: max-tokens: the answer stopped at the output limit\n'
+    default: return `dsh: turn ended: ${String(reason.kind)}\n`
   }
-  return `${output}dsh: ${error.code}: ${error.message}\n`
+}
+
+/** The headless runner's phrase for a recorded cancellation cause. */
+function cancelPhrase(cause: JsonObject | undefined): string {
+  switch (cause?.kind) {
+    case 'user': return 'cancelled by the user'
+    case 'parent': return 'cancelled by the parent agent'
+    case 'hook': return String(cause.reason)
+    case 'disposed': return 'the agent was disposed'
+    default: return 'cancelled'
+  }
+}
+
+/**
+ * Whether auto-continue carried every answer of the final turn that stopped
+ * at the output limit to a normal finish, as the headless runner judges it.
+ */
+function continuedPastCut(log: string): boolean {
+  let uncontinuedCut = false
+  let lastFinish: unknown
+  for (const record of records(log)) {
+    const data = record.data as JsonObject | undefined
+    if (record.type === 'turn/start') {
+      uncontinuedCut = false
+      lastFinish = undefined
+    } else if (record.type === 'user/message' && (data?.source as JsonObject | undefined)?.kind === 'plugin:dsh-auto-continue') {
+      uncontinuedCut = false
+    } else if (record.type === 'assistant/message' && Array.isArray(data?.stream)) {
+      const finish = data.stream
+        .map(entry => (entry as JsonObject).chunk as JsonObject | undefined)
+        .find(chunk => chunk?.type === 'finish')
+      lastFinish = (finish?.reason as JsonObject | undefined)?.kind
+      if (lastFinish === 'max-tokens') uncontinuedCut = true
+    }
+  }
+  return !uncontinuedCut && lastFinish !== undefined
 }
 
 function modelFromSession(log: string): { provider: string; model: string } {
@@ -1308,6 +1373,7 @@ describe('headless recorded-session snapshots', () => {
           ],
           tsconfigPath,
           expectedExitCode: turnReasonFromSession(primaryFixture)?.kind === 'completed'
+            || turnReasonFromSession(primaryFixture)?.kind === 'max-tokens' && continuedPastCut(primaryFixture)
             || turnReasonFromSession(primaryFixture) === undefined && scenario.manifest.input?.task !== undefined
             ? 0
             : 1,

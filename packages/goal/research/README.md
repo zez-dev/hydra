@@ -37,13 +37,13 @@ Each `journal` breakthrough is announced through `dsh-notify` as `researchBreakt
 | `recentExperiments` | required (`10` in `dsh-base`) | How many most-recent experiments the block lists |
 | `relatedBreakthroughs` | `5` (schema default; `5` in `dsh-base`) | How many breakthroughs mirrored from other journals the block lists under "Related breakthroughs from other research"; `0` omits the section; read from `ctx.memory` when `dsh-memory` is mounted |
 | `scoring.enabled` | required (`true` in `dsh-base`) | Whether one auxiliary request re-scores the open hypotheses after each recorded experiment |
-| `scoring.maxOutputTokens` | required (`512` in `dsh-base`) | Output cap of one scoring request |
+| `scoring.maxOutputTokens` | required (`512` in `dsh-base`) | Output cap of each scoring request; a route that cannot turn thinking off spends part of it on reasoning |
 | `scoring.timeoutMs` | required (`60000` in `dsh-base`) | Deadline of one scoring request; a late answer is logged and ignored |
 | `scoring.provider`, `scoring.model` | optional | Route of the scoring request; both or neither, absent reuses the session's own route |
 | `maxExperimentMs` | required (`600000` in `dsh-base`) | Upper bound on a `run_experiment` time budget; a larger `timeoutMs` argument is capped |
 | `maxOutputBytes` | required (`20000` in `dsh-base`) | Byte cap on the output a `run_experiment` call records in the journal and returns |
 
-`run_experiment` runs one shell command through the mounted `ctx.shell` executor (so sandboxing applies) in the session's workspace, reads metrics out of its output with the caller's regular expressions, computes deltas against the previous experiment with the same `title`, and records command, exit code, metrics, deltas, and an output excerpt as one journal experiment. After every recorded experiment, from either tool, a logged `session/research-score` request asks the scoring route for `[{ hypothesisId, score, reason }]` over every open hypothesis; scores are written onto the hypothesis lines (`~ score: 0.7 (reason)`), the round instruction lists open hypotheses by support and tells the model to test the highest-scored one first, and an unreadable answer is logged and leaves scores untouched.
+`run_experiment` runs one shell command through the mounted `ctx.shell` executor (so sandboxing applies) in the session's workspace, reads metrics out of its output with the caller's regular expressions, computes deltas against the previous experiment with the same `title`, and records command, exit code, metrics, deltas, and an output excerpt as one journal experiment. After every recorded experiment, from either tool, a logged `session/research-score` request asks the scoring route for `[{ hypothesisId, score, reason }]` over every open hypothesis; scores are written onto the hypothesis lines (`~ score: 0.7 (reason)`), the round instruction lists open hypotheses by support and tells the model to test the highest-scored one first, and an unreadable answer is logged and leaves scores untouched. The request asks for the route's lowest selectable reasoning effort, so a thinking route spends the output cap on the scores, and is asked once more at the route's default effort when that answer has no text; an answer cut at the cap is logged, not retried, and leaves scores untouched.
 
 -----
 
@@ -116,7 +116,7 @@ Prefix-stable: the schema does not change between requests.
 
 #### What the model sees
 
-An auxiliary request (`purpose: 'research-score'`), logged as `session/research-score` before it is sent: the system prompt below and one user message with the objective, criteria, open hypotheses with current scores, every experiment, and the dead ends.
+An auxiliary request (`purpose: 'research-score'`) at the route's lowest selectable reasoning effort, logged with that effort as `session/research-score` before it is sent: the system prompt below and one user message with the objective, criteria, open hypotheses with current scores, every experiment, and the dead ends.
 
 ##### Verbatim system prompt
 
@@ -128,7 +128,7 @@ Include every open hypothesis exactly once. Do not invent hypotheses or experime
 
 #### Token effect
 
-One independent request per recorded experiment while any hypothesis is open; nothing enters the session's own model history.
+One independent request per recorded experiment while any hypothesis is open, plus one at the route's default effort when the first answer has no text; nothing enters the session's own model history.
 
 #### KV Cache effect
 

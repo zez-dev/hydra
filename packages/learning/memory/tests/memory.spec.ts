@@ -20,7 +20,7 @@ import * as Memory from '@deepseek-ai/dsh-memory'
 import * as MemoryTools from '@deepseek-ai/dsh-memory/tools'
 import { createMessage } from '@deepseek-ai/dsh-llm'
 import { digestRecall, isRecallMessage, rankEntries, recalledIds, renderRecall, workspaceTag } from '@deepseek-ai/dsh-memory'
-import type { MemoryEntry } from '@deepseek-ai/dsh-memory'
+import type { MemoryEntry, MemoryEntryKind } from '@deepseek-ai/dsh-memory'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
@@ -161,7 +161,7 @@ describe('recall rendering', () => {
     const text = renderRecall([
       { id: 'a' as never, text: 'one', kind: 'fact', tags: ['x'], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 },
       { id: 'b' as never, text: 'two', kind: 'shortcut', tags: [], status: 'promoted', createdAt: 't', updatedAt: 't', recallCount: 0 },
-    ], 6000)
+    ], 6000, ['preference'])
     expect(text).toContain('<retrieved_memory>')
     expect(text).toContain('one')
     expect(text).toContain('two')
@@ -172,19 +172,34 @@ describe('recall rendering', () => {
     const entries = Array.from({ length: 50 }, (_, i) => ({
       id: String(i) as never, text: `entry number ${i} ${'x'.repeat(100)}`, kind: 'fact' as const, tags: [], status: 'approved' as const, createdAt: 't', updatedAt: 't', recallCount: 0,
     }))
-    const text = renderRecall(entries, 1000)
+    const text = renderRecall(entries, 1000, ['preference'])
     expect(Buffer.byteLength(text)).toBeLessThanOrEqual(1000)
     expect(text).toContain('entry number 0')
     expect(text).not.toContain('entry number 49')
+  })
+
+  it('renders nothing when the byte cap leaves no room for the first entry beside the head', () => {
+    const entry: MemoryEntry = { id: 'a' as never, text: 'one', kind: 'fact', tags: [], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 }
+    const full = renderRecall([entry], 6000, ['preference'])
+    expect(full).toContain('one')
+    expect(renderRecall([entry], Buffer.byteLength(full) - 1, ['preference'])).toBe('')
   })
 
   it('reads back the ids of the entries a rendered block carries', () => {
     const text = renderRecall([
       { id: 'a1b2c3d4' as never, text: 'one (with a parenthesis)', kind: 'fact', tags: ['x'], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 },
       { id: 'e5f6a7b8' as never, text: 'two', kind: 'preference', tags: [], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 },
-    ], 6000)
+    ], 6000, ['preference'])
     expect(recalledIds(text)).toEqual(['a1b2c3d4', 'e5f6a7b8'])
     expect(recalledIds('no block here')).toEqual([])
+  })
+
+  it('names the kinds it always carries, as configured, when it says what the block selects', () => {
+    const entry: MemoryEntry = { id: 'a' as never, text: 'one', kind: 'fact', tags: [], status: 'approved', createdAt: 't', updatedAt: 't', recallCount: 0 }
+    const selection = (always: MemoryEntryKind[]): string | undefined => renderRecall([entry], 6000, always).split('\n')[1]?.split(' More may be stored;')[0]
+    expect(selection([])).toBe('A selection of notes from earlier work: notes that share words with the current task, this project\'s first.')
+    expect(selection(['shortcut', 'preference']))
+      .toBe('A selection of notes from earlier work: every shortcut and preference, plus notes that share words with the current task, this project\'s first.')
   })
 
   it('identifies recall messages by their plugin source form and digests their text', () => {
@@ -272,6 +287,25 @@ describe('recall injection on agent/pre-step', () => {
     // Notes from every block in view count, not only the newest block's.
     agent.session.append('user/message', (second.kind === 'enter' ? second.messages : []).find(isRecallMessage)!, { surfaceOp: 'append' })
     expect(recalledText(await preStep(ctx, agent, [ask('Run the tests from the bash workspace before deployments reach staging')]))).toBeUndefined()
+  })
+
+  it('says the block is a selection that always carries preferences, and that the memory tool\'s search lists every stored note', async () => {
+    const ctx = await setup()
+    const agent = await fakeAgent(ctx, 'project-agent', '/work/alpha')
+    const fact = 'The billing service in /work/alpha deploys with make release'
+    await ctx.memory.add({ text: fact, kind: 'fact', tags: [workspaceTag('/work/alpha')] }, 'approved')
+    await ctx.memory.add({ text: 'answer in short paragraphs', kind: 'preference', tags: [] }, 'approved')
+    // The request shares no word with the fact, so only the preference is recalled.
+    const text = recalledText(await preStep(ctx, agent, [ask('What do you know about my projects?')]))
+    expect(text).toContain('answer in short paragraphs')
+    expect(text).not.toContain(fact)
+    expect(text?.startsWith([
+      '<retrieved_memory>',
+      'A selection of notes from earlier work: every preference, plus notes that share words with the current task, this project\'s first.'
+        + ' More may be stored; the `memory` tool\'s `search` without a query lists every stored note. Use a note only when',
+    ].join('\n'))).toBe(true)
+    const listed = await executeToolFixture(ctx, { signal, callId: ToolCallId('all'), name: 'memory', agent, arguments: { action: 'search' } })
+    expect((listed.value as { text: string }[]).map(hit => hit.text).sort()).toEqual([fact, 'answer in short paragraphs'].sort())
   })
 
   it('tells the model to use a note only in the same situation, to check a matching one before acting, and to keep the request as asked', async () => {

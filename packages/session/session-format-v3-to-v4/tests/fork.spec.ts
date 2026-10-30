@@ -87,12 +87,12 @@ describe('V4 fork results', () => {
     try {
       new SessionProjectionRegistry(ctx)
       new TokenMeter(ctx)
-      const pruner = new ToolResultPruner(ctx, { thresholdChars: 300, headChars: 100, tailChars: 100 })
+      const pruner = new ToolResultPruner(ctx, { thresholdChars: 300, headChars: 50, tailChars: 50 })
       const child = fork()
       const original = child.snapshotEvents().find(event => event.type === 'tool/result')!
       child.append('turn/start', { turn: 2 })
       child.append('step/start', { turn: 2, step: 1 })
-      const pruned = pruner.pruneSession(child)
+      const pruned = pruner.pruneSession(child, 'all')
       expect(pruned.pruned).toHaveLength(1)
       child.append('step/end', { turn: 2, step: 1 })
       child.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
@@ -100,7 +100,7 @@ describe('V4 fork results', () => {
       const replacement = events[pruned.pruned[0]!.replacementSeq]!
       expect(replacement.data).toMatchObject({ message: { id: original.data.message.id } })
       expect(replacement.sourceEventSeqs).toEqual([original.seq])
-      expect(JSON.stringify(replacement)).toContain('pruned')
+      expect(JSON.stringify(replacement)).toContain('characters cut from the middle')
       const decoder = codec.createDecoder(codec.encodeHeader(artifact(child).header, child.inheritedEventCount), 'strict')
       const output = new SessionFormatEventCollector()
       for (const event of events) decoder.decodeRow(codec.encodeEvent(event), output)

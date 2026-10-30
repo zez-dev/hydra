@@ -1603,6 +1603,11 @@
     },
     {
       "doc": "docs/subsystems/compaction.md",
+      "symbol": "PruneScope",
+      "source": "packages/compaction/compaction-tool-result-pruner/src/types.ts"
+    },
+    {
+      "doc": "docs/subsystems/compaction.md",
       "symbol": "PrunedEntry",
       "source": "packages/compaction/compaction-tool-result-pruner/src/types.ts"
     },

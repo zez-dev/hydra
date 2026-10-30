@@ -1162,6 +1162,8 @@ export function apply(ctx: Context, config: Config): void {
   const buffered = new Map<SessionId, SessionEvent[]>()
   /** The review in flight per session; the next turn's start cancels it so it never holds the route. */
   const reviewing = new Map<SessionId, AbortController>()
+  /** Settlement of each session's latest turn review, from that turn's end until the review settles. */
+  const pending = new Map<SessionId, Promise<void>>()
   ctx.on('session/event', (session, event) => {
     if (config.reviewTurns === false) return
     if (event.type === 'turn/start') {
@@ -1178,7 +1180,10 @@ export function apply(ctx: Context, config: Config): void {
     if (agent === undefined || reviewed.get(session.id) === event.data.turn) return
     reviewed.set(session.id, event.data.turn)
     const turn = event.data.turn
-    // A turn that gets no review starts no job and claims no maintenance.
+    // A turn that gets no review starts no job and claims no maintenance. A
+    // subagent child gets none: its activation disposes it as soon as the turn
+    // ends, which would cancel the review after its request was sent.
+    if (session.header.origin === 'subagent') return
     const transcript = reviewTranscript(config, events, turn)
     if (transcript === undefined) return
     const controller = new AbortController()
@@ -1186,6 +1191,14 @@ export function apply(ctx: Context, config: Config): void {
       if (reviewing.get(session.id) === controller) reviewing.delete(session.id)
     }
     controller.signal.addEventListener('abort', settle, { once: true })
+    // Pending from this `turn/end`, before the job starts, so a host that
+    // exits after the turn can wait for the review instead of cancelling it.
+    const finished = Promise.withResolvers<void>()
+    pending.set(session.id, finished.promise)
+    const done = (): void => {
+      if (pending.get(session.id) === finished.promise) pending.delete(session.id)
+      finished.resolve()
+    }
     void (async () => {
       // The review appends its own log events, so it starts after the
       // `turn/end` append that triggered it has finished publishing.
@@ -1194,7 +1207,9 @@ export function apply(ctx: Context, config: Config): void {
       // so only it yields when the next turn starts; a maintenance review
       // cannot overlap a turn and waits for the next idle instead.
       reviewing.set(session.id, controller)
-      if (startReviewJob(ctx, config, agent, turn, events, transcript, controller, settle, buffered.has(session.id))) return
+      if (startReviewJob(ctx, config, agent, turn, events, transcript, controller, () => { settle(); done() }, buffered.has(session.id))) {
+        return
+      }
       settle()
       // A goal-driven session goes busy again right after idle, so the
       // maintenance claim can lose the race; wait for the next idle and retry
@@ -1222,10 +1237,12 @@ export function apply(ctx: Context, config: Config): void {
         }
       } finally {
         settle()
+        done()
       }
     })()
   })
   ctx.provide('learning', {
+    settled: sessionId => pending.get(sessionId) ?? Promise.resolve(),
     promote: (id, name) => promoteEntry(ctx, ctx.memory, skillsRoot, id, name),
     promoteMany: (ids, name) => promoteEntries(ctx, ctx.memory, skillsRoot, ids, name),
     skills: () => listSkills(skillsRoot),

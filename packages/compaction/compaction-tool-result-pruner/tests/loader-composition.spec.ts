@@ -29,7 +29,7 @@ describe('compaction-tool-result-pruner real Loader composition', () => {
       "- name: '@deepseek-ai/dsh-token-meter'",
       "- name: '@deepseek-ai/dsh-compaction-tool-result-pruner'",
       '  config:',
-      '    thresholdChars: 100',
+      '    thresholdChars: 200',
       '    headChars: 20',
       '    tailChars: 10',
       '',
@@ -56,7 +56,7 @@ describe('compaction-tool-result-pruner real Loader composition', () => {
 
     expect(context.get('toolResultPruner')).toBeInstanceOf(ToolResultPruner)
     expect(context.toolResultPruner.config).toEqual({
-      thresholdChars: 100,
+      thresholdChars: 200,
       headChars: 20,
       tailChars: 10,
     })

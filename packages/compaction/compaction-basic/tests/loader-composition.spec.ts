@@ -64,7 +64,7 @@ describe('real Loader composition', () => {
       "- name: '@deepseek-ai/dsh-token-meter'",
       "- name: '@deepseek-ai/dsh-compaction-tool-result-pruner'",
       '  config:',
-      '    thresholdChars: 100',
+      '    thresholdChars: 200',
       '    headChars: 20',
       '    tailChars: 10',
       "- name: '@deepseek-ai/dsh-compaction-basic'",

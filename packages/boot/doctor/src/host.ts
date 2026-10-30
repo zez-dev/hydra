@@ -84,7 +84,8 @@ export function nodeEnvironment(): DoctorEnvironment {
         const report = process.report.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined
         return Boolean(report?.header?.glibcVersionRuntime)
       },
-      resolve: specifier => createRequire(import.meta.url).resolve(specifier),
+      // The platform packages are optional dependencies of the addon entry package, which loads the binary from them.
+      resolve: specifier => createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/node-addon-system/package.json')).resolve(specifier),
     }),
   }
 }

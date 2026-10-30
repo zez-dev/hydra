@@ -104,7 +104,17 @@ The Service Definition exports `toolPairingBalancedBefore(session, seq)` and `to
 
 ## Tool-result pruning outcomes
 
-The optional tool-result pruning service reports each durable content replacement and the aggregate Unicode-code-point reduction. Its public result types live in [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts).
+The optional tool-result pruning service reports each durable content replacement and the aggregate Unicode-code-point reduction. Its public result types live in [`compaction-tool-result-pruner/src/types.ts`](../../packages/compaction/compaction-tool-result-pruner/src/types.ts). A pass takes a scope that says which over-budget results it may cut.
+
+```ts type-equiv
+/**
+ * Which over-budget tool results one pruning pass may cut. `'read'` cuts only
+ * results a model request has carried, meaning those before the latest assistant
+ * message on the surface; `'all'` also cuts results the model has not read,
+ * with a marker that says so.
+ */
+type PruneScope = 'read' | 'all'
+```
 
 ```ts type-equiv
 /** Cited source event and size accounting for one landed surface replacement. */
@@ -228,23 +238,28 @@ measureContent(blocks: readonly ContentBlock[]): number
  * Text slicing is by Unicode code point, not UTF-16 code unit, so a retained
  * boundary cannot split a surrogate pair. Grapheme clusters may still split.
  * @param blocks - original tool-result content.
+ * @param read - whether a model request already carried `blocks`; it selects the marker.
  * @returns pruned content, or `null` when the text is within budget.
  */
-pruneContent(blocks: readonly ContentBlock[]): ContentBlock[] | null
+pruneContent(blocks: readonly ContentBlock[], read: boolean): ContentBlock[] | null
 
 /**
- * Prune every over-budget tool result from one stable current-surface snapshot.
+ * Prune the over-budget tool results `scope` selects from one stable
+ * current-surface snapshot. A request carries the whole surface, so a result
+ * is read when an assistant message follows it there; a replacement keeps its
+ * node's position, so it is judged where the original stood.
  * Each replacement preserves the complete event data except for `content`,
  * cites the shadowed node so replay can recover the replacement input, and is
  * immediately preceded by a `compaction/prune` shadow-price event pricing the
  * shadowed node through the injected token meter, so pure consumers can
  * subtract it without per-node state.
  * @param session - session whose current surface is rewritten.
+ * @param scope - whether results the model has not read may be cut too.
  * @returns landed replacements and aggregate Unicode-code-point savings.
  * @throws when the session rejects a replacement; replacements committed
  * earlier in the pass remain durable.
  */
-pruneSession(session: Session): PruneResult
+pruneSession(session: Session, scope: PruneScope): PruneResult
 ```
 
 Types: [ContentBlock](llm-streaming.md) · [Session](session.md)

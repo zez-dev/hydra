@@ -21,6 +21,12 @@ export interface ResearchScoreEventData {
   readonly system: string
   readonly messages: readonly Message[]
   readonly maxTokens: number
+  /**
+   * The route's lowest selectable reasoning effort, requested so the cap goes to
+   * the scores; absent when the route offers none or the request asked at the
+   * route's default effort.
+   */
+  readonly reasoningEffort?: string
 }
 
 declare module '@deepseek-ai/dsh-session/types' {
@@ -285,7 +291,8 @@ export interface ResearchService {
    */
   announceBreakthrough(journal: Journal, text: string): void
   /**
-   * Re-rank a journal's open hypotheses with one logged scoring request. A
+   * Re-rank a journal's open hypotheses with a logged scoring request, sent once
+   * more at the route's default effort when the lowest-effort answer has no text. A
    * disabled scoring config, an absent route, a failed request, and an
    * unreadable answer are each logged and leave the recorded scores unchanged.
    * @param store - the store holding the journal.

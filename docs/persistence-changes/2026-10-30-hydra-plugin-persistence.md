@@ -52,7 +52,7 @@ changes:
     decision: same-version
   - root: "event:session/goal-evaluation"
     previous: null
-    after: "ca21147b007a857494b8febaecf8be66ababdf55169bf77225bc2fa9a47f638d"
+    after: "9eb73c60b1f557075b1a2a943616ac09fafd06e73e7b7763aab794e4deebee0a"
     decision: same-version
   - root: "event:session/learning-request"
     previous: null
@@ -64,7 +64,7 @@ changes:
     decision: same-version
   - root: "event:session/research-score"
     previous: null
-    after: "3ca068db4c6e57b2a2d6550a0fa378cdae36b63658ee33675853480e029837a6"
+    after: "993a2ada1bc3a942e38b09f182fdb72da315626aaf3fd5ef3f3b8b64623310c8"
     decision: same-version
   - root: "event:session/title-llm-request"
     previous: "2026-10-13-liveshare-share-viewer-principal"

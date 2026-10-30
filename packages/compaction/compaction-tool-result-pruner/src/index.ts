@@ -13,18 +13,20 @@ import type { Session, SessionEvent, SessionSeq, ToolResultMessage } from '@deep
 import type {} from '@deepseek-ai/dsh-compaction'
 // Type-only: the `ctx.tokenMeter` Context merge for the declared injection.
 import type {} from '@deepseek-ai/dsh-token-meter'
-import { codePointLength, DEFAULTS, hasSurrogates, PRUNE_MARKER, resolveConfig } from './config.ts'
+import { codePointLength, DEFAULTS, hasSurrogates, pruneMarker, resolveConfig } from './config.ts'
 import type {
   PrunedEntry,
   PruneResult,
+  PruneScope,
   ResolvedConfig,
   ToolResultPruneConfig,
 } from './types.ts'
 
-export { codePointLength, DEFAULTS, PRUNE_MARKER, resolveConfig } from './config.ts'
+export { codePointLength, DEFAULTS, pruneMarker, resolveConfig } from './config.ts'
 export type {
   PrunedEntry,
   PruneResult,
+  PruneScope,
   ResolvedConfig,
   ToolResultPruneConfig,
 } from './types.ts'
@@ -38,6 +40,8 @@ declare module '@deepseek-ai/cordis' {
 interface SnapshotCandidate {
   readonly seq: SessionSeq
   readonly event: SessionEvent<'tool/result'>
+  /** Position in the surface snapshot. */
+  readonly index: number
 }
 
 /** Deterministic head/middle/tail pruning for current tool-result surface nodes. */
@@ -78,9 +82,10 @@ export class ToolResultPruner extends Service {
    * Text slicing is by Unicode code point, not UTF-16 code unit, so a retained
    * boundary cannot split a surrogate pair. Grapheme clusters may still split.
    * @param blocks - original tool-result content.
+   * @param read - whether a model request already carried `blocks`; it selects the marker.
    * @returns pruned content, or `null` when the text is within budget.
    */
-  pruneContent(blocks: readonly ContentBlock[]): ContentBlock[] | null {
+  pruneContent(blocks: readonly ContentBlock[], read: boolean): ContentBlock[] | null {
     // A UTF-16 length is never below the code-point count, so content that
     // is short in code units is short in code points: no counting needed.
     if (blocks.reduce((sum, block) => sum + (block.type === 'text' ? block.text.length : 0), 0) <= this.config.thresholdChars) return null
@@ -105,7 +110,7 @@ export class ToolResultPruner extends Service {
       const headEnd = Math.min(points.length, Math.max(0, removedStart - blockStart))
       const tailStart = Math.min(points.length, Math.max(0, removedEnd - blockStart))
       const intersectsRemoved = blockStart < removedEnd && blockEnd > removedStart
-      const marker = intersectsRemoved && !markerInserted ? PRUNE_MARKER : ''
+      const marker = intersectsRemoved && !markerInserted ? pruneMarker(removedEnd - removedStart, read) : ''
       if (marker.length > 0) markerInserted = true
       const text = (typeof points === 'string' ? points.slice(0, headEnd) : points.slice(0, headEnd).join(''))
         + marker
@@ -125,31 +130,40 @@ export class ToolResultPruner extends Service {
   }
 
   /**
-   * Prune every over-budget tool result from one stable current-surface snapshot.
+   * Prune the over-budget tool results `scope` selects from one stable
+   * current-surface snapshot. A request carries the whole surface, so a result
+   * is read when an assistant message follows it there; a replacement keeps its
+   * node's position, so it is judged where the original stood.
    * Each replacement preserves the complete event data except for `content`,
    * cites the shadowed node so replay can recover the replacement input, and is
    * immediately preceded by a `compaction/prune` shadow-price event pricing the
    * shadowed node through the injected token meter, so pure consumers can
    * subtract it without per-node state.
    * @param session - session whose current surface is rewritten.
+   * @param scope - whether results the model has not read may be cut too.
    * @returns landed replacements and aggregate Unicode-code-point savings.
    * @throws when the session rejects a replacement; replacements committed
    * earlier in the pass remain durable.
    */
-  pruneSession(session: Session): PruneResult {
+  pruneSession(session: Session, scope: PruneScope): PruneResult {
     const candidates: SnapshotCandidate[] = []
-    for (const seq of [...session.surface.nodes]) {
+    let answered = -1
+    for (const [index, seq] of [...session.surface.nodes].entries()) {
       // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
       const event = session.eventAt(seq)
       /* v8 ignore next -- surface seqs are validated contiguous log references. */
-      if (event?.type === 'tool/result') candidates.push({ seq, event })
+      if (event === undefined) continue
+      if (event.type === 'assistant/message') answered = index
+      else if (event.type === 'tool/result') candidates.push({ seq, event, index })
     }
 
     const pruned: PrunedEntry[] = []
     let charsRemoved = 0
-    for (const { seq, event } of candidates) {
+    for (const { seq, event, index } of candidates) {
+      const read = index < answered
+      if (!read && scope === 'read') continue
       const original = session.deriveEventMessage(event) as ToolResultMessage
-      const content = this.pruneContent(original.content)
+      const content = this.pruneContent(original.content, read)
       if (content === null) continue
       const charsBefore = this.measureContent(original.content)
       const charsAfter = this.measureContent(content)

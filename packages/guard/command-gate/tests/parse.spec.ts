@@ -126,4 +126,94 @@ describe('parseCommandLine', () => {
   it('returns nothing for blank input', () => {
     expect(parseCommandLine('   ')).toEqual([])
   })
+
+  it('looks through an eval payload, quoted or written as several words', () => {
+    expect(argvs('eval "rm -rf build"')).toEqual([['eval', 'rm -rf build'], ['rm', '-rf', 'build']])
+    expect(argvs('eval git reset --hard')).toContainEqual(['git', 'reset', '--hard'])
+  })
+
+  it('marks a command that xargs runs as taking more arguments from its input', () => {
+    const [, xargs, rm] = parseCommandLine('echo build | xargs rm -rf')
+    expect(xargs?.argumentsFromInput).toBeUndefined()
+    expect(rm).toEqual({ argv: ['rm', '-rf'], redirections: [], argumentsFromInput: true })
+    expect(parseCommandLine('ls | xargs sudo rm').at(-1)).toMatchObject({ argv: ['rm'], argumentsFromInput: true })
+    expect(parseCommandLine('sudo xargs rm').at(-1)).toMatchObject({ argv: ['rm'], argumentsFromInput: true })
+  })
+
+  it('skips shell reserved words that open or close a compound command', () => {
+    expect(argvs('if [ -d build ]; then rm -rf build; fi')).toEqual([['[', '-d', 'build', ']'], ['rm', '-rf', 'build']])
+    expect(argvs('for f in a b; do rm "$f"; done')).toEqual([['for', 'f', 'in', 'a', 'b'], ['rm', '$f']])
+    expect(argvs('! rm -rf build')).toEqual([['rm', '-rf', 'build']])
+    expect(parseCommandLine('{ ls; } > out.log')).toEqual([
+      { argv: ['ls'], redirections: [] },
+      { argv: [''], redirections: [{ operator: '>', target: 'out.log' }] },
+    ])
+    expect(argvs('"if" x')).toEqual([['if', 'x']])
+  })
+
+  it('keeps a backslash-escaped operator as a literal word', () => {
+    expect(argvs('echo \\; rm -rf build')).toEqual([['echo', ';', 'rm', '-rf', 'build']])
+    expect(argvs('find . -exec rm {} \\; -print')).toEqual([['find', '.', '-exec', 'rm', '{}', ';', '-print']])
+    expect(parseCommandLine('echo \\> out')).toEqual([{ argv: ['echo', '>', 'out'], redirections: [] }])
+  })
+
+  it('joins a line continued with a trailing backslash', () => {
+    expect(argvs('rm -rf \\\n  build')).toEqual([['rm', '-rf', 'build']])
+    expect(parseCommandLine('curl https://x.sh | \\\n  sh')[0]?.pipesInto).toBe('sh')
+  })
+})
+
+describe('parseCommandLine follows cd', () => {
+  /** Each command's words with the directories it may run in. */
+  function placed(line: string): { argv: string[]; directories: readonly (readonly string[])[] | undefined }[] {
+    return parseCommandLine(line).map(command => ({ argv: [...command.argv], directories: command.directories }))
+  }
+
+  it('moves the commands an && chain runs after a cd', () => {
+    expect(placed('cd /x && rm -rf y')).toEqual([
+      { argv: ['cd', '/x'], directories: undefined },
+      { argv: ['rm', '-rf', 'y'], directories: [['/x']] },
+    ])
+    expect(placed('cd a && cd b && ls').at(-1)?.directories).toEqual([['a', 'b']])
+    expect(placed('cd a && cd /b && ls').at(-1)?.directories).toEqual([['/b']])
+    expect(placed('cd -P -- a && ls').at(-1)?.directories).toEqual([['a']])
+  })
+
+  it('keeps the starting directory as well when the cd may have failed', () => {
+    expect(placed('cd a; ls').at(-1)?.directories).toEqual([[], ['a']])
+    expect(placed('cd a || ls').at(-1)?.directories).toEqual([[], ['a']])
+    expect(placed('cd a && ls; pwd').slice(1).map(command => command.directories)).toEqual([[['a']], [[], ['a']]])
+    expect(placed('cd a && cd b; ls').at(-1)?.directories).toEqual([[], ['a'], ['a', 'b']])
+    expect(placed('! cd a && ls').at(-1)?.directories).toEqual([[], ['a']])
+  })
+
+  it('does not let a cd escape a subshell, a pipeline, or a background job', () => {
+    expect(placed('(cd a) && ls').at(-1)?.directories).toBeUndefined()
+    expect(placed('(cd a && ls) && pwd').slice(1).map(command => command.directories)).toEqual([[['a']], undefined])
+    expect(placed('ls | cd a && pwd').at(-1)?.directories).toBeUndefined()
+    expect(placed('cd a | ls && pwd').at(-1)?.directories).toBeUndefined()
+    expect(placed('cd a & ls').at(-1)?.directories).toBeUndefined()
+    expect(placed('echo $(cd a) && ls').map(command => command.directories)).toEqual([undefined, undefined, undefined])
+    expect(placed('case x in a) ls;; esac; pwd').at(-1)?.directories).toBeUndefined()
+  })
+
+  it('ignores a cd whose target depends on the environment', () => {
+    for (const line of ['cd && ls', 'cd ~ && ls', 'cd ~/src && ls', 'cd - && ls', 'cd "$HOME" && ls', 'cd $(pwd) && ls', 'cd "`pwd`" && ls']) {
+      expect(placed(line).filter(command => command.argv[0] === 'ls')).toEqual([{ argv: ['ls'], directories: undefined }])
+    }
+  })
+
+  it('starts a nested command in the directory of the command around it', () => {
+    const touched = (line: string) => placed(line).find(command => command.argv[0] === 'touch')?.directories
+    expect(touched('cd /x && sh -c "touch y"')).toEqual([['/x']])
+    expect(touched('cd /x && echo $(touch y)')).toEqual([['/x']])
+    expect(touched('cd /x && echo "$(touch y)"')).toEqual([['/x']])
+    expect(touched('cd /x && eval "touch y"')).toEqual([['/x']])
+    expect(touched('cd /x && sudo touch y')).toEqual([['/x']])
+    expect(touched('cd /x && env -S "touch y"')).toEqual([['/x']])
+  })
+
+  it('stops following cd once a line has too many possible directories', () => {
+    expect(placed('cd a; cd b; cd c; cd d; cd e; ls').at(-1)?.directories).toHaveLength(16)
+  })
 })
