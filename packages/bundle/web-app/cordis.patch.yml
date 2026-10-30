@@ -26,11 +26,8 @@
 # to the first search so startup stays quiet.
 # ── upstream features Hydra's Web and desktop app ship without ─────────────
 
-# DeepSeek account sign-in, the /feedback command, and the Session-log upload to
-# DeepSeek's official API. The CLI and SDK profiles keep dsh-base's rows.
-- id: llm-deepseek-account
-  disabled: true
-
+# The /feedback command and the Session-log upload to DeepSeek's official API.
+# The CLI and SDK profiles keep dsh-base's rows.
 - id: command-feedback
   disabled: true
 
@@ -59,10 +56,9 @@
         serviceVersion: !!js process.env.DSH_CLIENT_VERSION
         endpoint: !!js process.env.DSH_PRODUCT_ANALYTICS_OTLP_URL
 
-    # Requires the DeepSeek account service, which Hydra does not ship.
     - id: product-analytics
       name: '@deepseek-ai/dsh-client-product-analytics'
-      disabled: true
+      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
       config:
         enabled: true
         appVersion: !!js process.env.DSH_CLIENT_VERSION
@@ -157,14 +153,13 @@
 
     # Configuration-surface reads and writes over Typert Remote. Each method
     # reports an actionable error when its settings-domain provider is absent.
-    # Hydra ships without DeepSeek account sign-in.
+    # Hydra ships without the DeepSeek account settings section and account menu.
     - id: ui-settings-account
       name: '@deepseek-ai/dsh-client-ui-settings-account'
       disabled: true
 
     - id: account-controller
       name: '@deepseek-ai/dsh-api-account-controller'
-      disabled: true
 
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'

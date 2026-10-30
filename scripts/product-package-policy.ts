@@ -37,7 +37,7 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/context/tmux-context': { category: 'optional', reason: 'Context contribution requiring a tmux pane.' },
   'packages/fs/tool-str-replace-editor': { category: 'optional', reason: 'Explicit alternative to the default filesystem editing tools.' },
   'packages/client/ui-message-feedback': { category: 'optional', reason: 'Message feedback, which Hydra\'s Web and desktop app ship disabled; a profile patch enables it.' },
-  'packages/client/ui-settings-account': { category: 'optional', reason: 'DeepSeek account sign-in, which Hydra\'s Web and desktop app ship disabled; a profile patch enables it.' },
+  'packages/client/ui-settings-account': { category: 'optional', reason: 'DeepSeek account settings and menu, which Hydra\'s Web and desktop app ship disabled; a profile patch enables it.' },
   'packages/client/ui-settings-session-log': { category: 'optional', reason: 'Switch for the DeepSeek Session-log upload, which Hydra\'s Web and desktop app ship disabled.' },
   'packages/sdk/client': { category: 'sdk', reason: 'Published TypeScript embedding client runs in the consumer process.' },
   'packages/typert/generator': { category: 'build', reason: 'Build-time generation of type metadata.' },

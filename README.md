@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 Hydra is an unofficial community fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`), the open-source agent harness developed by [DeepSeek](https://deepseek.com). It keeps the upstream **everything-is-a-plugin** architecture, powered by [Cordis](https://github.com/cordiverse/cordis), and adds plugins for long-running goals, research journals, learning memory, and models with weak tool calling such as GLM, Qwen, and local models.
 
-Hydra is built on DeepSeek Harness. It is not affiliated with, endorsed by, or supported by DeepSeek. "DeepSeek Harness" is a trademark of DeepSeek and is used here only to describe what Hydra is built on.
+Hydra is built on DeepSeek Harness. It is not affiliated with, endorsed by, or supported by DeepSeek. "DeepSeek Harness" is a trademark of DeepSeek and is used here only to describe what Hydra is built on. Read the [disclaimer](#disclaimer) before you use it.
 
 ![The Hydra Web UI answering "What files are in this project?" with a Bash tool call and its output](.github/assets/hydra-web-ui.png)
 
@@ -19,6 +19,21 @@ node ~/hydra/apps/cli/lib/bin.js web
 ```
 
 The script clones Hydra into `~/hydra` (or updates it), builds it, and prints the start command; you can [read it first](scripts/install.sh). Open the printed link and add a model under **Settings → Models**. The [Run](#run) section has the same steps by hand.
+
+## Disclaimer
+
+Hydra is an independent community project. It is not affiliated with, endorsed by, sponsored by, or supported by DeepSeek, Anthropic, OpenAI, or any other model provider. DeepSeek, DeepSeek Harness, Claude, and other product names are trademarks of their respective owners and appear here only to identify the software Hydra is built on or works with.
+
+Hydra is provided "as is", without warranty of any kind, under the [MIT License](LICENSE). To the fullest extent permitted by law, its authors and contributors are not liable for any claim, damages, data loss, security incident, or cost arising from its use.
+
+Hydra runs AI agents that can execute shell commands, change or delete files, and send your code, prompts, and files to the model providers you configure. You are responsible for:
+
+- reviewing what the agent does, and keeping backups of anything important;
+- your API keys and the charges your providers bill;
+- following your providers' terms of service and usage policies;
+- the data you send to those providers and the laws that apply to it.
+
+Model output can be wrong. Nothing Hydra produces, including its research and market data tools, is financial, legal, medical, or other professional advice. Read the [safety notice](SAFETY.md) and report security problems as [SECURITY.md](SECURITY.md) describes.
 
 ## Credits
 
@@ -49,7 +64,7 @@ Hydra's Web and desktop app ship these upstream features disabled, because they 
 
 | Feature | Rows disabled |
 |---|---|
-| DeepSeek account sign-in and its credit display, and the desktop product analytics that needs the account | `llm-deepseek-account`, `account-controller`, `ui-settings-account`, `product-analytics` |
+| The DeepSeek account settings section and account menu | `ui-settings-account` |
 | Like/Dislike and `/feedback`, whose submission also released a Session-log slice to DeepSeek's telemetry collector | `message-feedback`, `command-feedback`, `ui-message-feedback` |
 | Session-log upload with requests to the official DeepSeek API, and its Settings switch | `session-log-deepseek`, `ui-settings-session-log` |
 
