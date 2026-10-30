@@ -9,7 +9,7 @@ import type {} from '@deepseek-ai/dsh-working-directory'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { applyReadTool, READ_LIMIT, STREAM_MIN_SIZE } from './read.ts'
+import { applyReadTool, READ_LIMIT, STREAM_MIN_SIZE, type ReadWindowShare } from './read.ts'
 import { applyWriteTool } from './write.ts'
 import { applyEditTool } from './edit.ts'
 import { applyReadImageTool } from './read-image.ts'
@@ -40,6 +40,23 @@ export interface Config {
   readMaxBytes?: number
   /** Files at or above this size stream instead of loading whole into memory. */
   readStreamMinSize?: number
+  /**
+   * Fraction, greater than 0 and at most 1, of the routed model's context window left after
+   * `readContextReserveTokens` that one complete `read` result may fill, converted to bytes with
+   * `readBytesPerToken`. Set it together with `readBytesPerToken`; unset, `readMaxBytes` alone
+   * caps a read.
+   */
+  readContextFraction?: number
+  /**
+   * Bytes of `read` result assumed per token of the routed model, a positive number used only to
+   * convert `readContextFraction` into bytes. Set it together with `readContextFraction`.
+   */
+  readBytesPerToken?: number
+  /**
+   * Tokens of the routed context window, a non-negative integer, kept for the rest of the request
+   * before `readContextFraction` applies; set it only with the share fields. Defaults to 0.
+   */
+  readContextReserveTokens?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -51,16 +68,56 @@ export const Config: z<Config> = z.object({
   readMaxLineLength: z.number().default(READ_MAX_LINE_LENGTH),
   readMaxBytes: z.number().default(READ_MAX_BYTES),
   readStreamMinSize: z.number().default(STREAM_MIN_SIZE),
+  readContextFraction: z.number(),
+  readBytesPerToken: z.number(),
+  readContextReserveTokens: z.number(),
 })
 
+/** The window-share fields, which have no schemastery defaults. */
+type WindowShareKey = 'readContextFraction' | 'readBytesPerToken' | 'readContextReserveTokens'
+
 /** Configuration after schemastery applied the defaults. */
-type ResolvedConfig = Required<Config>
+type ResolvedConfig = Required<Omit<Config, WindowShareKey>> & Pick<Config, WindowShareKey>
 
 /** Every read cap counts lines/chars/bytes — a positive integer, or windowing arithmetic misbehaves silently. */
 function assertPositiveInteger(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1) {
     throw new Error(`tool-fs: ${name} must be a positive integer`)
   }
+}
+
+/**
+ * Validate the window-share fields: the fraction and bytes-per-token together or neither, a
+ * fraction greater than 0 and at most 1, a positive finite bytes-per-token, and an optional
+ * non-negative integer reserve that defaults to 0.
+ * @param config - the resolved plugin config.
+ * @returns the share, or `undefined` when no share field is set.
+ */
+function resolveWindowShare(config: ResolvedConfig): ReadWindowShare | undefined {
+  const {
+    readContextFraction: fraction,
+    readBytesPerToken: bytesPerToken,
+    readContextReserveTokens: reserveTokens,
+  } = config
+  if (fraction === undefined && bytesPerToken === undefined) {
+    if (reserveTokens !== undefined) {
+      throw new Error('tool-fs: readContextReserveTokens requires readContextFraction and readBytesPerToken')
+    }
+    return undefined
+  }
+  if (fraction === undefined || bytesPerToken === undefined) {
+    throw new Error('tool-fs: readContextFraction and readBytesPerToken must be set together')
+  }
+  if (!(fraction > 0 && fraction <= 1)) {
+    throw new Error('tool-fs: readContextFraction must be greater than 0 and at most 1')
+  }
+  if (!(Number.isFinite(bytesPerToken) && bytesPerToken > 0)) {
+    throw new Error('tool-fs: readBytesPerToken must be a positive finite number')
+  }
+  if (reserveTokens !== undefined && !(Number.isInteger(reserveTokens) && reserveTokens >= 0)) {
+    throw new Error('tool-fs: readContextReserveTokens must be a non-negative integer')
+  }
+  return { fraction, bytesPerToken, reserveTokens: reserveTokens ?? 0 }
 }
 
 /** Register the selected filesystem tools; `read_image` additionally requires a mounted attachment store. */
@@ -71,12 +128,14 @@ export function apply(ctx: Context, config: Config): void {
   assertPositiveInteger('readMaxLineLength', resolved.readMaxLineLength)
   assertPositiveInteger('readMaxBytes', resolved.readMaxBytes)
   assertPositiveInteger('readStreamMinSize', resolved.readStreamMinSize)
+  const windowShare = resolveWindowShare(resolved)
   if (resolved.read) {
     applyReadTool(ctx, {
       limit: resolved.readLimit,
       maxLineLength: resolved.readMaxLineLength,
       maxBytes: resolved.readMaxBytes,
       streamMinSize: resolved.readStreamMinSize,
+      ...windowShare === undefined ? {} : { windowShare },
     })
   }
   // read_image is composition-conditional: without a mounted attachment store

@@ -303,8 +303,21 @@
     - id: fs-observation-policy
       name: '@deepseek-ai/dsh-fs-observation-policy'
 
+    # Hydra serves local models with 8K to 64K windows, where a 50 KB read can
+    # fill most of the window. The reserve keeps room for this bundle's base
+    # request (about 10,800 Claude tokens) and a compaction summary (up to
+    # about 3,200); one read may fill half of the window left after it, so
+    # compaction can keep each read whole beside them. Bytes per token is set
+    # for dense text: 800 lines of a server log rendered to 52,212 bytes and
+    # cost about 31,000 Claude Haiku 5.5 tokens. A 24K window reads 7,650
+    # bytes at a time, 60K reads 38,250, and from about 75K up `readMaxBytes`
+    # applies.
     - id: tool-fs
       name: '@deepseek-ai/dsh-tool-fs'
+      config:
+        readContextFraction: 0.5
+        readBytesPerToken: 1.7
+        readContextReserveTokens: 15000
 
     - id: tool-fs-search
       name: '@deepseek-ai/dsh-tool-fs-search'

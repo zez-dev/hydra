@@ -533,6 +533,8 @@ interface ToolOutputMap {
       text: string;
     }[];
     totalLines: number;
+    /** The most bytes one read returns in this context window; present only when that limit ended this read early. */
+    windowCapBytes?: number;
   };
   read_image: {
     /** Canonical absolute path in the filesystem execution world. */

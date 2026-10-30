@@ -31,8 +31,13 @@
             disabled: !!js process.platform !== 'win32'
             config:
               requireDescription: false
+          # The context-window share dsh-base sets for its tool-fs row.
           - id: tool-fs
             name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              readContextFraction: 0.5
+              readBytesPerToken: 1.7
+              readContextReserveTokens: 15000
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
             config:

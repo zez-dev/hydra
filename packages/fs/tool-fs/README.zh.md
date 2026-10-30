@@ -66,6 +66,11 @@ kind: "package-reference"
 | `readMaxLineLength` | `2000` | 每行截断前保留的字符数 |
 | `readMaxBytes` | `51200` | 一次 `read` 调用所选行的字节上限；溢出时以「已达上限」footer 结束窗口 |
 | `readStreamMinSize` | `10485760` | 大于等于该大小或大小未知的文件采用流式读取，而不是整体加载到内存 |
+| `readContextFraction` | 未设置 | 路由模型上下文窗口扣除 `readContextReserveTokens` 后，一次完整 `read` 结果可占用的比例，大于 0 且至多为 1；须与 `readBytesPerToken` 一起设置 |
+| `readBytesPerToken` | 未设置 | 按路由模型每个 token 假定的 `read` 结果字节数，用于把 `readContextFraction` 换算为字节；须与 `readContextFraction` 一起设置 |
+| `readContextReserveTokens` | `0` | 在 `readContextFraction` 生效前，为请求其余部分保留的路由上下文窗口 token 数；只能与两个份额字段一起设置 |
+
+同时设置两个份额字段后，如果调用会话最近一次请求的路由带有已知上下文窗口，`read` 最多返回 `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` 字节（含信封与 footer），`readMaxBytes` 仍然生效。请求的第一行即使单独超过该上限也会返回，因此每次读取都有进展；窗口不大于保留量时，每次读取返回一行。没有 agent 的调用、会话首次请求之前的调用，或路由未声明窗口时，只使用 `readMaxBytes`。只设置其中一个份额字段、未设置份额字段却设置保留量、比例超出该范围、`readBytesPerToken` 非正数或无穷大，或保留量为负数或小数时，加载失败。
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-fs)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -188,11 +193,11 @@ Read a file before editing it (the default fs-observation-policy requires it), u
 
 #### 模型看到的内容
 
-成功读取结果精确为 `<path><resolvedPath></path>`、换行、`<type>file</type>`、换行、`<content>`、形如 `<lineNumber>: <text>` 的编号行、一个空行、一条 footer 和 `</content>`。footer 精确为 `(Output capped. Showing lines <start>-<end>. Use offset=<next> to continue.)`、`(Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)` 或 `(End of file - total <total> lines)`。长行结尾精确为 `... (line truncated to <max> chars)`。读取缺失目标仍返回 `FS_NOT_FOUND`，但会为调用会话记录确认缺失；外部删除的文件被重新读取后，重试的 `write` 可以通过提供方的不替换防护安全地重新创建该文件。
+成功读取结果精确为 `<path><resolvedPath></path>`、换行、`<type>file</type>`、换行、`<content>`、形如 `<lineNumber>: <text>` 的编号行、一个空行、一条 footer 和 `</content>`。footer 精确为：上下文窗口份额结束读取时为 `(Output capped at <cap> bytes, the most one read returns in this context window. Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)`，`readMaxBytes` 结束读取时为 `(Output capped. Showing lines <start>-<end>. Use offset=<next> to continue.)`，其余为 `(Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)` 或 `(End of file - total <total> lines)`。在 PTC 程序中，仅当该上限结束读取时，结构化结果才以 `windowCapBytes` 携带同一上限。长行结尾精确为 `... (line truncated to <max> chars)`。读取缺失目标仍返回 `FS_NOT_FOUND`，但会为调用会话记录确认缺失；外部删除的文件被重新读取后，重试的 `write` 可以通过提供方的不替换防护安全地重新创建该文件。
 
 #### Token 影响
 
-读取输出受 `readLimit`、`readMaxLineLength` 与 `readMaxBytes` 限制；保留的调用与结果会反复发送，直到上下文压缩（compaction）。
+读取输出受 `readLimit`、`readMaxLineLength` 与 `readMaxBytes` 限制；设置份额字段后还受路由窗口份额限制，因此在小窗口上一个新结果会为请求的其余部分留出空间；被截断的读取需要再调用一次才能继续。保留的调用与结果会反复发送，直到上下文压缩（compaction）。
 
 #### KV Cache 影响
 
@@ -254,6 +259,7 @@ Read a file before editing it (the default fs-observation-policy requires it), u
 - **内嵌图像预览依赖 UI 组合**：工具结果卡片经由浏览器的 `tool.call.images` 槽位渲染图像，由附件呈现插件填充；未组合该插件的 UI 改为显示结果的信封文本。
 - **没有附件区域工具**：agent 在拥有文件系统路径时可以通过其他可用工具裁剪图片；没有路径的粘贴或拖入图片无法按更高分辨率重新读取。
 - **没有超时接口**：`read`/`write`/`edit` 不接受超时参数，也不声明超时预算；取消只通过 `exec.signal` 传递（见[提供方理由](../README.zh.md)）。
+- **上下文窗口份额限制单个结果，而不是单个步骤**：每个并行 `read` 都可占满整个份额，因此同一步骤中的多个读取合起来可能超出窗口。`readBytesPerToken` 与 `readContextReserveTokens` 都是固定估计值，因此 token 化更密的文本，或大于保留量的请求前缀，留下的空间会少于份额所假定的值。
 
 <a id="dev-note"></a>
 ### 开发备注

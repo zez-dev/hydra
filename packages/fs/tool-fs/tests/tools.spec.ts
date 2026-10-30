@@ -419,6 +419,11 @@ describe('formatReadOutput footer variants', () => {
     expect(out).toContain('(Output capped. Showing lines 1-1. Use offset=2 to continue.)')
   })
 
+  it('reports a read the context-window budget capped, naming the cap', () => {
+    const out = formatReadOutput('/f', { ...base, totalLines: 99, windowCapBytes: 20400 })
+    expect(out).toContain('(Output capped at 20400 bytes, the most one read returns in this context window. Showing lines 1-1 of 99. Use offset=2 to continue.)')
+  })
+
   it('reports a more-remaining page', () => {
     const out = formatReadOutput('/f', { ...base, totalLines: 99 })
     expect(out).toContain('(Showing lines 1-1 of 99. Use offset=2 to continue.)')
@@ -817,6 +822,27 @@ describe('read caps are plugin config', () => {
   })
 
   it.each([
+    ['readContextFraction alone', { readContextFraction: 0.2 }, 'readContextFraction and readBytesPerToken must be set together'],
+    ['readBytesPerToken alone', { readBytesPerToken: 1.7 }, 'readContextFraction and readBytesPerToken must be set together'],
+    ['a zero readContextFraction', { readContextFraction: 0, readBytesPerToken: 1 }, 'readContextFraction must be greater than 0 and at most 1'],
+    ['a readContextFraction above 1', { readContextFraction: 1.5, readBytesPerToken: 1 }, 'readContextFraction must be greater than 0 and at most 1'],
+    ['a NaN readContextFraction', { readContextFraction: Number.NaN, readBytesPerToken: 1 }, 'readContextFraction must be greater than 0 and at most 1'],
+    ['a zero readBytesPerToken', { readContextFraction: 0.2, readBytesPerToken: 0 }, 'readBytesPerToken must be a positive finite number'],
+    ['an infinite readBytesPerToken', { readContextFraction: 0.2, readBytesPerToken: Number.POSITIVE_INFINITY }, 'readBytesPerToken must be a positive finite number'],
+    ['readContextReserveTokens without a share', { readContextReserveTokens: 1000 }, 'readContextReserveTokens requires readContextFraction and readBytesPerToken'],
+    ['a negative readContextReserveTokens', { readContextFraction: 0.2, readBytesPerToken: 1, readContextReserveTokens: -1 }, 'readContextReserveTokens must be a non-negative integer'],
+    ['a fractional readContextReserveTokens', { readContextFraction: 0.2, readBytesPerToken: 1, readContextReserveTokens: 1.5 }, 'readContextReserveTokens must be a non-negative integer'],
+  ] as const)('rejects %s at load', async (_case, config, message) => {
+    const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(NativeToolExecutor)
+    await ctx.plugin(FakeFs)
+    await expect(ctx.plugin(ToolFs, config)).rejects.toThrow(`tool-fs: ${message}`)
+  })
+
+  it.each([
     ['readLimit', { readLimit: 0 }],
     ['readLimit', { readLimit: 2.5 }],
     ['readMaxLineLength', { readMaxLineLength: -1 }],
@@ -834,6 +860,125 @@ describe('read caps are plugin config', () => {
 
   it('has no default export (namespace plugin export shape)', () => {
     expect('default' in ToolFs).toBe(false)
+  })
+})
+
+describe('context-window read budget', () => {
+  // "1: xxxxxxxxx" is 12 bytes; from line 10 on each line adds 14 with its separator.
+  const FORTY = Array.from({ length: 40 }, () => 'xxxxxxxxx').join('\n')
+  const SHARE = { readContextFraction: 0.5, readBytesPerToken: 1 } as const
+
+  /** A calling agent whose session's latest request was routed with `contextWindow`. */
+  function routedAgent(contextWindow?: number) {
+    return {
+      session: {
+        header: {},
+        requestContext: () => ({ provider: 'p', model: 'm', ...contextWindow === undefined ? {} : { contextWindow } }),
+      },
+    }
+  }
+
+  it('caps the complete result at its share of the routed window and names the cap', async () => {
+    const { ctx, fs } = await setup(SHARE)
+    fs.files.set('key:a.txt', FORTY)
+    // 1000 tokens x 0.5 x 1 byte = 500 bytes. The envelope and the longest footer reserve 239,
+    // leaving 261 for numbered lines: lines 1-9 take 116 bytes and lines 10-19 another 140.
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1000))
+    expect(result.isError, text(result)).toBe(false)
+    if (result.isError) throw new Error('expected read success')
+    const numbered = Array.from({ length: 19 }, (_, i) => `${i + 1}: xxxxxxxxx`).join('\n')
+    expect(text(result)).toBe(`<path>/abs/a.txt</path>
+<type>file</type>
+<content>
+${numbered}
+
+(Output capped at 500 bytes, the most one read returns in this context window. Showing lines 1-19 of 40. Use offset=20 to continue.)
+</content>`)
+    expect(Buffer.byteLength(text(result))).toBeLessThanOrEqual(500)
+    expect(result.value).toMatchObject({ offset: 1, totalLines: 40, windowCapBytes: 500 })
+  })
+
+  it('returns the whole window when the routed window leaves room for it', async () => {
+    const { ctx, fs } = await setup(SHARE)
+    fs.files.set('key:a.txt', FORTY)
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1_000_000))
+    expect(result.isError, text(result)).toBe(false)
+    if (result.isError) throw new Error('expected read success')
+    expect(text(result)).toContain('(End of file - total 40 lines)')
+    expect(result.value).not.toHaveProperty('windowCapBytes')
+  })
+
+  it.each([
+    ['the call has no agent', undefined],
+    ['the session has made no request yet', { session: { header: {}, requestContext: () => undefined } }],
+    ['the route advertises no window', routedAgent()],
+  ])('leaves readMaxBytes as the only cap when %s', async (_case, agent) => {
+    const { ctx, fs } = await setup(SHARE)
+    fs.files.set('key:a.txt', FORTY)
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, agent)
+    expect(text(result)).toContain('(End of file - total 40 lines)')
+  })
+
+  it('reports the readMaxBytes cap when it is tighter than the window share', async () => {
+    const { ctx, fs } = await setup({ ...SHARE, readMaxBytes: 9 })
+    fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1_000_000))
+    expect(result.isError, text(result)).toBe(false)
+    if (result.isError) throw new Error('expected read success')
+    expect(text(result)).toContain('(Output capped. Showing lines 1-2. Use offset=3 to continue.)')
+    expect(result.value).not.toHaveProperty('windowCapBytes')
+  })
+
+  it('returns the first requested line when the budget cannot hold one', async () => {
+    const { ctx, fs } = await setup(SHARE)
+    fs.files.set('key:a.txt', FORTY)
+    // 10 tokens x 0.5 x 1 byte = 5 bytes, less than the envelope alone.
+    const result = await call(ctx, 'read', { file_path: 'a.txt', offset: 7 }, routedAgent(10))
+    expect(text(result)).toBe(`<path>/abs/a.txt</path>
+<type>file</type>
+<content>
+7: xxxxxxxxx
+
+(Output capped at 5 bytes, the most one read returns in this context window. Showing lines 7-7 of 40. Use offset=8 to continue.)
+</content>`)
+  })
+
+  it('declares windowCapBytes in the read output only when a share is configured', async () => {
+    const outputKeys = async (config: ToolFs.Config) => {
+      const { ctx } = await setup(config)
+      return Object.keys(ctx.tools.get('read')?.output.schema.properties ?? {})
+    }
+    expect(await outputKeys({})).toEqual(['path', 'offset', 'lines', 'totalLines'])
+    expect(await outputKeys(SHARE)).toEqual(['path', 'offset', 'lines', 'totalLines', 'windowCapBytes'])
+  })
+
+  it('applies the share to the window left after the reserve', async () => {
+    const { ctx, fs } = await setup({ ...SHARE, readContextReserveTokens: 400 })
+    fs.files.set('key:a.txt', FORTY)
+    // (1400 - 400) tokens x 0.5 x 1 byte = 500 bytes: the same window as 1000 tokens without a reserve.
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1400))
+    expect(text(result)).toContain('(Output capped at 500 bytes, the most one read returns in this context window. Showing lines 1-19 of 40. Use offset=20 to continue.)')
+  })
+
+  it('returns one line per read when the reserve takes the whole window', async () => {
+    const { ctx, fs } = await setup({ ...SHARE, readContextReserveTokens: 2000 })
+    fs.files.set('key:a.txt', FORTY)
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1500))
+    expect(text(result)).toBe(`<path>/abs/a.txt</path>
+<type>file</type>
+<content>
+1: xxxxxxxxx
+
+(Output capped at 0 bytes, the most one read returns in this context window. Showing lines 1-1 of 40. Use offset=2 to continue.)
+</content>`)
+  })
+
+  it('rounds a fractional budget down to whole bytes', async () => {
+    const { ctx, fs } = await setup({ readContextFraction: 0.2, readBytesPerToken: 1.7 })
+    fs.files.set('key:a.txt', FORTY)
+    // 99 tokens x 0.2 x 1.7 bytes = 33.66 bytes.
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(99))
+    expect(text(result)).toContain('(Output capped at 33 bytes,')
   })
 })
 

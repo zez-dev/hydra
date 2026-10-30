@@ -1,0 +1,10 @@
+version: 1
+scenario: fs-read-context-cap
+profile: headless
+composition: fs-read-context-cap
+recording: authored
+header:
+  class: fs-read-context-cap
+  pin: true
+  systemPromptSource: text-turn
+  toolSchemasSource: text-turn

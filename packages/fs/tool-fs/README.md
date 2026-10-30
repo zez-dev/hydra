@@ -66,6 +66,11 @@ All keys are optional. The `read`, `readImage`, `write`, and `edit` switches def
 | `readMaxLineLength` | `2000` | Characters kept per line before truncation |
 | `readMaxBytes` | `51200` | Byte cap on one `read` call's selected lines; overflow ends the window with a capped footer |
 | `readStreamMinSize` | `10485760` | Files at or above this size (or of unknown size) stream instead of loading whole into memory |
+| `readContextFraction` | unset | Fraction, above 0 and at most 1, of the routed model's context window left after `readContextReserveTokens` that one complete `read` result may fill; set it with `readBytesPerToken` |
+| `readBytesPerToken` | unset | Bytes of `read` result assumed per token of the routed model, used to convert `readContextFraction` to bytes; set it with `readContextFraction` |
+| `readContextReserveTokens` | `0` | Tokens of the routed context window kept for the rest of the request before `readContextFraction` applies; set it only with the two share fields |
+
+With both share fields set, a `read` whose calling session's latest request was routed with a known context window returns at most `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` bytes, envelope and footer included, and `readMaxBytes` still applies. The first requested line is returned even when it alone exceeds that cap, so every read makes progress; a window no larger than the reserve returns one line per read. A call without an agent, before the session's first request, or on a route that advertises no window uses `readMaxBytes` alone. Setting one share field without the other, a reserve without them, a fraction outside that range, a non-positive or infinite `readBytesPerToken`, or a negative or fractional reserve fails at load.
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-fs) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -188,11 +193,11 @@ Prefix-stable while the visible tool definitions and order are unchanged. Regist
 
 #### What the model sees
 
-A successful read is exactly `<path><resolvedPath></path>`, newline, `<type>file</type>`, newline, `<content>`, numbered lines as `<lineNumber>: <text>`, a blank line, one footer, and `</content>`. The footer is exactly `(Output capped. Showing lines <start>-<end>. Use offset=<next> to continue.)`, `(Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)`, or `(End of file - total <total> lines)`. A long line ends exactly `... (line truncated to <max> chars)`. A missing read still returns `FS_NOT_FOUND`, but it records confirmed absence for the calling session; after an externally deleted file is re-read, a retried `write` can safely recreate it through the provider's no-replace guard.
+A successful read is exactly `<path><resolvedPath></path>`, newline, `<type>file</type>`, newline, `<content>`, numbered lines as `<lineNumber>: <text>`, a blank line, one footer, and `</content>`. The footer is exactly `(Output capped at <cap> bytes, the most one read returns in this context window. Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)` when the context-window share ended the read, `(Output capped. Showing lines <start>-<end>. Use offset=<next> to continue.)` when `readMaxBytes` did, `(Showing lines <start>-<end> of <total>. Use offset=<next> to continue.)`, or `(End of file - total <total> lines)`. In PTC programs, the structured result carries the same cap as `windowCapBytes` only when it ended the read. A long line ends exactly `... (line truncated to <max> chars)`. A missing read still returns `FS_NOT_FOUND`, but it records confirmed absence for the calling session; after an externally deleted file is re-read, a retried `write` can safely recreate it through the provider's no-replace guard.
 
 #### Token effect
 
-Read output is capped by `readLimit`, `readMaxLineLength`, and `readMaxBytes`; the retained call and result are resent until compaction.
+Read output is capped by `readLimit`, `readMaxLineLength`, and `readMaxBytes`, and with the share fields set, by the routed window's share, so one fresh result leaves room for the rest of the request on a small window; a capped read needs another call to continue. The retained call and result are resent until compaction.
 
 #### KV Cache effect
 
@@ -254,6 +259,7 @@ These limits define when the tool suite is a poor fit or needs special operation
 - **Inline image preview rides the UI composition** — the tool-result card renders the image through the browser's `tool.call.images` slot, which the attachment presentation plugin fills; a UI without that plugin shows the result's envelope text instead.
 - **No attachment-region tool** — an agent may crop an image through another available tool when it has a filesystem path; a pasted or dragged image without a path cannot be re-read at higher resolution.
 - **No timeout surface** — `read`/`write`/`edit` take no timeout argument and declare no timeout budget; cancellation rides `exec.signal` only ([provider rationale](../README.md)).
+- **The context-window share bounds one result, not one step** — each parallel `read` may fill the whole share, so several in one step can together exceed the window. `readBytesPerToken` and `readContextReserveTokens` are fixed estimates, so text that tokenizes more densely, or a request prefix larger than the reserve, leaves less room than the share assumes.
 
 <a id="dev-note"></a>
 ### Dev Note

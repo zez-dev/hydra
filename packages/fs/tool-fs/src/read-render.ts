@@ -23,6 +23,12 @@ export interface ReadWindow {
   maxLineLength: number
   /** Maximum bytes of selected output; overflow stops the scan and marks `truncatedByBytes`. */
   maxBytes: number
+  /**
+   * Maximum UTF-8 bytes of the numbered lines as rendered (`N: text`, newline-separated);
+   * overflow stops the scan and marks `truncatedByNumberedBytes`. The first selected line is
+   * returned even when it alone exceeds this, so every read makes progress. Absent: no limit.
+   */
+  maxNumberedBytes?: number
 }
 
 /** One line returned from a text file. */
@@ -41,6 +47,8 @@ export interface WindowResult {
   totalLines: number
   /** Whether selected output hit the byte cap. */
   truncatedByBytes: boolean
+  /** Whether the numbered lines hit `maxNumberedBytes` before the requested lines ended. */
+  truncatedByNumberedBytes: boolean
 }
 
 /** Outcome of a bounded text read — what {@link formatReadOutput} renders. */
@@ -53,17 +61,21 @@ export interface FileReadOutcome {
   totalLines: number
   /** Whether selected output hit the byte cap. */
   truncatedByBytes?: true
+  /** The context-window byte cap that ended this read early; it takes precedence over `truncatedByBytes`. */
+  windowCapBytes?: number
 }
 
 interface WindowAccumulator {
   lines: FileTextLine[]
   totalLines: number
   outputBytes: number
+  numberedBytes: number
   truncatedByBytes: boolean
+  truncatedByNumberedBytes: boolean
 }
 
 function newAccumulator(): WindowAccumulator {
-  return { lines: [], totalLines: 0, outputBytes: 0, truncatedByBytes: false }
+  return { lines: [], totalLines: 0, outputBytes: 0, numberedBytes: 0, truncatedByBytes: false, truncatedByNumberedBytes: false }
 }
 
 function truncateLine(line: string, maxLineLength: number): string {
@@ -76,7 +88,8 @@ function lineByteSize(line: string, currentLineCount: number): number {
 
 function consumeLine(acc: WindowAccumulator, rawLine: string, request: ReadWindow): void {
   acc.totalLines += 1
-  if (acc.truncatedByBytes || acc.totalLines < request.offset || acc.lines.length >= request.limit) return
+  if (acc.truncatedByBytes || acc.truncatedByNumberedBytes
+    || acc.totalLines < request.offset || acc.lines.length >= request.limit) return
 
   const text = truncateLine(rawLine, request.maxLineLength)
   const bytes = lineByteSize(text, acc.lines.length)
@@ -84,7 +97,15 @@ function consumeLine(acc: WindowAccumulator, rawLine: string, request: ReadWindo
     acc.truncatedByBytes = true
     return
   }
+  // The rendered `N: ` prefix is ASCII digits plus two bytes.
+  const numberedLineBytes = bytes + String(acc.totalLines).length + 2
+  if (request.maxNumberedBytes !== undefined && acc.lines.length > 0
+    && acc.numberedBytes + numberedLineBytes > request.maxNumberedBytes) {
+    acc.truncatedByNumberedBytes = true
+    return
+  }
   acc.outputBytes += bytes
+  acc.numberedBytes += numberedLineBytes
   acc.lines.push({ number: acc.totalLines, text })
 }
 
@@ -96,7 +117,12 @@ function finish(acc: WindowAccumulator, request: ReadWindow, displayPath: string
   if (!acc.truncatedByBytes && request.offset > acc.totalLines && !(acc.totalLines === 0 && request.offset === 1)) {
     throw new FsError(`offset ${request.offset} is out of range for "${displayPath}" (${acc.totalLines} lines)`, 'FS_NOT_FOUND')
   }
-  return { lines: acc.lines, totalLines: acc.totalLines, truncatedByBytes: acc.truncatedByBytes }
+  return {
+    lines: acc.lines,
+    totalLines: acc.totalLines,
+    truncatedByBytes: acc.truncatedByBytes,
+    truncatedByNumberedBytes: acc.truncatedByNumberedBytes,
+  }
 }
 
 /**
@@ -106,7 +132,7 @@ function finish(acc: WindowAccumulator, request: ReadWindow, displayPath: string
  * @param chunks - decoded text chunks in file order; chunk boundaries carry no meaning.
  * @param request - the resolved window; the caller has already applied its defaults and caps.
  * @param displayPath - the caller-facing path used in the offset-out-of-range error.
- * @returns the numbered window lines, the total line count seen, and the byte-cap truncation flag.
+ * @returns the numbered window lines, the total line count seen, and the byte-cap truncation flags.
  */
 export async function buildWindow(
   chunks: AsyncIterable<string> | Iterable<string>,
@@ -152,7 +178,9 @@ export async function buildWindow(
 export function formatReadOutput(displayPath: string, outcome: FileReadOutcome): string {
   const endLine = outcome.lines.at(-1)?.number ?? Math.max(0, outcome.offset - 1)
   let footer: string
-  if (outcome.truncatedByBytes) {
+  if (outcome.windowCapBytes !== undefined) {
+    footer = windowCapFooter(outcome.windowCapBytes, outcome.offset, endLine, outcome.totalLines)
+  } else if (outcome.truncatedByBytes) {
     footer = `(Output capped. Showing lines ${outcome.offset}-${endLine}. Use offset=${endLine + 1} to continue.)`
   } else if (endLine < outcome.totalLines) {
     footer = `(Showing lines ${outcome.offset}-${endLine} of ${outcome.totalLines}. Use offset=${endLine + 1} to continue.)`
@@ -162,11 +190,34 @@ export function formatReadOutput(displayPath: string, outcome: FileReadOutcome):
   const body = outcome.lines.length > 0
     ? `${outcome.lines.map(line => `${line.number}: ${line.text}`).join('\n')}\n\n${footer}`
     : footer
+  return envelope(displayPath, body)
+}
+
+function envelope(displayPath: string, body: string): string {
   return `<path>${displayPath}</path>
 <type>file</type>
 <content>
 ${body}
 </content>`
+}
+
+function windowCapFooter(capBytes: number, offset: number, endLine: number, totalLines: number): string {
+  return `(Output capped at ${capBytes} bytes, the most one read returns in this context window. `
+    + `Showing lines ${offset}-${endLine} of ${totalLines}. Use offset=${endLine + 1} to continue.)`
+}
+
+/**
+ * Bytes a window-capped result spends outside its numbered lines: the envelope, the blank line
+ * before the footer, and the footer with line numbers as long as `Number.MAX_SAFE_INTEGER`.
+ * Numbered lines within `capBytes` minus this keep the complete result within `capBytes`.
+ * @param displayPath - the path the envelope renders.
+ * @param offset - the 1-based first line the read requested.
+ * @param capBytes - the cap the footer names.
+ * @returns the reserved UTF-8 bytes.
+ */
+export function windowCapReserveBytes(displayPath: string, offset: number, capBytes: number): number {
+  const footer = windowCapFooter(capBytes, offset, Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER)
+  return Buffer.byteLength(envelope(displayPath, `\n\n${footer}`), 'utf8')
 }
 
 /**

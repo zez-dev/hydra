@@ -1,0 +1,8 @@
+# A 24,600-token routed window: the shipped context-window share caps one read
+# at 8,160 bytes, below the read's line limit.
+
+- id: llm-deepseek
+  config:
+    models:
+      - id: deepseek-v4-flash
+        contextWindow: 24600

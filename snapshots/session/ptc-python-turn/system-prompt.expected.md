@@ -344,6 +344,8 @@ class ReadOutput(TypedDict):
     offset: int
     lines: list[ReadOutputLines]
     totalLines: int
+    # The most bytes one read returns in this context window; present only when that limit ended this read early.
+    windowCapBytes: NotRequired[int]
 
 class ReadImageArgs(TypedDict):
     # Path to the image file, resolved by the filesystem backend.

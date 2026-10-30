@@ -4770,6 +4770,23 @@ export interface Config {
   readMaxBytes?: number
   /** Files at or above this size stream instead of loading whole into memory. */
   readStreamMinSize?: number
+  /**
+   * Fraction, greater than 0 and at most 1, of the routed model's context window left after
+   * `readContextReserveTokens` that one complete `read` result may fill, converted to bytes with
+   * `readBytesPerToken`. Set it together with `readBytesPerToken`; unset, `readMaxBytes` alone
+   * caps a read.
+   */
+  readContextFraction?: number
+  /**
+   * Bytes of `read` result assumed per token of the routed model, a positive number used only to
+   * convert `readContextFraction` into bytes. Set it together with `readContextFraction`.
+   */
+  readBytesPerToken?: number
+  /**
+   * Tokens of the routed context window, a non-negative integer, kept for the rest of the request
+   * before `readContextFraction` applies; set it only with the share fields. Defaults to 0.
+   */
+  readContextReserveTokens?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-fs -->

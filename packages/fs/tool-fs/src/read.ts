@@ -8,7 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, ReadResultView, ToolResult } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
-import { buildWindow, formatReadOutput, langFromPath, readMetaFromMeta } from './read-render.ts'
+import { buildWindow, formatReadOutput, langFromPath, readMetaFromMeta, windowCapReserveBytes } from './read-render.ts'
 import { resolveRegularReadTarget } from './read-target.ts'
 
 /** Default and maximum number of lines returned by one `read` call (the `readLimit` config). */
@@ -30,6 +30,32 @@ export interface ReadToolCaps {
   maxBytes: number
   /** Files at or above this size stream; smaller files read whole into memory. */
   streamMinSize: number
+  /** Share of the routed model's context window one result may fill; absent leaves `maxBytes` as the only byte cap. */
+  windowShare?: ReadWindowShare
+}
+
+/** The `readContextFraction`, `readBytesPerToken`, and `readContextReserveTokens` config. */
+export interface ReadWindowShare {
+  /** Fraction of the routed context window left after `reserveTokens` that one complete result may fill. */
+  fraction: number
+  /** Bytes of rendered result assumed per token of the routed model. */
+  bytesPerToken: number
+  /** Tokens of the routed window kept for the rest of the request before `fraction` applies. */
+  reserveTokens: number
+}
+
+/**
+ * Resolve the byte cap a window share sets for one call, from the context window of the calling
+ * session's latest routed request. A window no larger than the reserve gives a cap of 0.
+ * @param share - the configured share.
+ * @param contextWindow - the routed window in tokens; absent without an agent, before the first
+ * request, or on a route that advertises none.
+ * @returns whole bytes the complete result may fill, or `undefined` when no window is known.
+ */
+function resolveWindowCap(share: ReadWindowShare, contextWindow: number | undefined): number | undefined {
+  return contextWindow === undefined
+    ? undefined
+    : Math.floor(Math.max(0, contextWindow - share.reserveTokens) * share.fraction * share.bytesPerToken)
 }
 
 /** Validated `read` arguments after defaulting. */
@@ -102,6 +128,13 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
             },
           },
           totalLines: { type: 'integer', required: true },
+          // Declared only where a share can set it, so PTC programs see no field that never appears.
+          ...caps.windowShare === undefined ? {} : {
+            windowCapBytes: {
+              type: 'integer',
+              description: 'The most bytes one read returns in this context window; present only when that limit ended this read early.',
+            },
+          },
         },
       },
       render: (args, value) => {
@@ -115,6 +148,7 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
             lines: value.lines,
             totalLines: value.totalLines,
             ...truncatedByBytes ? { truncatedByBytes: true } : {},
+            ...value.windowCapBytes === undefined ? {} : { windowCapBytes: value.windowCapBytes },
           }),
         }]
       },
@@ -145,17 +179,30 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
       const chunks = info.size === undefined || info.size >= caps.streamMinSize
         ? await ctx.fs.streamText(target, exec.signal)
         : [await ctx.fs.readText(target, exec.signal)]
+      const path = ctx.fs.processPath(target)
+      const windowCapBytes = caps.windowShare === undefined
+        ? undefined
+        : resolveWindowCap(caps.windowShare, exec.agent?.session.requestContext()?.contextWindow)
       const window = await buildWindow(
         chunks,
-        { offset: input.offset, limit: input.limit, maxLineLength: caps.maxLineLength, maxBytes: caps.maxBytes },
+        {
+          offset: input.offset,
+          limit: input.limit,
+          maxLineLength: caps.maxLineLength,
+          maxBytes: caps.maxBytes,
+          ...windowCapBytes === undefined ? {} : {
+            maxNumberedBytes: Math.max(0, windowCapBytes - windowCapReserveBytes(path, input.offset, windowCapBytes)),
+          },
+        },
         target.displayPath,
       )
 
       const outcome = {
-        path: ctx.fs.processPath(target),
+        path,
         offset: input.offset,
         lines: window.lines,
         totalLines: window.totalLines,
+        ...windowCapBytes !== undefined && window.truncatedByNumberedBytes ? { windowCapBytes } : {},
       }
       // Record the present observation (a no-op when no policy plugin listens). The
       // read already succeeded; an fs/observed listener is contractually a
