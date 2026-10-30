@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { redactSessionSnapshotIds } from '../src/identity.ts'
+import { isSnapshotIdentityToken, redactSessionSnapshotIds } from '../src/identity.ts'
 
 const parentId = '11111111-1111-4111-8111-111111111111'
 const childId = '22222222-2222-4222-8222-222222222222'
@@ -119,5 +119,17 @@ describe('session snapshot identity redaction', () => {
     expect(redacted?.match(/\{\{message:7\}\}/g)).toHaveLength(2)
     expect(redacted).toContain('"id":"{{message:8}}"')
     expect(redacted).not.toContain('{{id:')
+  })
+
+  it('recognizes only a complete typed token as one it writes', () => {
+    expect(['{{id:1}}', '{{session:12}}', '{{retry:3}}'].map(isSnapshotIdentityToken)).toEqual([true, true, true])
+    expect([
+      '{{sessionId}}',
+      '{{id:0}}',
+      '{{tools}}',
+      'job {{id:1}}',
+      'bash-0123456789abcdef',
+      parentId,
+    ].map(isSnapshotIdentityToken)).toEqual([false, false, false, false, false, false])
   })
 })

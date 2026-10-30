@@ -30,7 +30,7 @@ import {
   writesCurrentSessionFixtures,
   type SnapshotSessionFormatManifest,
 } from './manifest.ts'
-import { redactSessionSnapshotIds } from './identity.ts'
+import { isSnapshotIdentityToken, redactSessionSnapshotIds } from './identity.ts'
 import { captureExpectedWorkspaceSnapshot } from './workspace.ts'
 import {
   assertSessionFixtureVersion,
@@ -980,7 +980,7 @@ function preserveNormalizedVolatiles(
   return Object.is(normalizedFresh, normalizedExisting) ? existing : fresh
 }
 
-/** Normalize one aligned record with the same contract used by fixture comparison. */
+/** Normalize one aligned record in isolation for the leaf-equivalence check. */
 function normalizedRefreshRecord(
   record: Record<string, unknown>,
   context: NormalizeContext,
@@ -1050,6 +1050,9 @@ function collectNormalizedStringMappings(
     || fresh === existing
     || excludedStrings.has(fresh)
     || excludedStrings.has(existing)
+    // Identity redaction renumbers every occurrence after stabilization; a token
+    // borrowed for one field would leave the same id raw in other fields and text.
+    || isSnapshotIdentityToken(existing)
   ) return true
   const freshKey = JSON.stringify([normalizedFresh, fresh])
   const existingKey = JSON.stringify([normalizedFresh, existing])
@@ -1113,11 +1116,13 @@ function normalizedStringMappings(
 /**
  * Rewrite a fresh replay-produced log so repeated refreshes do not churn
  * volatile fixture fields. Meaningful event payloads come from `fresh`; the
- * existing fixture lends normalized-equivalent values, including non-message ids, paths,
+ * existing fixture lends normalized-equivalent values, including raw non-message ids, paths,
  * creation/event times, spill locators, and hook durations, only when the
  * complete record layout aligns and volatile strings form a consistent
  * bijection. Complete durable-message ids are excluded because the later
- * fixture-ready structural pass owns them. Ambiguous layouts or mappings
+ * fixture-ready structural pass owns them; typed `{{kind:N}}` identity tokens
+ * are excluded because identity redaction renumbers every occurrence of an id
+ * after this pass. Ambiguous layouts or mappings
  * keep fresh strings. Packed timing gaps expand from zero when a projected
  * fixture omits `time0`, so packing does not shift later records;
  * fresh semantic values and fragment arrays remain authoritative.

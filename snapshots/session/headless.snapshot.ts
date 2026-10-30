@@ -236,6 +236,14 @@ async function fixtureSessions(scenario: HeadlessScenario, selectedFiles?: reado
   }))
 }
 
+/** Read each role's committed native writer oracle; a role without one yet reads as empty. */
+async function writerSnapshots(scenario: HeadlessScenario, count: number): Promise<string[]> {
+  return Promise.all(Array.from({ length: count }, async (_, index) => {
+    const path = join(scenario.dir, writerSnapshotName(index))
+    return existsSync(path) ? readFile(path, 'utf8') : ''
+  }))
+}
+
 async function primaryFixtureFile(dir: string): Promise<string> {
   const [primary] = sessionFixtureNames(await readdir(dir))
   if (primary === undefined) throw new Error(`${dir}: missing parent Session fixture`)
@@ -1536,7 +1544,10 @@ describe('headless recorded-session snapshots', () => {
         expect(await readFile(join(scenario.dir, retainedToolInput), 'utf8'), 'retained replay input bytes').toBe(primaryFixture)
       }
       if (scenario.manifest.sessionFormat !== undefined) {
-        if (mode === 'refresh') await writeSessionFixtures(scenario, actualLogs, fixtures, actualContext)
+        // Refresh stabilizes each writer oracle against the committed oracle it replaces, never the historical replay input.
+        if (mode === 'refresh') {
+          await writeSessionFixtures(scenario, actualLogs, await writerSnapshots(scenario, fixtures.length), actualContext)
+        }
         expected = await Promise.all(fixtures.map((_, index) => readFile(join(scenario.dir, writerSnapshotName(index)), 'utf8')))
         for (const [index, content] of expected.entries()) {
           expect(sessionHeaderVersion(content, writerSnapshotName(index))).toBeLessThanOrEqual(SESSION_FORMAT_VERSION)

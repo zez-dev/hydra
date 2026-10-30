@@ -70,7 +70,7 @@ defineAcpSnapshotSuite({
 
 每个已记录 Session 目录携带封闭的 `snapshot.yml` manifest，以及规范 parent 与连续 child 角色。parent 文件名是 `session[.vN].jsonl`；child 是 `session.<ordinal>[.vN].jsonl`；v0 省略 `.v0`，正版本使用小写 `.vN`，且每个文件名与其 header 一致。一个角色可以保留旧 generation，但 harness 会选择数值最高的一项。拥有 fixture 的 manifest 可以声明 `sessionFormat.version` 与一个或多个封闭 `coverage` 名称，把该历史 generation 保留为显式迁移 fixture。未声明时，record 与 refresh 写入当前 generation；replay 按[语料策略](../../../snapshots/AGENTS.md)对每个 parent/child 角色独立接受保留的 V3 基线或当前 generation。显式声明 `sessionFormat.version` 时，每个选定角色都必须匹配该版本。manifest 还会指名场景、随附 profile、组合／header 类别、录制来源，以及已完成 Session 无法重建的 replay、平台、权限、环境、workspace 或输入事实。存储保护检查每个选定 parent 与 child 角色的工具结果和可移植路径。提示词／schema 擦除、消息身份及提示词先于请求的顺序检查适用于当前 generation；保留的前代维持其历史表示。适配器注册预期输出、Session 日志与可选 `workspace.expected/` 比较；保护会拒绝遗留目录、缺失角色、非规范名称、绝对路径、格式错误的 manifest 与平台专用分隔符。
 
-`normalizeSessionSnapshot` 在规范化路径并擦除系统提示文本与工具 schema 后，会保留完整 Session header 与事件 payload，但从已提交 fixture 中省略顶层 `seq`/`time` envelope；它还会规范化嵌入式 stream clock 与历史 packed-row 的 `seq0`/`time0` envelope 与 catalog child 创建时钟。事件顺序与来源事件引用的顺序保持不变。录制与刷新会将顶层 `sourceEventSeqs` 以展开数组的形式写入 fixture。Replay 只在内存中合成顶层 envelope，而运行时持久化仍写入完整日志。多 Session 比较会先通过严格的构建期静态 Session 格式目录校验预期日志与收集日志，再进行身份脱敏与规范化；来源文件名不能改变格式校验。保留的历史 replay 输入不是原生当前格式 writer 输出的比较基准：结构迁移保留请求含义，但可以产生不同的事件布局。归一化保留意外的 request-header 字段（包括 `system`），使回归保持可见。无版本的协议适配器单元测试 fixture 不属于已发布 Session 格式语料。[当前写入器格式](../../../docs/session-format-status.zh.md)的 fixture 每个事件占一行；保留的 v0/v1 fixture 可以使用规范 packed row。[临时仓库迁移器](../../../scripts/migrate-packed-session-fixtures.ts)（`pnpm run migrate:packed-session-fixtures`）会改写更旧的历史布局，由其[移除提案](../../../.agents/notes/proposed/process/2026-07-26-remove-packed-session-fixture-migrator.zh.md)负责删除该迁移器。
+`normalizeSessionSnapshot` 在规范化路径并擦除系统提示文本与工具 schema 后，会保留完整 Session header 与事件 payload，但从已提交 fixture 中省略顶层 `seq`/`time` envelope；它还会规范化嵌入式 stream clock 与历史 packed-row 的 `seq0`/`time0` envelope 与 catalog child 创建时钟，并将 `compaction/pressure` 事件的实测 token 计数（`estimatedTokens`、`pendingTokens`、`pricedTokens`、`density`）置零：这些计数为渲染后的提示词计价，因此随 workspace 与 checkout 路径变化；声明的窗口、上限与阈值仍参与比较。事件顺序与来源事件引用的顺序保持不变。录制与刷新会将顶层 `sourceEventSeqs` 以展开数组的形式写入 fixture。Replay 只在内存中合成顶层 envelope，而运行时持久化仍写入完整日志。多 Session 比较会先通过严格的构建期静态 Session 格式目录校验预期日志与收集日志，再进行身份脱敏与规范化；来源文件名不能改变格式校验。保留的历史 replay 输入不是原生当前格式 writer 输出的比较基准：结构迁移保留请求含义，但可以产生不同的事件布局。归一化保留意外的 request-header 字段（包括 `system`），使回归保持可见。无版本的协议适配器单元测试 fixture 不属于已发布 Session 格式语料。[当前写入器格式](../../../docs/session-format-status.zh.md)的 fixture 每个事件占一行；保留的 v0/v1 fixture 可以使用规范 packed row。[临时仓库迁移器](../../../scripts/migrate-packed-session-fixtures.ts)（`pnpm run migrate:packed-session-fixtures`）会改写更旧的历史布局，由其[移除提案](../../../.agents/notes/proposed/process/2026-07-26-remove-packed-session-fixture-migrator.zh.md)负责删除该迁移器。
 
 spill 场景通过真实本地提供方保存到私有临时根目录。fixture 适配器提供固定长度的逻辑定位符，并仅将本次运行已保存的定位符映射回实际文件以供检索，在不写入共享逻辑路径的情况下保留预览预算。已知的快照 spill 路径会规范化为稳定的定位符 token，包括 JSON 省略通知中带引号、使用 JSON 转义 Windows 分隔符的路径。刷新提取会保留匹配路径的序列化写法，以便进行字面替换。规范化只改变定位符：保存字节数与省略计数仍作为比较证据。
 
@@ -81,6 +81,10 @@ Headless/ACP 与 SDK 适配器在规范化之前，将原始目录中的子创�
 ### 录制、回放与刷新
 
 `pnpm run test:snapshot:record` 调用在线 LLM（大语言模型），并在规范具名版本文件下写入收集到的当前 generation。record 与 refresh 绝不重命名或删除已完成的 generation，即使后续运行不再产生某个 child 角色也一样；受审阅的源树整理只有在同角色存在已验证的当前替代文件后才移除前代。显式声明 `sessionFormat` 的场景在录制模式下保持只读。`pnpm run test:snapshot:refresh` 保持无密钥，运行选定的最高 replay 输入，并写入 stdout、各 pin 自有的提示词与工具 schema 伴随文件，以及新鲜当前 generation 的可比较 Session 输出；保留历史输入的场景写入单独的 writer 输出比较基准，而非规范当前格式 replay 代际。Headless 与 SDK 场景可通过本地 `runtime.cordis.yml` patch 添加执行 fixture。每个组合 owner 把 replay patch 放在 live patch 旁；顶层 `snapshots/` 拥有 Session 驱动场景，其他预期输出留在其 package owner 旁。[`dsh-llm-replay`](../llm-replay/README.zh.md) 提供通过 `DSH_SNAPSHOT_*` 环境值选择的已记录流。
+
+刷新以已提交的基准稳定其写入的每个 Session 文件：普通场景以选定的 replay fixture 为基准；保留历史输入的场景以刷新所替换的已提交 `writer*.expected.jsonl` 输出比较基准为基准。Session id 与 cwd 通过跨所有日志的字面替换取基准中的值。只要记录布局仍然对齐，replay 规范化会消除的其他值（如事件或 stream clock、hook 耗时、catalog child 创建时间、路径或原始 id）就保留已提交的写法。其他带类型的 `{{kind:N}}` 身份 token 不会被复制：身份脱敏随后会按首次出现顺序为某个 id 的每一处出现重新编号，复制到某个字段的 token 会让同一 id 在其他字段与文本中保持原始值。因此，replay 复现已提交行为的刷新不会改变任何已提交文件。
+
+`test:snapshot`、`test:snapshot:refresh` 与 `test:snapshot:record` 会先运行 `pnpm run build:native-system` 与 `tsx scripts/generate-typert.ts`：每个 `dsh` 进程（包括源 mode 进程）都会加载 native 宿主 addon 以及各 package 生成的 Typert 产物（`lib/typert.host.js`）。CI 快照门禁直接运行 `vitest`，因为其前置构建已经生成这两者。
 
 ### 固定请求 header 与系统提示
 
@@ -95,7 +99,7 @@ Headless/ACP 与 SDK 适配器在规范化之前，将原始目录中的子创�
 - **持久记录等待超时**——即使首次日志收集就超过期限，`waitForTurnStart`、`waitForTurnEnd`、`waitForSubagentTurnEnd`、`waitForGoalPhase`、`waitForInboxMessage`、`waitForTitleAfterTurnEnd` 和 `waitForEventAfterTurnEnd` 也会指出会话或子会话及等待期限。子会话等待还会指出目标轮次。这些等待都通过错误的 cause 保留底层失败。`waitForTurnStart` 会立即拒绝格式错误的轮次记录。
 - **fixture 保护拒绝已提交文件**——遗留场景目录、缺失文件、一个 header 类别包含多个 pin、重复的伴随文件内容、未擦除的提示文本或工具 schema、没有前置 `system/message` 的 `request/header`，以及格式错误的 pin header 都会在比较运行前使套件失败。
 - **会话收集需要原始 JSONL mode**——快照配置使用 JSONL 后端的 `compression: 'none'`；压缩 JSONL 没有快照收集路径。
-- **构建 mode 需要当前产物**——选择 `DSH_EXAMPLE_MODE=lib` 前先运行 `pnpm run build`；源 mode 仍是零构建路径。
+- **构建 mode 需要当前产物**——选择 `DSH_EXAMPLE_MODE=lib` 前先运行 `pnpm run build`。直接对快照配置运行 `vitest` 会跳过脚本中的 native addon 与 Typert 步骤，因此在全新 checkout 中每个 `dsh` 进程都无法加载 `system.node`。
 
 -----
 
@@ -162,7 +166,7 @@ Headless/ACP 与 SDK 适配器在规范化之前，将原始目录中的子创�
 这些限制说明何时需要对该工具包特别小心。它们是当前包约束，不是任务积压。
 
 - **会话收集需要原始 JSONL mode**——`runScenario` 收集持久化 `.jsonl` 日志，因此快照配置使用 JSONL 后端的 `compression: 'none'`；压缩 JSONL 没有快照收集路径。
-- **构建 mode 需要当前产物**——选择 `DSH_EXAMPLE_MODE=lib` 前先运行 `pnpm run build`；源 mode 仍是零构建路径。
+- **构建 mode 需要当前产物**——选择 `DSH_EXAMPLE_MODE=lib` 前先运行 `pnpm run build`；源 mode 只需要快照脚本先行构建的 native addon 与 Typert 产物。
 - **ACP 继续覆盖协议行为**——刺激来自 ACP 客户端的取消与权限往返留在该适配器；组装式一次性行为与持久控制行为使用 headless 与 SDK 适配器。
 
 <a id="dev-note"></a>

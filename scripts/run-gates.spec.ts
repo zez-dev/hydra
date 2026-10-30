@@ -986,6 +986,9 @@ describe('Node 24 lane ownership', () => {
       expect(subject.find(item => item.id === id)?.needs).toEqual(['build'])
     }
     expect(subject.find(item => item.id === 'snapshot')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
+    // The build owns the snapshot prerequisites, so the gate skips the script's rebuild.
+    expect(subject.find(item => item.id === 'snapshot')?.displayCommand)
+      .toBe('pnpm exec vitest run --config vitest.snapshot.config.ts')
     expect(subject.find(item => item.id === 'expected-output')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
     expect(subject.find(item => item.id === 'built-bin-smoke')?.env).toEqual({ DSH_EXAMPLE_MODE: 'lib' })
     expect(subject.find(item => item.id === 'doc-typecheck')?.env).toEqual({

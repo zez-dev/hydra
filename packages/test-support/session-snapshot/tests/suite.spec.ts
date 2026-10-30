@@ -12,6 +12,7 @@ import {
   parsePersistedSessionFilename,
   parseSessionFixtureName,
   persistedSessionFilename,
+  redactSessionSnapshotIds,
   sessionFixtureName,
   sessionFixtureNames,
   sessionHeaderVersion,
@@ -1514,6 +1515,38 @@ describe('stabilizeRefreshLog', () => {
       JSON.stringify({ type: 'approval/decided', data: { id: existingId, outcome: 'allowed-once' } }),
       '',
     ].join('\n'))
+  })
+
+  it('lends stream clocks from a projected writer baseline, not from another event layout', () => {
+    const header = '{"type":"session","id":"{{session:1}}","createdAt":100,"cwd":"/old"}'
+    const message = (time: number): Record<string, unknown> => ({
+      type: 'assistant/message',
+      data: { stream: [{ type: 'chunk', time, chunk: { type: 'block-start', index: 0 } }] },
+    })
+    const log = (...records: Record<string, unknown>[]): string =>
+      [header, ...records.map(record => JSON.stringify(record)), ''].join('\n')
+    const streamTime = (output: string): unknown =>
+      (JSON.parse(output.split('\n')[1] as string) as { data: { stream: { time: unknown }[] } }).data.stream[0]?.time
+    const fresh = log({ ...message(300), seq: 1, time: 300 })
+
+    expect(streamTime(stabilize(fresh, log(message(100))))).toBe(100)
+    expect(streamTime(stabilize(fresh, log({ type: 'text-chunks', time0: 100, data: { dt: [0] } }, message(100))))).toBe(300)
+  })
+
+  it.each([
+    { name: 'an unchanged', freshText: 'moved to background job' },
+    { name: 'a changed', freshText: 'continues as background job' },
+  ])('tokenizes every occurrence of a job id alike beside $name result text', ({ freshText }) => {
+    const log = (jobId: string, startedAt: number, text: string): string => [
+      '{"type":"session","id":"{{session:1}}","createdAt":100,"cwd":"/old"}',
+      JSON.stringify({ type: 'job/registered', data: { jobId, kind: 'bash', startedAt } }),
+      JSON.stringify({ type: 'tool/result', data: { message: { role: 'tool', content: [{ type: 'text', text: `${text} ${jobId}` }] } } }),
+      '',
+    ].join('\n')
+    const existing = log('{{id:1}}', 100, 'moved to background job')
+
+    expect(redactSessionSnapshotIds([stabilize(log('bash-0123456789abcdef', 200, freshText), existing)]))
+      .toEqual([log('{{id:1}}', 100, freshText)])
   })
 
   it('keeps fresh correlated ids when record alignment is structurally ambiguous', () => {

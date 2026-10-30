@@ -35,6 +35,15 @@ function messageId(value: unknown): string | undefined {
   return value.id
 }
 
+/**
+ * Whether a string is a complete typed token written by {@link redactSessionSnapshotIds}.
+ * @param value - one fixture string value.
+ * @returns whether the value is exactly one `{{kind:N}}` identity token.
+ */
+export function isSnapshotIdentityToken(value: string): boolean {
+  return CANONICAL_TOKEN_RE.test(value)
+}
+
 function redactedCandidate(value: string): boolean {
   return UUID_FRAGMENT_RE.test(value) || SHORT_JOB_ID_RE.test(value)
     || LEGACY_TOKEN_RE.test(value) || CANONICAL_TOKEN_RE.test(value)

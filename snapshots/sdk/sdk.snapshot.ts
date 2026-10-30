@@ -1181,8 +1181,12 @@ describe('TypeScript SDK snapshots over the jsonrpc runtime', () => {
         for (const turnEnd of turnEnds) expect(turnEnd).toMatchObject({ data: { reason: { kind: 'completed' } } })
       }
 
-      let expectedContents = retained && !refreshing
-        ? await Promise.all(files.map((_, index) => readFile(join(scenarioDir, writerSnapshotName(index)), 'utf8')))
+      // Refresh stabilizes each writer oracle against the committed oracle it replaces, never the historical replay input.
+      let expectedContents = retained
+        ? await Promise.all(files.map(async (_, index) => {
+          const path = join(scenarioDir, writerSnapshotName(index))
+          return refreshing && !existsSync(path) ? '' : readFile(path, 'utf8')
+        }))
         : replayContents
 
       if (recording) {

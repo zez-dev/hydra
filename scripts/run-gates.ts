@@ -762,8 +762,12 @@ function ciUnitGates(): Gate[] {
 
 // Recorded-session adapters boot process scenarios in `lib` mode. Callers wait
 // either on `build` or on a validation gate that transitively owns that build.
+// The build already emits the native addon and Typert artifacts that the
+// `test:snapshot` script regenerates; regenerating Typert here would rewrite
+// files that concurrent sibling gates import.
 function snapshotGate(needs: string[] = ['build']): Gate {
-  return pnpmScript('snapshot', 'test:snapshot', {
+  return pnpmExec('snapshot', ['vitest', 'run', '--config', 'vitest.snapshot.config.ts'], {
+    label: 'test:snapshot',
     env: { DSH_EXAMPLE_MODE: 'lib' },
     needs,
   })
