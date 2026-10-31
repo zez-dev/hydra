@@ -57,6 +57,12 @@ export interface Config {
    * before `readContextFraction` applies; set it only with the share fields. Defaults to 0.
    */
   readContextReserveTokens?: number
+  /**
+   * Maximum bytes returned for the selected lines of one `read` call whose routed context window
+   * is known, in place of `readMaxBytes`; a call with no known window keeps `readMaxBytes`. Set it
+   * only with the share fields. Defaults to `readMaxBytes`.
+   */
+  readContextMaxBytes?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -71,10 +77,11 @@ export const Config: z<Config> = z.object({
   readContextFraction: z.number(),
   readBytesPerToken: z.number(),
   readContextReserveTokens: z.number(),
+  readContextMaxBytes: z.number(),
 })
 
 /** The window-share fields, which have no schemastery defaults. */
-type WindowShareKey = 'readContextFraction' | 'readBytesPerToken' | 'readContextReserveTokens'
+type WindowShareKey = 'readContextFraction' | 'readBytesPerToken' | 'readContextReserveTokens' | 'readContextMaxBytes'
 
 /** Configuration after schemastery applied the defaults. */
 type ResolvedConfig = Required<Omit<Config, WindowShareKey>> & Pick<Config, WindowShareKey>
@@ -88,8 +95,9 @@ function assertPositiveInteger(name: string, value: number): void {
 
 /**
  * Validate the window-share fields: the fraction and bytes-per-token together or neither, a
- * fraction greater than 0 and at most 1, a positive finite bytes-per-token, and an optional
- * non-negative integer reserve that defaults to 0.
+ * fraction greater than 0 and at most 1, a positive finite bytes-per-token, an optional
+ * non-negative integer reserve that defaults to 0, and an optional positive integer byte cap that
+ * defaults to `readMaxBytes`.
  * @param config - the resolved plugin config.
  * @returns the share, or `undefined` when no share field is set.
  */
@@ -98,10 +106,14 @@ function resolveWindowShare(config: ResolvedConfig): ReadWindowShare | undefined
     readContextFraction: fraction,
     readBytesPerToken: bytesPerToken,
     readContextReserveTokens: reserveTokens,
+    readContextMaxBytes: maxBytes,
   } = config
   if (fraction === undefined && bytesPerToken === undefined) {
     if (reserveTokens !== undefined) {
       throw new Error('tool-fs: readContextReserveTokens requires readContextFraction and readBytesPerToken')
+    }
+    if (maxBytes !== undefined) {
+      throw new Error('tool-fs: readContextMaxBytes requires readContextFraction and readBytesPerToken')
     }
     return undefined
   }
@@ -117,7 +129,8 @@ function resolveWindowShare(config: ResolvedConfig): ReadWindowShare | undefined
   if (reserveTokens !== undefined && !(Number.isInteger(reserveTokens) && reserveTokens >= 0)) {
     throw new Error('tool-fs: readContextReserveTokens must be a non-negative integer')
   }
-  return { fraction, bytesPerToken, reserveTokens: reserveTokens ?? 0 }
+  if (maxBytes !== undefined) assertPositiveInteger('readContextMaxBytes', maxBytes)
+  return { fraction, bytesPerToken, reserveTokens: reserveTokens ?? 0, maxBytes: maxBytes ?? config.readMaxBytes }
 }
 
 /** Register the selected filesystem tools; `read_image` additionally requires a mounted attachment store. */

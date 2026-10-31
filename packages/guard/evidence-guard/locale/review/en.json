@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Evidence review",
+    "description": "Before a turn ends, ask the model to read what it skipped, check the files it changed, and verify its claims, then give its final answer again."
+  }
+}

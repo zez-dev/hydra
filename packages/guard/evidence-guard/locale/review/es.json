@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Revisión de evidencia",
+    "description": "Antes de que termine un turno, pide al modelo que lea lo que omitió, compruebe los archivos que cambió y verifique sus afirmaciones, y que vuelva a dar su respuesta final."
+  }
+}

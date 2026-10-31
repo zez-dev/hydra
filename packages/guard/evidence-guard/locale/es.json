@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Estándar de evidencia",
+    "description": "Pide a cada modelo que lea los archivos completos, respalde cada afirmación con el archivo y la línea o la salida del comando de los que proviene, y diga cuándo algo no está verificado."
+  }
+}

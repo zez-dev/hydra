@@ -832,6 +832,9 @@ describe('read caps are plugin config', () => {
     ['readContextReserveTokens without a share', { readContextReserveTokens: 1000 }, 'readContextReserveTokens requires readContextFraction and readBytesPerToken'],
     ['a negative readContextReserveTokens', { readContextFraction: 0.2, readBytesPerToken: 1, readContextReserveTokens: -1 }, 'readContextReserveTokens must be a non-negative integer'],
     ['a fractional readContextReserveTokens', { readContextFraction: 0.2, readBytesPerToken: 1, readContextReserveTokens: 1.5 }, 'readContextReserveTokens must be a non-negative integer'],
+    ['readContextMaxBytes without a share', { readContextMaxBytes: 4096 }, 'readContextMaxBytes requires readContextFraction and readBytesPerToken'],
+    ['a zero readContextMaxBytes', { readContextFraction: 0.2, readBytesPerToken: 1, readContextMaxBytes: 0 }, 'readContextMaxBytes must be a positive integer'],
+    ['a fractional readContextMaxBytes', { readContextFraction: 0.2, readBytesPerToken: 1, readContextMaxBytes: 1.5 }, 'readContextMaxBytes must be a positive integer'],
   ] as const)('rejects %s at load', async (_case, config, message) => {
     const ctx = new Context()
     provideWorkingDirectoryFixture(ctx)
@@ -921,6 +924,34 @@ ${numbered}
 
   it('reports the readMaxBytes cap when it is tighter than the window share', async () => {
     const { ctx, fs } = await setup({ ...SHARE, readMaxBytes: 9 })
+    fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1_000_000))
+    expect(result.isError, text(result)).toBe(false)
+    if (result.isError) throw new Error('expected read success')
+    expect(text(result)).toContain('(Output capped. Showing lines 1-2. Use offset=3 to continue.)')
+    expect(result.value).not.toHaveProperty('windowCapBytes')
+  })
+
+  it('uses readContextMaxBytes in place of readMaxBytes when the routed window is known', async () => {
+    const { ctx, fs } = await setup({ ...SHARE, readMaxBytes: 9, readContextMaxBytes: 4096 })
+    fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1_000_000))
+    expect(text(result)).toContain('(End of file - total 3 lines)')
+  })
+
+  it.each([
+    ['the call has no agent', undefined],
+    ['the session has made no request yet', { session: { header: {}, requestContext: () => undefined } }],
+    ['the route advertises no window', routedAgent()],
+  ])('keeps readMaxBytes, not readContextMaxBytes, when %s', async (_case, agent) => {
+    const { ctx, fs } = await setup({ ...SHARE, readMaxBytes: 9, readContextMaxBytes: 4096 })
+    fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
+    const result = await call(ctx, 'read', { file_path: 'a.txt' }, agent)
+    expect(text(result)).toContain('(Output capped. Showing lines 1-2. Use offset=3 to continue.)')
+  })
+
+  it('reports the readContextMaxBytes cap when it is tighter than the window share', async () => {
+    const { ctx, fs } = await setup({ ...SHARE, readContextMaxBytes: 9 })
     fs.files.set('key:a.txt', 'aaaa\nbbbb\ncccc')
     const result = await call(ctx, 'read', { file_path: 'a.txt' }, routedAgent(1_000_000))
     expect(result.isError, text(result)).toBe(false)

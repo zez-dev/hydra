@@ -136,6 +136,7 @@ export interface PromptAssembly extends PromptPresentation {
 const SECTION_ORDERS = {
   HARNESS_IDENTITY: -1000,
   DEPLOYMENT_PERSONA_PREFIX: 0,
+  EVIDENCE_STANDARD: 400,
   PLAN_POLICY: 500,
   TEAM_POLICY: 600,
   PTC_ONLY: 800,
