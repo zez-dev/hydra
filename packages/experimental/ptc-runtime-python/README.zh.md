@@ -45,7 +45,7 @@ The program is the body of an async Python function. Top-level await and return 
 
 ### wire
 
-帧在子进程 fd 3 上以 JSON-lines 传输——每行一个对象——因此 stdout/stderr 留给程序自己的输出。子进程 → 宿主：`boot-ack`、`call`、`log`、`done`。宿主 → 子进程：`boot`（首帧，携带全部上限与命名空间声明）、`run`（`boot-ack` 之后，只携带程序体）与每个 `call` 一个 `reply`。伪造帧可在 `done` 上同时携带 `value` 与 `error`，因此消费方必须先检查 `error`，在它存在时忽略 `value`。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主把下一个 log 帧追加到同一条目，因此 `print('a', end='', flush=True); print('b')` 读回为一条 `'ab'` 条目而不是假换行（拆分计费算术见 fd-3 协议 Agent Note 的 wire-contract 一节）。合并的唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。
+帧以 JSON-lines 传输——每行一个对象——因此 stdout/stderr 留给程序自己的输出。子进程 → 宿主，经 fd 3：`boot-ack`、`call`、`log`、`done`。宿主 → 子进程，经 fd 4：`boot`（首帧，携带全部上限与命名空间声明）、`run`（`boot-ack` 之后，只携带程序体）与每个 `call` 一个 `reply`。两个方向各用一条管道，因此子进程退出导致的宿主写入失败不会丢弃子进程已写出的帧。伪造帧可在 `done` 上同时携带 `value` 与 `error`，因此消费方必须先检查 `error`，在它存在时忽略 `value`。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主把下一个 log 帧追加到同一条目，因此 `print('a', end='', flush=True); print('b')` 读回为一条 `'ab'` 条目而不是假换行（拆分计费算术见 fd-3 协议 Agent Note 的 wire-contract 一节）。合并的唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。
 
 ### 可能出错的地方
 
@@ -65,13 +65,13 @@ The program is the body of an async Python function. Top-level await and return 
 
 ### 设计概念
 
-单向信任：宿主把每条入站帧都视为敌意（模型代码可以在 fd 3 上伪造任何内容）并逐字段重建后才读取；Python 侧信任宿主回复。bootstrap（`py/bootstrap.py`）把程序作为 async 函数体执行，因此顶层 `await` 与 `return` 都可用；binding 调用经 fd 3 以 JSON-lines 往返，回复在 pump 中限速，以免大量大回复钉住宿主的 fd-3 可写缓冲。
+单向信任：宿主把每条入站帧都视为敌意（模型代码可以在 fd 3 上伪造任何内容）并逐字段重建后才读取；Python 侧信任宿主回复。bootstrap（`py/bootstrap.py`）把程序作为 async 函数体执行，因此顶层 `await` 与 `return` 都可用；binding 调用经 fd 3、其回复经 fd 4 以 JSON-lines 往返，回复在 pump 中限速，以免大量大回复钉住宿主的 fd-4 可写缓冲。
 
-已发布的 bootstrap 与 protocol 源码以 UTF-8 JSON 通过可信二进制 stdin 传入解释器，不依赖沙箱中的临时目录挂载或 locale 文本编码。模型程序与 binding 通信使用 fd 3。宿主在启动前解析沙箱 runner，子进程环境中只保留 `TMPDIR`。经过时间截止包含沙箱准备。所配置解释器的加载期版本探测在约束之外运行，不执行模型代码。
+已发布的 bootstrap 与 protocol 源码以 UTF-8 JSON 通过可信二进制 stdin 传入解释器，不依赖沙箱中的临时目录挂载或 locale 文本编码。模型程序与 binding 通信使用 fd 3 与 fd 4。宿主在启动前解析沙箱 runner，子进程环境中只保留 `TMPDIR`。经过时间截止包含沙箱准备。所配置解释器的加载期版本探测在约束之外运行，不执行模型代码。
 
 ### wire 契约
 
-帧为 `boot`／`run`（宿主 → 子进程）与 `boot-ack`／`call`／`log`／`done` （子进程 → 宿主），以及每个 `call` 对应一个 `reply`（宿主 → 子进程）。`log` 帧的 `truncated` 标志标记的就是子进程账本自己的截断标记帧，因此宿主在与子进程相同的点停止捕获，而不是从自己的预算推断。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主把下一个 log 帧合并进同一条目，因此 `print('a', end='', flush=True); print('b')` 读回为一条 `'ab'` 条目而不是假换行（拆分计费算术在 fd-3 协议 Agent Note 的 wire-contract 段）。合并的唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。`done.error.kind` 为 `exception`、`invalid-output`、`output-limit` 或模型代码返回后 CPU 检查产生的 `timeout` 之一；墙钟截止、中止与基底死亡在宿主侧观察。
+帧为 `boot`／`run` 以及每个 `call` 对应一个 `reply`（宿主 → 子进程，fd 4）与 `boot-ack`／`call`／`log`／`done`（子进程 → 宿主，fd 3）。`log` 帧的 `truncated` 标志标记的就是子进程账本自己的截断标记帧，因此宿主在与子进程相同的点停止捕获，而不是从自己的预算推断。`log` 帧的 `open` 标志标记由显式 flush 提交的未结束行：宿主把下一个 log 帧合并进同一条目，因此 `print('a', end='', flush=True); print('b')` 读回为一条 `'ab'` 条目而不是假换行（拆分计费算术在 fd-3 协议 Agent Note 的 wire-contract 段）。合并的唯一例外是截断：当后续超预算帧触发账本时，已计费的前缀作为独立条目先提交，截断 marker 跟在后面（marker 保持末位，无重复计费）。`done.error.kind` 为 `exception`、`invalid-output`、`output-limit` 或模型代码返回后 CPU 检查产生的 `timeout` 之一；墙钟截止、中止与基底死亡在宿主侧观察。
 
 ### 无损 JSON 跨越
 
@@ -79,7 +79,7 @@ The program is the body of an async Python function. Top-level await and return 
 
 ### 镜像对齐
 
-`tests/protocol-mirror.e2e.ts` 启动真实 `python3`，对照 `src/protocol.ts` 断言 `PROTOCOL_FD`／截断标记文本以及 `py/protocol.py` 中每个 `TypedDict` 的必填／可选 wire 字段集，因此字段改名、删除或一侧把另一侧必填的字段变成可选都会使测试失败。字段*类型*不跨语言边界比较；该残留由评审加后端的真实子进程套件（`tests/runtime.spec.ts`）负责。
+`tests/protocol-mirror.e2e.ts` 启动真实 `python3`，对照 `src/protocol.ts` 断言两个协议 fd（`CHILD_TO_HOST_FD`、`HOST_TO_CHILD_FD`）／截断标记文本以及 `py/protocol.py` 中每个 `TypedDict` 的必填／可选 wire 字段集，因此字段改名、删除或一侧把另一侧必填的字段变成可选都会使测试失败。字段*类型*不跨语言边界比较；该残留由评审加后端的真实子进程套件（`tests/runtime.spec.ts`）负责。
 
 ### 源码地图
 
@@ -87,8 +87,8 @@ The program is the body of an async Python function. Top-level await and return 
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`PythonPtcRuntime`——spawn、帧 pump、预算、隔离、拆卸；重新导出协议词汇 |
 | [`src/protocol.ts`](src/protocol.ts) | 宿主侧：帧 codec、不可信帧校验器、无损 JSON 计量器、共享标记文本 |
-| [`py/bootstrap.py`](py/bootstrap.py) | 子进程侧：fd-3 通道、程序执行、binding 分发、账本与结算 |
-| [`py/protocol.py`](py/protocol.py) | Python 侧：`PROTOCOL_FD`、`TypedDict` 帧镜像、`log_truncation_marker` |
+| [`py/bootstrap.py`](py/bootstrap.py) | 子进程侧：fd-3/fd-4 通道、程序执行、binding 分发、账本与结算 |
+| [`py/protocol.py`](py/protocol.py) | Python 侧：`CHILD_TO_HOST_FD`／`HOST_TO_CHILD_FD`、`TypedDict` 帧镜像、`log_truncation_marker` |
 | [`tests/runtime.spec.ts`](tests/runtime.spec.ts) | 真实子进程套件：预算、隔离、敌意帧、名称重绑 |
 | [`tests/protocol-mirror.e2e.ts`](tests/protocol-mirror.e2e.ts) | 对照真实 `python3` 的跨语言镜像测试 |
 

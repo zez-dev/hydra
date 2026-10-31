@@ -1,21 +1,29 @@
 /**
- * Versionless, JSON-lines wire protocol between the Node host and the CPython subprocess. Frames
- * travel on the child's fd 3 (one JSON object per line), leaving stdout/stderr free for the
- * program's own output. Host treats every inbound frame as hostile because model code can post
- * anything through the same fd; the Python bootstrap trusts host replies.
+ * Versionless, JSON-lines wire protocol between the Node host and the CPython subprocess. The
+ * child writes its frames on fd 3 and reads the host's frames on fd 4 (one JSON object per line),
+ * leaving stdout/stderr free for the program's own output. Host treats every inbound frame as
+ * hostile because model code can post anything through the same fd; the Python bootstrap trusts
+ * host replies.
  * @module @deepseek-ai/dsh-experimental-ptc-runtime-python/src/protocol
  */
 
 /**
- * The framed-JSON channel's file descriptor from the child's perspective. The
- * host pins it positionally when it spawns the child (`stdio` index 3, i.e.
- * `['pipe','pipe','pipe','pipe']`), and the Python bootstrap reads the same
- * number from its own `protocol.py`. Exported as the single TS-side source of
- * truth: the host wiring uses it, and the cross-language mirror test asserts the
- * Python constant equals it, so a drift on either side breaks the boot channel
- * loudly rather than silently.
+ * The file descriptor, from the child's perspective, that carries
+ * {@link ChildToHost} frames. The host spawns the child with five `pipe` stdio
+ * entries and reads this one; it never writes to it.
  */
-export const PROTOCOL_FD = 3
+export const CHILD_TO_HOST_FD = 3
+
+/**
+ * The file descriptor, from the child's perspective, that carries the host's
+ * `boot`, `run`, and `reply` frames. The bootstrap never writes to it, and the
+ * host discards anything model code writes there. A host write that fails
+ * because the child exited destroys only this pipe, so frames the child wrote
+ * to {@link CHILD_TO_HOST_FD} before exiting are still read. The Python
+ * bootstrap reads both numbers from its own `protocol.py`, and the
+ * cross-language mirror test asserts they equal these.
+ */
+export const HOST_TO_CHILD_FD = 4
 
 /**
  * One binding namespace declaration inside a {@link BootMessage}. `global` is
@@ -38,7 +46,7 @@ interface ErrorClass {
 }
 
 /**
- * What the host sends immediately after spawn, as the first line on fd 3. The
+ * What the host sends immediately after spawn, as the first line on fd 4. The
  * Python bootstrap reads this, applies resource limits, then waits for the
  * subsequent run frame. Separated from the run so the run message stays
  * pure model input.

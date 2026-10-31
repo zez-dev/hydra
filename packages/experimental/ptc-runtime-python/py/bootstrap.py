@@ -1,11 +1,12 @@
 """CPython bootstrap for dsh-ptc-runtime-python.
 
-Reads a :class:`BootMessage` on fd 3, applies resource limits and log capture,
+Reads a :class:`BootMessage` on fd 4, applies resource limits and log capture,
 reads a :class:`RunMessage`, runs the model program as the body of an async
 function (top-level ``await`` and ``return`` both work; the returned value is
-the completion), and posts a terminal :class:`DoneMessage`. The program calls
-host functions through the ``tools`` (or other namespace) proxy, whose attribute
-and subscript access return awaitables that ride binding messages over fd 3.
+the completion), and posts a terminal :class:`DoneMessage` on fd 3. The program
+calls host functions through the ``tools`` (or other namespace) proxy, whose
+attribute and subscript access return awaitables that post ``call`` frames on
+fd 3 and receive their replies on fd 4.
 
 This module runs under ``python3 -I`` with only ``TMPDIR`` in its environment.
 The trusted stdin loader supplies this module and its ``protocol`` dependency.
@@ -36,9 +37,9 @@ from decimal import Context, Decimal
 _FLOAT_CONTEXT = Context(prec=28)
 from typing import Any
 
-from protocol import PROTOCOL_FD, log_truncation_marker  # noqa: E402
+from protocol import CHILD_TO_HOST_FD, HOST_TO_CHILD_FD, log_truncation_marker  # noqa: E402
 
-# Read size for the async fd-3 reader. One `os.read` returns whatever the pipe
+# Read size for the async fd-4 reader. One `os.read` returns whatever the pipe
 # holds, so this only bounds a single syscall's copy, not a frame: a larger frame
 # simply takes more reads. 64 KiB matches the usual pipe capacity.
 _READ_CHUNK_BYTES = 65536
@@ -637,7 +638,7 @@ def _decode_json_plain(
 
 
 class ProtocolChannel:
-    """Blocking readers and synchronous writers over the fd-3 protocol pipe.
+    """Blocking readers over fd 4 (host frames) and synchronous writers over fd 3.
 
     Writes are unbuffered and go straight to the fd, so ``send_sync`` is safe
     from inside model code (which may run outside an asyncio task) and from
@@ -649,12 +650,13 @@ class ProtocolChannel:
     relied on for framing.
     """
 
-    def __init__(self, fd: int) -> None:
-        self._fd = fd
+    def __init__(self, read_fd: int, write_fd: int) -> None:
+        self._read_fd = read_fd
+        self._write_fd = write_fd
         # Residual bytes read past a frame's newline, shared by the blocking and
         # async readers. Held here, not in the reading coroutine: the reply pump
         # is cancelled once `done` is posted, and read-ahead sitting in a local
-        # would be lost with it. Both readers use `os.read(self._fd, ...)`
+        # would be lost with it. Both readers use `os.read(self._read_fd, ...)`
         # directly, so no buffered file object wraps the fd.
         self._pending = bytearray()
         # Serializes writers: os.write releases the GIL, and a frame larger
@@ -702,7 +704,7 @@ class ProtocolChannel:
                 del self._pending[: newline + 1]
                 return _decode(line.decode("utf-8"))
             scanned = _len(self._pending)
-            chunk = _os_read(self._fd, _read_chunk)
+            chunk = _os_read(self._read_fd, _read_chunk)
             if not chunk:
                 # EOF before a newline: drop the partial line, as the host drops
                 # a frame that never completed.
@@ -756,12 +758,12 @@ class ProtocolChannel:
             ready = loop.create_future()
             # `add_reader` only reports readability; the read itself happens here,
             # and `os.read` returns whatever is buffered without waiting for more.
-            loop.add_reader(self._fd, lambda: ready.done() or ready.set_result(None))
+            loop.add_reader(self._read_fd, lambda: ready.done() or ready.set_result(None))
             try:
                 await ready
             finally:
-                loop.remove_reader(self._fd)
-            chunk = _os_read(self._fd, _read_chunk)
+                loop.remove_reader(self._read_fd)
+            chunk = _os_read(self._read_fd, _read_chunk)
             if not chunk:
                 # EOF. Any partial line is dropped, matching how the host drops a
                 # frame that never completed.
@@ -803,7 +805,7 @@ class ProtocolChannel:
         with self._write_lock:
             view = memoryview(payload)
             while view:
-                view = view[os.write(self._fd, view):]
+                view = view[os.write(self._write_fd, view):]
 
 
 # ---------------------------------------------------------------------------
@@ -1012,7 +1014,7 @@ async def _run(channel: ProtocolChannel) -> None:
     # 1. Boot handshake.
     boot = channel.read_frame()
     if boot is None or boot.get("type") != "boot":
-        raise RuntimeError("bootstrap: expected boot frame on fd 3")
+        raise RuntimeError("bootstrap: expected boot frame on fd 4")
 
     report_cpu_timeout = _make_cpu_timeout_reporter(channel, boot["cpuSeconds"])
 
@@ -1220,7 +1222,7 @@ async def _run(channel: ProtocolChannel) -> None:
     run = channel.read_frame()
     if run is None or run.get("type") != "run":
         reply_task.cancel()
-        raise RuntimeError("bootstrap: expected run frame on fd 3")
+        raise RuntimeError("bootstrap: expected run frame on fd 4")
 
     program: str = run["program"]
 
@@ -1349,7 +1351,7 @@ async def _run(channel: ProtocolChannel) -> None:
             with channel._write_lock:
                 view = _memoryview_local(_fallback_frame_local)
                 while view:
-                    view = view[_os_write_local(channel._fd, view):]
+                    view = view[_os_write_local(channel._write_fd, view):]
 
     max_value_bytes = int(boot["maxValueBytes"])
     done: dict[str, Any] | str
@@ -2133,7 +2135,7 @@ def _make_cpu_timeout_reporter(channel: ProtocolChannel, cpu_seconds: int) -> An
     """
 
     acquire, release = channel._write_lock.acquire, channel._write_lock.release
-    write, set_blocking, view_of, fd = os.write, os.set_blocking, memoryview, channel._fd
+    write, set_blocking, view_of, fd = os.write, os.set_blocking, memoryview, channel._write_fd
     caught = BaseException
     message = (
         "CPU time exhausted (limit at most the configured %ss; "
@@ -2591,7 +2593,7 @@ def _done_with_value(
 
 
 def main() -> None:
-    channel = ProtocolChannel(PROTOCOL_FD)
+    channel = ProtocolChannel(read_fd=HOST_TO_CHILD_FD, write_fd=CHILD_TO_HOST_FD)
     asyncio.run(_run(channel))
 
 

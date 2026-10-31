@@ -3,12 +3,12 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
-import { logTruncationMarker, PROTOCOL_FD, WIRE_FRAME_FIELDS } from '../src/protocol.ts'
+import { CHILD_TO_HOST_FD, HOST_TO_CHILD_FD, logTruncationMarker, WIRE_FRAME_FIELDS } from '../src/protocol.ts'
 
 /**
  * Cross-language mirror check between `src/protocol.ts` and `py/protocol.py`,
  * spawning a real `python3` to read the Python side. Two things are asserted:
- * the runtime surfaces both sides EXECUTE against — `PROTOCOL_FD` and the log
+ * the runtime surfaces both sides EXECUTE against — the two protocol fds and the log
  * truncation marker text, where a drift silently corrupts a live run — and the
  * per-frame wire field sets (required/optional keys of each `TypedDict`), which
  * turns the otherwise review-only shape mirror into an executable check that
@@ -36,23 +36,23 @@ async function hasPython3(): Promise<boolean> {
 const python3Available = await hasPython3()
 
 describe.skipIf(!python3Available)('protocol.py mirrors protocol.ts at runtime', () => {
-  it('agrees on PROTOCOL_FD and the log truncation marker across byte budgets', async () => {
+  it('agrees on the protocol fds and the log truncation marker across byte budgets', async () => {
     const budgets = [1, 65536, 1048576]
     const probe = [
       'import json, sys',
       `sys.path.insert(0, ${JSON.stringify(pyDir)})`,
-      'from protocol import PROTOCOL_FD, log_truncation_marker',
+      'from protocol import CHILD_TO_HOST_FD, HOST_TO_CHILD_FD, log_truncation_marker',
       `budgets = ${JSON.stringify(budgets)}`,
       'print(json.dumps({',
-      '  "fd": PROTOCOL_FD,',
+      '  "fds": [CHILD_TO_HOST_FD, HOST_TO_CHILD_FD],',
       '  "markers": [log_truncation_marker(b) for b in budgets],',
       '}))',
     ].join('\n')
     const { stdout } = await execFileAsync('python3', [...python3Flags, '-c', probe])
-    const seen = JSON.parse(stdout) as { fd: number; markers: string[] }
-    // Assert against the TS-side PROTOCOL_FD export (the value the host wires),
-    // not a bare literal, so a drift on either side of the wire is caught here.
-    expect(seen.fd).toBe(PROTOCOL_FD)
+    const seen = JSON.parse(stdout) as { fds: number[]; markers: string[] }
+    // Assert against the TS-side fd exports (the values the host wires), not
+    // bare literals, so a drift on either side of the wire is caught here.
+    expect(seen.fds).toEqual([CHILD_TO_HOST_FD, HOST_TO_CHILD_FD])
     expect(seen.markers).toEqual(budgets.map(budget => logTruncationMarker(budget)))
   })
 

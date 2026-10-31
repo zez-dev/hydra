@@ -28,7 +28,7 @@ These three packages together provide program execution; each README describes w
 |---|---|---|
 | [`ptc-runtime/`](ptc-runtime/README.md) | Defines what a PTC runtime does: run one program against host-provided bindings and report what it printed and returned | `ctx.ptcRuntime` |
 | [`ptc-runtime-node/`](ptc-runtime-node/README.md) | Evaluates TypeScript as async function bodies, REPL statements or VM Scripts, with file policy and optional retained state | registers `ctx.ptcRuntime` |
-| [`experimental/ptc-runtime-python/`](../experimental/ptc-runtime-python/README.md) | The experimental Python backend: owns the fd-3 wire protocol between a Node host and a CPython subprocess and the CPython runtime implementation | — |
+| [`experimental/ptc-runtime-python/`](../experimental/ptc-runtime-python/README.md) | The experimental Python backend: owns the fd-3/fd-4 wire protocol between a Node host and a CPython subprocess and the CPython runtime implementation | — |
 
 -----
 

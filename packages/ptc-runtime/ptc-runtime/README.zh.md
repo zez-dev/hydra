@@ -104,7 +104,7 @@ binding-global 与 error-class 名称是语言可移植的：必须匹配标识�
 
 - [PTC mode Agent Note](../../../.agents/notes/implemented/feature/2026-06-15-ptc.zh.md)——工具注册表如何消费 `ctx.ptcRuntime` 并把 `run_code` 呈现给模型。
 - [Node 进程后端](../ptc-runtime-node/README.zh.md)——已发布的 TypeScript 执行后端。
-- [实验性 Python 后端](../../experimental/ptc-runtime-python/README.zh.md)——私有的 CPython 子进程提供方及其 fd-3 协议。
+- [实验性 Python 后端](../../experimental/ptc-runtime-python/README.zh.md)——私有的 CPython 子进程提供方及其 fd-3/fd-4 协议。
 - [PTC 运行时子系统参考](../../../docs/subsystems/ptc-runtime.zh.md)——请求／结果词汇、绑定与 `ctx.ptcRuntime` 的 cordis 接口面。
 - [能力 seam](../../../.agents/notes/implemented/architecture/2026-06-13-capability-seams.zh.md)——Service Definition / Service Provider / Consumer 拆分。
 

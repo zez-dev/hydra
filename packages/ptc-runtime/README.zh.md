@@ -28,7 +28,7 @@ kind: "package-group"
 |---|---|---|
 | [`ptc-runtime/`](ptc-runtime/README.zh.md) | 定义 PTC 运行时做什么：针对宿主提供的绑定运行一个程序，并报告其打印和返回的内容 | `ctx.ptcRuntime` |
 | [`ptc-runtime-node/`](ptc-runtime-node/README.zh.md) | 将 TypeScript 求值为异步函数体、REPL 语句或 VM Script，遵循文件策略并可选保留状态 | 注册 `ctx.ptcRuntime` |
-| [`experimental/ptc-runtime-python/`](../experimental/ptc-runtime-python/README.zh.md) | 实验性 Python 后端：负责 Node 宿主与 CPython 子进程之间的 fd-3 协议，以及 CPython 运行时实现 | — |
+| [`experimental/ptc-runtime-python/`](../experimental/ptc-runtime-python/README.zh.md) | 实验性 Python 后端：负责 Node 宿主与 CPython 子进程之间的 fd-3/fd-4 协议，以及 CPython 运行时实现 | — |
 
 -----
 

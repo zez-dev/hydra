@@ -1,11 +1,12 @@
 /**
  * CPython subprocess PTC runtime: a fresh `python3` process runs each model program under an
- * asyncio event loop with top-level ``await``. Binding calls travel on fd 3 as JSON-lines,
- * leaving stdout/stderr free for the program's own output. Direct file effects follow the
- * shared sandbox policy; CPU, address-space, output, and wall-clock budgets bound each run.
- * Process-group teardown sends SIGTERM followed by SIGKILL after the configured grace.
+ * asyncio event loop with top-level ``await``. Binding calls travel on fd 3 and their replies on
+ * fd 4 as JSON-lines, leaving stdout/stderr free for the program's own output. Direct file
+ * effects follow the shared sandbox policy; CPU, address-space, output, and wall-clock budgets
+ * bound each run. Process-group teardown sends SIGTERM followed by SIGKILL after the configured
+ * grace.
  *
- * The package also owns the versionless fd-3 wire protocol itself; its host-side codec and
+ * The package also owns the versionless fd-3/fd-4 wire protocol itself; its host-side codec and
  * hostile-frame validators are re-exported so every consumer of the wire shares one vocabulary.
  * @module @deepseek-ai/dsh-experimental-ptc-runtime-python
  */
@@ -27,9 +28,9 @@ import type { ConfinedArgv, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { bootstrapInput, PYTHON_BOOTSTRAP_LOADER } from './launch.ts'
 import type { BootMessage, ChildToHost, ReplyMessage } from './protocol.ts'
-import { checkDoneValue, encodeJsonPlain, hasUnsafeIntegerToken, logTruncationMarker, validateChildFrame } from './protocol.ts'
+import { CHILD_TO_HOST_FD, checkDoneValue, encodeJsonPlain, hasUnsafeIntegerToken, HOST_TO_CHILD_FD, logTruncationMarker, validateChildFrame } from './protocol.ts'
 
-// Re-export the fd-3 wire vocabulary so the runtime and its tests share one
+// Re-export the wire vocabulary so the runtime and its tests share one
 // import surface; the protocol layer owns the definitions.
 export type { BootMessage, ChildToHost, ReplyMessage } from './protocol.ts'
 export {
@@ -164,7 +165,7 @@ const FRAME_PARSE_CAP_BYTES = 64 * 1024 * 1024
 const MAX_PENDING_CHUNKS = 1024
 
 /**
- * Replies the host retains before fd 3 accepts them. The drain loop writes one
+ * Replies the host retains before fd 4 accepts them. The drain loop writes one
  * reply per iteration and waits for `drain` when the pipe is full; a child
  * that never reads its replies (hostile or wedged) leaves the pipe full, so
  * every call frame it keeps sending adds a reply the drain cannot write, and
@@ -776,13 +777,13 @@ export class PythonPtcRuntime extends PtcRuntime {
   constructor(ctx: Context, config: Config) {
     super(ctx)
     // Reject at load on Windows: the bootstrap imports the POSIX-only `resource`
-    // module for RLIMIT_CPU/RLIMIT_AS, spawns with a positional fd 3, and
+    // module for RLIMIT_CPU/RLIMIT_AS, spawns with positional fds 3 and 4, and
     // terminates via negative-PID process-group signals — none of which exist
     // on Windows. Registering ctx.ptcRuntime there would let assembly succeed
     // and defer the failure to the first run. The asymmetry with the worker
     // backend is intentional: that backend is cross-platform; this one is not.
     if (process.platform === 'win32') {
-      throw new Error('dsh-ptc-runtime-python: this backend requires a Unix platform (POSIX rlimits, fd-3 stdio, process-group signals); it cannot run on Windows')
+      throw new Error('dsh-ptc-runtime-python: this backend requires a Unix platform (POSIX rlimits, fd-3/fd-4 stdio, process-group signals); it cannot run on Windows')
     }
     this.config = config as ResolvedConfig
     for (const [key, value] of Object.entries(this.config)) {
@@ -1160,18 +1161,23 @@ export class PythonPtcRuntime extends PtcRuntime {
     complete: () => void,
   ): Promise<PtcRunResult> {
     let child: ChildProcessWithoutNullStreams
-    let proto: Duplex | null
+    let childFrames: Duplex | null
+    let hostFrames: Duplex | null
     try {
       child = spawn(argv[0], argv.slice(1), {
         cwd: request.cwd,
         env: pythonEnvironment(),
         detached: true, // Own the process group used by termination and exit observation.
-        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+        // One pipe per direction: a host write that fails because the child
+        // exited destroys only fd 4, so frames the child wrote to fd 3 before
+        // exiting are still read.
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe', 'pipe'],
       })
-      proto = child.stdio[3] as Duplex | null
-      /* v8 ignore next 3 -- Node's extra-stdio typing includes null; four pipe entries supply fd 3. */
-      if (proto === null) {
-        throw new Error('dsh-ptc-runtime-python: python subprocess spawned without a fd-3 pipe')
+      childFrames = child.stdio[CHILD_TO_HOST_FD] as Duplex | null
+      hostFrames = child.stdio[HOST_TO_CHILD_FD] as Duplex | null
+      /* v8 ignore next 3 -- Node's extra-stdio typing includes null; five pipe entries supply fds 3 and 4. */
+      if (childFrames === null || hostFrames === null) {
+        throw new Error('dsh-ptc-runtime-python: python subprocess spawned without its fd-3 and fd-4 pipes')
       }
     } catch (error: unknown) {
       complete()
@@ -1483,7 +1489,7 @@ export class PythonPtcRuntime extends PtcRuntime {
       // the two together are the unframed buffer, and `pendingBytes` counts both.
       let sealedBlocks: Buffer[] = []
       let pendingBytes = 0
-      proto.on('data', (chunk: Buffer) => {
+      childFrames.on('data', (chunk: Buffer) => {
         // Once settled, stop accumulating: a hostile child that keeps flooding
         // fd 3 between finish() and close must not regrow the host buffer.
         /* v8 ignore next -- post-settlement data needs the child to outrace close after we decided. */
@@ -1938,14 +1944,14 @@ export class PythonPtcRuntime extends PtcRuntime {
       // the run.
       //
       // Replies are encoded and written ONE AT A TIME, waiting for `drain`
-      // whenever fd 3's buffer is full. Binding resolution carries no
+      // whenever fd 4's buffer is full. Binding resolution carries no
       // seam-level byte cap, so a program that resolves several large values in
       // one `asyncio.gather` round would otherwise encode them all in the same
       // turn and queue every frame in the writable stream's buffer -- measured
       // to exhaust a 256 MiB Node heap, which kills the whole host process
       // rather than failing this one run. Pacing changes no model-visible
       // behavior: the child matches each reply to its `call` by id from a pump
-      // that reads fd 3 continuously, so arrival order was never observable,
+      // that reads fd 4 continuously, so arrival order was never observable,
       // and the bindings themselves still run concurrently. Only the host's peak
       // memory and the flush timing change.
       const replyQueue: (ReplyMessage | undefined)[] = []
@@ -1968,7 +1974,7 @@ export class PythonPtcRuntime extends PtcRuntime {
       // of one macrotask (see the data handler).
       let postBatchCheckPending = false
       let draining = false
-      // Resolve when fd 3 can take another frame, OR when it is gone: a pipe
+      // Resolve when fd 4 can take another frame, OR when it is gone: a pipe
       // destroyed under the drain (child exited, close-deadline teardown) never
       // emits 'drain' again, so waiting on that event alone would hang the
       // drain forever — `draining` stays true and the unconsumed queue is
@@ -1977,14 +1983,14 @@ export class PythonPtcRuntime extends PtcRuntime {
       // behind.
       const waitForDrain = (): Promise<void> => new Promise<void>((resolvePromise) => {
         const finish = (): void => {
-          proto.off('drain', finish)
-          proto.off('close', finish)
-          proto.off('error', finish)
+          hostFrames.off('drain', finish)
+          hostFrames.off('close', finish)
+          hostFrames.off('error', finish)
           resolvePromise()
         }
-        proto.once('drain', finish)
-        proto.once('close', finish)
-        proto.once('error', finish)
+        hostFrames.once('drain', finish)
+        hostFrames.once('close', finish)
+        hostFrames.once('error', finish)
       })
       const drainReplies = async (): Promise<void> => {
         if (draining) return
@@ -1999,9 +2005,9 @@ export class PythonPtcRuntime extends PtcRuntime {
             // A pipe destroyed under us (child exited, close deadline) will
             // never emit 'drain' again; short-circuit before the write so the
             // remaining frames are dropped by the `finally` below.
-            if (proto.destroyed) break
+            if (hostFrames.destroyed) break
             // Read by index, not `shift()`: a large `asyncio.gather` of wide
-            // bindings awaiting fd 3's `drain` can queue many frames, and each
+            // bindings awaiting fd 4's `drain` can queue many frames, and each
             // `shift()` re-slices the remaining array (O(n) per pop, O(n²) over
             // the whole drain). A head cursor keeps the cost linear; the `finally`
             // below discards everything consumed once the drain ends. The consumed
@@ -2029,7 +2035,7 @@ export class PythonPtcRuntime extends PtcRuntime {
             // Encode inside the loop, not up front: a queued reply the run no
             // longer needs is dropped by the `settled` check above without ever
             // being serialized.
-            if (!proto.write(`${encodeJsonPlain(payload)}\n`)) {
+            if (!hostFrames.write(`${encodeJsonPlain(payload)}\n`)) {
               await waitForDrain()
             }
           }
@@ -2045,14 +2051,14 @@ export class PythonPtcRuntime extends PtcRuntime {
       const sendReply = (payload: ReplyMessage): void => {
         /* v8 ignore next -- `settled` covers a race where the child exits between decision and write. */
         if (settled) return
-        // A child that stops reading fd 3 leaves the drain loop blocked on
+        // A child that stops reading fd 4 leaves the drain loop blocked on
         // `drain` forever while its call frames keep resolving into replies:
         // the backlog would grow without bound until the wall clock, pinning
         // every binding result the child provokes. Cap the retained backlog and
         // settle the run as a worker-exit, the same hostile-peer bound the
         // frame cap applies to inbound bytes.
         if (pendingReplies >= MAX_PENDING_REPLIES) {
-          finish({ error: { kind: 'worker-exit', message: `reply queue exceeded ${MAX_PENDING_REPLIES} pending frames on fd 3 (the child stopped consuming its replies)` } })
+          finish({ error: { kind: 'worker-exit', message: `reply queue exceeded ${MAX_PENDING_REPLIES} pending frames on fd 4 (the child stopped consuming its replies)` } })
           return
         }
         pendingReplies += 1
@@ -2068,7 +2074,7 @@ export class PythonPtcRuntime extends PtcRuntime {
       // a descendant with `os.setsid()`/`start_new_session=True` moves it into a
       // fresh process group, so the SIGTERM/SIGKILL aimed at the child's group
       // (`kill(-pid)`) never reaches it. If that orphan inherited stdout/stderr/
-      // fd 3 and outlives the run, those pipes stay open and `close` never fires
+      // fd 3/fd 4 and outlives the run, those pipes stay open and `close` never fires
       // — leaving run() (and a teardown awaiting `finished`) hung indefinitely.
       // finish() arms this deadline; when it fires we detach our stream handles
       // and settle on the already-decided result regardless of the orphan.
@@ -2280,7 +2286,8 @@ export class PythonPtcRuntime extends PtcRuntime {
           flushStray(strayOut)
           flushStray(strayErr)
           child.stdin.destroy()
-          proto.destroy()
+          childFrames.destroy()
+          hostFrames.destroy()
           child.stdout.destroy()
           child.stderr.destroy()
           settle(result)
@@ -2315,13 +2322,17 @@ export class PythonPtcRuntime extends PtcRuntime {
         settle(decided)
       })
 
-      // Fd-3 and the stdout/stderr pipes emit `error` on early child death
+      // Fd 3, fd 4, and the stdout/stderr pipes emit `error` on early child death
       // (ECONNRESET/EPIPE); swallow them so they do not become uncaught. The
       // authoritative failure signal is `child.on('close')` above.
       const silenceStreamError = (): void => {}
-      proto.on('error', silenceStreamError)
+      childFrames.on('error', silenceStreamError)
+      hostFrames.on('error', silenceStreamError)
       child.stdout.on('error', silenceStreamError)
       child.stderr.on('error', silenceStreamError)
+      // The host never reads fd 4: resume() discards anything the child writes
+      // there, so the pipe still reaches end-of-file and closes when the child exits.
+      hostFrames.resume()
 
       const onAbort = (): void => {
         finish({ error: request.signal.reason as PtcRunFailure })
@@ -2359,7 +2370,7 @@ export class PythonPtcRuntime extends PtcRuntime {
       // the run frame. The ack handler below writes it.
       let runSent = false
       try {
-        proto.write(`${JSON.stringify(boot)}\n`)
+        hostFrames.write(`${JSON.stringify(boot)}\n`)
       } catch (error: unknown) {
         finish({ error: { kind: 'worker-exit', message: `failed to boot python subprocess: ${messageOf(error)}` } })
         return
@@ -2369,7 +2380,7 @@ export class PythonPtcRuntime extends PtcRuntime {
         if (runSent) return
         runSent = true
         try {
-          proto.write(`${JSON.stringify({ type: 'run', program: request.program })}\n`)
+          hostFrames.write(`${JSON.stringify({ type: 'run', program: request.program })}\n`)
         } catch (error: unknown) {
           /* v8 ignore next -- the child exited between its ack and this write; the run settles as worker-exit. */
           finish({ error: { kind: 'worker-exit', message: `failed to boot python subprocess: ${messageOf(error)}` } })
