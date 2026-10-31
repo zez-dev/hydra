@@ -174,6 +174,7 @@ These limits tell you what to expect in unusual setups — a source checkout, SS
 - **SSH sessions keep the URL but skip the browser handoff** — without an advertised root the printed URL names the remote host's bind-address endpoint (loopback for a loopback bind); the SSH client or editor must expose and open the local forwarded address.
 - **`BROWSER` overrides only come from the environment** — a discovered `.env` cannot set `BROWSER`; only an inherited value can choose the executable for the automatic handoff.
 - **Binding all network interfaces is not supported** — a wildcard `--host`, including the IPv4-mapped forms Linux reads as IPv4 any, is rejected at startup for safety; bind one concrete IPv4 or IPv6 address of a local interface instead.
+- **The browser-only preview serves no Claude model** — the packed Worker deployment of this profile carries no pi-ai runtime, so the Anthropic route shows its catalog error on the Models page and the first-run key step still asks for an Anthropic key the Worker cannot serve.
 
 <a id="dev-note"></a>
 ### Dev Note
