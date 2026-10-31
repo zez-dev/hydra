@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-notify",
   "description": "Outbound notifications for DeepSeek Harness: goal blocks and completions, filed tickets, idle QA loops, and errors posted to webhook, Telegram, and Discord channels",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

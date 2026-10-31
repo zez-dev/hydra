@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-api-usage-controller",
   "description": "Usage Remote: the cross-session token-usage report — overall totals, the per-day series, and the per-model split — for the Web dashboard",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-goal-resume-on-open",
   "description": "Re-arms an active goal when its session is resumed, by policy: ask a human through the approval service or always",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

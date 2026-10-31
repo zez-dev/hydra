@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-tool-market",
   "description": "Model-facing market_quote, market_history, market_profile and market_filings tools over the DeepSeek Harness market-data seam, plus the /market command",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

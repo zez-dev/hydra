@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import {
-  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError, FIXES, HYDRA_VERSION, renderReport,
+  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError,
+  DEEPSEEK_HARNESS_VERSION, FIXES, renderReport,
   summarize,
 } from '@deepseek-ai/dsh-doctor'
 import type { DoctorEnvironment, DoctorRow } from '@deepseek-ai/dsh-doctor'
@@ -17,7 +18,7 @@ function environment(overrides: Partial<DoctorEnvironment> = {}): DoctorEnvironm
     platform: 'linux',
     arch: 'x64',
     nodeVersion: 'v24.0.0',
-    harnessVersion: '0.1.6-alpha.2',
+    hydraVersion: '0.3.0',
     env: { DSH_HOME: '/home/u/.dsh' },
     exists: path => files.has(path),
     writable: path => files.has(path),
@@ -40,7 +41,7 @@ describe('version row', () => {
   it('names the Hydra release, the harness release it is based on, Node, and the platform', () => {
     expect(checkVersion(environment({ platform: 'darwin', arch: 'arm64' }))).toEqual([{
       section: 'about', check: 'version', status: 'ok',
-      detail: `Hydra ${HYDRA_VERSION} on DeepSeek Harness 0.1.6-alpha.2, Node v24.0.0, darwin-arm64`,
+      detail: `Hydra 0.3.0 on DeepSeek Harness ${DEEPSEEK_HARNESS_VERSION}, Node v24.0.0, darwin-arm64`,
     }])
   })
 })

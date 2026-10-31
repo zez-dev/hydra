@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-api-learning-controller",
   "description": "Learning Remote: list memory candidates and recalled entries, review, forget, and promote them to skills",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

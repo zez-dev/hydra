@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-auto-continue",
   "description": "Auto-continue guard plugin: steers a continuation when a turn stops at the output-token limit",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

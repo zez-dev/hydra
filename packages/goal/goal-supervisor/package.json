@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-goal-supervisor",
   "description": "Resumes stored sessions with active goals at boot under a concurrency cap and a daily round budget, and the /goals command",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

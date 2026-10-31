@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-off-peak",
   "description": "Defer goal rounds and queued tasks into configured off-peak windows: a durable queue, a window drainer with an optional cheaper route, /offpeak, and the off_peak tool",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

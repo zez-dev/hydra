@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-learning",
   "description": "Learning tab in Web Plugins settings: review memory candidates, forget remembered entries, promote one to a skill",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

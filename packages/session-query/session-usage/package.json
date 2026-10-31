@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-session-usage",
   "description": "Cross-session token usage for DeepSeek Harness: /usage totals, a per-model table and a 12-week day grid, derived from the session logs with a per-session fold cache",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

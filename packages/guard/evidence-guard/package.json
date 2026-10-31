@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-evidence-guard",
   "description": "Evidence guard plugins: an evidence standard in every system prompt and an end-of-turn review of partial reads, unchecked changes, and unverified claims",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },
@@ -20,7 +20,7 @@
     },
     "./review": {
       "types": "./lib/types/review.d.ts",
-      "default": "./lib/review.js"
+      "default": "./lib/types/review.js"
     },
     "./src/*": "./src/*",
     "./package.json": "./package.json",
@@ -31,7 +31,7 @@
     "locale/*.json",
     "locale/review/*.json",
     "lib/index.js",
-    "lib/review.js",
+    "lib/types/**/*.js",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-market-data",
   "description": "Market-data capability seam for DeepSeek Harness: quotes, daily history, issuer profiles and SEC filings behind a provider registry, with a keyless Stooq and EDGAR provider",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

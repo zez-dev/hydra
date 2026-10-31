@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-spend-guard",
   "description": "Per-session and per-day token budgets for DeepSeek Harness: pause the goal or stop the turn when a budget is crossed, /spend totals, and optional notifications",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

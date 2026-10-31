@@ -68,8 +68,8 @@ export interface DoctorEnvironment {
   readonly arch: string
   /** The running Node.js version, such as `v24.1.0`. */
   readonly nodeVersion: string
-  /** Version of the DeepSeek Harness release this build is based on, read from the package manifest. */
-  readonly harnessVersion: string
+  /** Hydra's release version, read from the package manifest. */
+  readonly hydraVersion: string
   readonly env: Readonly<Record<string, string | undefined>>
   /** Whether a path exists. */
   exists(path: string): boolean

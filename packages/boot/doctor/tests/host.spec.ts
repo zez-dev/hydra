@@ -55,7 +55,7 @@ describe('the production environment', () => {
     expect(host.platform).toBe(process.platform)
     expect(host.arch).toBe(process.arch)
     expect(host.nodeVersion).toBe(process.version)
-    expect(host.harnessVersion).toBe((JSON.parse(await readFile(join(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version)
+    expect(host.hydraVersion).toBe((JSON.parse(await readFile(join(import.meta.dirname, '../package.json'), 'utf8')) as { version: string }).version)
     expect(host.env).toBe(process.env)
     expect(host.exists(file)).toBe(true)
     expect(host.exists(missing)).toBe(false)

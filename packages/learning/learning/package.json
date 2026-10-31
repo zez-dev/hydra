@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-learning",
   "description": "Learning growth for DeepSeek Harness: extracts reusable facts and shortcuts from finished turns into memory candidates, and the /learn command that approves, rejects, or promotes them to skills",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

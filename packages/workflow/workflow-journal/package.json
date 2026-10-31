@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-workflow-journal",
   "description": "Durable workflow-run journal for DeepSeek Harness: records settled agent() calls so a resumed run replays them",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

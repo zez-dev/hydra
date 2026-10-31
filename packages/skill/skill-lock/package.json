@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-skill-lock",
   "description": "Skill lockfile for DeepSeek Harness: records trusted skill content and reports drift",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

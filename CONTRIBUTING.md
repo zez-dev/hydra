@@ -40,11 +40,11 @@ The `master` branch mirrors DeepSeek Harness; `main` is Hydra.
 
 1. Bring `master` up to date: `gh repo sync zez-dev/hydra --branch master`, or **Sync fork** on GitHub while viewing `master`.
 2. On a new branch from `main`, merge `master` and resolve the conflicts. Regenerate what the checks name as stale; `pnpm run check:ci:static` lists every generated file that is out of date. Translation pairing is expected to fail, because Hydra's own README lines are English-only.
-3. Set the `version` of every Hydra-only package to the upstream release: `/doctor` reports its own package version as the DeepSeek Harness version. If the merge took upstream's PWA icons, redraw them from Hydra's `apps/web/public/favicon.svg` with `pnpm -C apps/web run render:app-icons`.
+3. Keep Hydra's version in every package manifest, resolving `version` conflicts in favor of `main`, and set `DEEPSEEK_HARNESS_VERSION` in [packages/boot/doctor/src/checks.ts](packages/boot/doctor/src/checks.ts) to the upstream release: `/doctor` reports Hydra's version from the manifests and the DeepSeek Harness version from that constant. If the merge took upstream's PWA icons, redraw them from Hydra's `apps/web/public/favicon.svg` with `pnpm -C apps/web run render:app-icons`.
 4. Open a pull request. The Hydra check must pass before it is merged.
 5. If the merge added a workflow under `.github/workflows/`, disable it under **Actions** (or with `gh workflow disable`): only `hydra-check.yml` should run here, because upstream's workflows need DeepSeek's runners and secrets.
 
 ### Publish a release
 
-1. Raise `HYDRA_VERSION` in [packages/boot/doctor/src/checks.ts](packages/boot/doctor/src/checks.ts); `/doctor` prints it first.
+1. On a new branch from `main`, run `pnpm run release:dsh <version>`: it sets the version of every package manifest, which `/doctor`, the CLI, and the desktop app report, and commits the change.
 2. Merge that change, then tag the merge with the same version (`v<version>`) and publish release notes that list what changed and the known limits.

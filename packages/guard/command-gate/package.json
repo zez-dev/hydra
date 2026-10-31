@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-command-gate",
   "description": "Command-gate guard plugin: classifies shell argv and blocks destructive commands before they execute",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-memory",
   "description": "Durable learned memory for DeepSeek Harness: a storage-domain store, digest-stable recall injection, the model-facing memory tool, and the /memory command",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },
