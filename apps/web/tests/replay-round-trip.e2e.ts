@@ -236,7 +236,7 @@ describe('web e2e: fresh round trip through the real assembly', () => {
       .flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
     expect(userText.some(text => text.includes(`Current working directory: ${JSON.stringify(cwd)}.`))).toBe(true)
     expect(system).not.toContain(scaffold.baseUrl)
-    expect(userText.some(text => text.includes(`Current DeepSeek Harness Web GUI URL: ${JSON.stringify(scaffold.baseUrl)}.`))).toBe(true)
+    expect(userText.some(text => text.includes(`Current Hydra Web GUI URL: ${JSON.stringify(scaffold.baseUrl)}.`))).toBe(true)
     const suffix = paragraphs.slice(-2).join('\n\n')
       .split(REPO_ROOT).join('{{sourceRoot}}')
       .split(join(scaffold.workspaceCwd, 'workspace')).join('{{cwd}}')

@@ -478,7 +478,7 @@ describe('dsh web keyless CLI smoke', () => {
       expect(captured.messages?.filter(message => message.role === 'user')
         .flatMap(message => message.content ?? [])
         .some(block => block.type === 'text'
-          && block.text?.includes(`Current DeepSeek Harness Web GUI URL: ${JSON.stringify(new URL(baseUrl).origin)}.`)))
+          && block.text?.includes(`Current Hydra Web GUI URL: ${JSON.stringify(new URL(baseUrl).origin)}.`)))
         .toBe(true)
       expect(workspaceMessage).toMatchInlineSnapshot(`
         {

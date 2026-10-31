@@ -1,14 +1,20 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
+import * as HarnessDevContext from '@deepseek-ai/dsh-harness-dev-context'
 import { parseSessionLog, prepareSessionSnapshotFixtureForComparison } from '@deepseek-ai/dsh-llm-replay'
+import { renderContextSnapshot } from '@deepseek-ai/dsh-system-prompt'
 import {
   assertFixtureInventory,
+  normalizeWebSessionVolatiles,
   parseSeedFixture,
   recordedSessionFixturePath,
   selectedSessionFixture,
 } from './scaffold.ts'
+import { REPO_ROOT } from './support.ts'
 
 const roots: string[] = []
 
@@ -40,6 +46,30 @@ describe('Web seed stream timing', () => {
       previousEnd = 'time' in record ? record.time : record.time0 + record.dt.reduce((total, delta) => total + delta, 0)
     }
     expect(previousEnd).toBeGreaterThan(0)
+  })
+})
+
+describe('Web session normalization', () => {
+  it('tokenizes the checkout path and Web GUI URL that the runtime context reports', async () => {
+    const ctx = new Context()
+    onTestFinished(() => ctx.fiber.dispose())
+    const webUrl = 'http://127.0.0.1:4567'
+    ctx.provide('webApp', { getAdvertisedUrl: () => webUrl } satisfies Context['webApp'])
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(HarnessDevContext)
+    const reported = renderContextSnapshot(await ctx.systemPrompt.assemble())
+    expect(reported).toContain(JSON.stringify(REPO_ROOT))
+    expect(reported).toContain(JSON.stringify(webUrl))
+
+    const line = normalizeWebSessionVolatiles(JSON.stringify({
+      type: 'user/message', data: { content: [{ type: 'text', text: reported }] },
+    }))
+    const normalized = (JSON.parse(line) as { data: { content: [{ text: string }] } }).data.content[0].text
+
+    expect(normalized).not.toContain(JSON.stringify(REPO_ROOT))
+    expect(normalized).not.toContain(JSON.stringify(webUrl))
+    expect(normalized).toContain('"{{sourceRoot}}"')
+    expect(normalized).toContain('"{{webUrl}}"')
   })
 })
 
