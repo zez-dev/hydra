@@ -46,6 +46,22 @@ export interface DesktopElectronBuilderConfig {
       readonly signingHashAlgorithms: readonly string[]
     }
   }
+  readonly linux: {
+    readonly icon: string
+    readonly category: 'Development'
+    readonly executableName: 'hydra'
+    readonly maintainer: string
+    readonly vendor: 'Hydra'
+    readonly synopsis: string
+    readonly description: string
+    readonly target: readonly ['AppImage', 'deb']
+  }
+  readonly deb: {
+    readonly packageName: 'hydra'
+  }
+  readonly toolsets: {
+    readonly appimage: '1.0.3'
+  }
   readonly nsis: {
     readonly uninstallDisplayName: '${productName}'
     readonly include: string

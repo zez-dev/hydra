@@ -1,5 +1,8 @@
 import type { DesktopAutoUpdateTarget } from './desktop-auto-update-environment.mjs'
 
+/** A target the packager builds: every auto-update target, plus Linux, which has no update feed. */
+export type DesktopBuildTarget = DesktopAutoUpdateTarget | 'linux-x64'
+
 /** Mutable target directories plus shared download and package caches. */
 export interface DesktopTargetBuildPaths {
   readonly root: string
@@ -29,7 +32,7 @@ export function resolveDesktopBuildTarget(
   env?: NodeJS.ProcessEnv,
   hostPlatform?: NodeJS.Platform,
   hostArch?: string,
-): DesktopAutoUpdateTarget
+): DesktopBuildTarget
 
 /**
  * Return the mutable preparation and artifact directories owned by one release target.
@@ -37,7 +40,7 @@ export function resolveDesktopBuildTarget(
  * @param environment - Packaging environment with an optional absolute cache directory.
  * @returns Target paths plus shared download and package caches.
  */
-export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, environment?: NodeJS.ProcessEnv): DesktopTargetBuildPaths
+export function desktopTargetBuildPaths(target: DesktopBuildTarget, environment?: NodeJS.ProcessEnv): DesktopTargetBuildPaths
 
 /**
  * Return the platform and architecture of the payload one release target prepares.
@@ -47,6 +50,15 @@ export function desktopTargetBuildPaths(target: DesktopAutoUpdateTarget, environ
  */
 export function desktopTargetPlatform(target: DesktopAutoUpdateTarget): {
   readonly platform: 'darwin' | 'win32'
+  readonly arch: 'arm64' | 'x64'
+}
+/**
+ * Return the platform and architecture of the payload one build target prepares, Linux included.
+ * @param target - Supported Desktop build target name.
+ * @returns Platform and architecture of the prepared payload.
+ */
+export function desktopTargetPlatform(target: DesktopBuildTarget): {
+  readonly platform: 'darwin' | 'win32' | 'linux'
   readonly arch: 'arm64' | 'x64'
 }
 
@@ -86,3 +98,11 @@ export function desktopArtifactOutput(
   paths: Pick<DesktopTargetBuildPaths, 'artifacts' | 'unsignedArtifacts' | 'unnotarizedArtifacts'>,
   mode: { unsigned: boolean, skipNotarization: boolean },
 ): { directory: string, suffix: string }
+
+/**
+ * Locate the Electron executable inside an extracted Electron distribution.
+ * @param electronDirectory - Directory the distribution was extracted to.
+ * @param platform - Platform the distribution targets.
+ * @returns Path of the executable, which also runs as Node with ELECTRON_RUN_AS_NODE.
+ */
+export function electronExecutablePath(electronDirectory: string, platform: NodeJS.Platform): string

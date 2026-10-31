@@ -19,6 +19,7 @@ Build Desktop installers locally or through Windows or macOS Actions, choose dep
 - [macOS self-hosted packaging](#macos-actions)
 - [Unsigned Windows test installer](#unsigned-windows-test-installer)
 - [Local macOS DMG without release signing](#local-macos-dmg-without-release-signing)
+- [Linux AppImage and .deb](#linux-appimage-and-deb)
 - [macOS release signing and diagnostics](#macos-release-signing)
 - [Directory builds and preparation](#directory-and-preparation)
 - [Local Official bundles from a loopback registry](#local-official-bundles-from-a-loopback-registry)
@@ -176,6 +177,18 @@ pnpm run package:desktop:mac:x64:unsigned
 Add `--check` to validate local configuration and tools without building, or `--dir` to stop at the unpacked application. The DMG is `apps/desktop/.desktop-build/targets/<target>/unsigned-artifacts/hydra-<version>-mac-<arch>-unsigned.dmg`. After all checks pass, the command prints `DMG:` followed by its absolute path. Open it and copy the application to a local test directory.
 
 These commands ignore `.env.macos` and inherited release settings, use `com.hydra.harness` as the app ID, and omit automatic-update and mandatory-update configuration. Build tools, standard network proxies, and `DSH_DESKTOP_NPM_REGISTRY` remain available from the shell. They skip Developer ID signing, Apple notarization, temporary signing keychains, and notarization proxy changes. Electron receives a local ad-hoc signature without certificates so the modified executable can run; the DMG is unsigned. Both preparation and the assembled application still run runtime integrity and smoke checks. Local builds omit update feeds, ZIPs, and release completion records, and the upload commands cannot publish them. macOS may require approval in System Settings → Privacy & Security to open an unnotarized application.
+
+<a id="linux-appimage-and-deb"></a>
+
+## Linux AppImage and .deb
+
+Linux x64 builds are unsigned and run only on a Linux x64 host. After `pnpm install` and `pnpm run build:native-system`, run one command from the repository root:
+
+```sh
+pnpm run package:desktop:linux:x64:unsigned
+```
+
+Use `package:desktop:linux:x64:unsigned:dir` to stop at the unpacked application. The command writes an `.AppImage` and a `.deb`, both named `hydra-<version>-linux-<arch>-unsigned`, to `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`. Like the local macOS DMG, it reads no dotenv file or inherited release settings, uses `com.hydra.harness` as the app ID, omits automatic-update and mandatory-update configuration, and runs the runtime integrity and smoke checks. The `Hydra desktop · Linux x64` workflow builds both files on a GitHub-hosted Ubuntu 22.04 runner when started by hand and keeps them as the run's downloadable files for 14 days.
 
 <a id="macos-release-signing"></a>
 

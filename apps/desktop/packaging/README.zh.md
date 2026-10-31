@@ -19,6 +19,7 @@ description: "在本地或 Windows／macOS Actions 中生成 Desktop 安装包�
 - [macOS 自托管打包](#macos-actions)
 - [未签名 Windows 测试安装包](#unsigned-windows-test-installer)
 - [无发布签名的本地 macOS DMG](#local-macos-dmg-without-release-signing)
+- [Linux AppImage 与 .deb](#linux-appimage-and-deb)
 - [macOS 发布签名与诊断](#macos-release-signing)
 - [目录构建与准备](#directory-and-preparation)
 - [用回环 registry 安装本地 Official 包](#local-official-bundles-from-a-loopback-registry)
@@ -176,6 +177,18 @@ pnpm run package:desktop:mac:x64:unsigned
 添加 `--check` 仅验证本地配置和工具而不构建，或添加 `--dir` 只生成解包应用。DMG 路径为 `apps/desktop/.desktop-build/targets/<target>/unsigned-artifacts/hydra-<version>-mac-<arch>-unsigned.dmg`。所有检查通过后，命令打印 `DMG:` 及其绝对路径。打开后将应用复制到本地测试目录。
 
 这些命令忽略 `.env.macos` 和继承的发布配置，使用 `com.hydra.harness` 作为应用 ID，并省略自动更新和强制更新配置。构建工具、标准网络代理与 `DSH_DESKTOP_NPM_REGISTRY` 仍可从 shell 提供。它们跳过 Developer ID 签名、Apple 公证、临时签名钥匙串和公证代理修改。Electron 使用无需证书的本地 ad-hoc 签名，以便修改后的可执行文件能够运行；DMG 不签名。准备阶段和组装后的应用仍执行运行时完整性与冒烟检查。本地构建不生成更新源、ZIP 或发布完成记录，上传命令无法发布这些产物。macOS 可能要求在“系统设置 → 隐私与安全性”中批准打开未经公证的应用。
+
+<a id="linux-appimage-and-deb"></a>
+
+## Linux AppImage 与 .deb
+
+Linux x64 构建均不签名，且只能在 Linux x64 主机上运行。执行 `pnpm install` 与 `pnpm run build:native-system` 后，在仓库根目录运行一条命令：
+
+```sh
+pnpm run package:desktop:linux:x64:unsigned
+```
+
+使用 `package:desktop:linux:x64:unsigned:dir` 可在解包后的应用处停止。该命令把均名为 `hydra-<version>-linux-<arch>-unsigned` 的 `.AppImage` 与 `.deb` 写入 `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`。与本地 macOS DMG 一样，它不读取 dotenv 文件或继承的发布设置，使用 `com.hydra.harness` 作为应用 ID，省略自动更新与强制更新配置，并运行运行时完整性检查与冒烟检查。`Hydra desktop · Linux x64` 工作流在手动启动时于 GitHub 托管的 Ubuntu 22.04 运行器上构建这两个文件，并将其作为本次运行的可下载文件保留 14 天。
 
 <a id="macos-release-signing"></a>
 
