@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Garde-fou des dépenses",
+    "description": "Met l'objectif en pause ou arrête le tour lorsque le budget de jetons de la session ou de la journée est atteint."
+  }
+}

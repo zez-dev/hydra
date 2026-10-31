@@ -1,0 +1,10 @@
+Hydra
+Hydra
+Add an API key to get started
+Choose a model provider and enter its API key
+Model provider [select] [empty]
+Enter API key [password]
+[alert] Could not load the model providers. Set up later, then add a key in Settings.
+Save and continue [disabled]
+Set up later
+Back

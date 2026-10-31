@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { addonBinaryPath, nodeEnvironment } from '../src/host.ts'
 import type { AddonHost } from '../src/host.ts'
@@ -72,5 +73,11 @@ describe('the production environment', () => {
     expect(host.launcherPath()).toMatch(/landlock-run$/)
     expect(['full', 'partial', 'unusable']).toContain(host.probeLandlock())
     expect(host.addonBinary()).toMatch(/system\.node$/)
+  })
+
+  it.skipIf(process.platform === 'win32')('looks for this platform addon in the package the addon entry package loads it from', () => {
+    const entry = createRequire(import.meta.url).resolve('@deepseek-ai/node-addon-system/package.json')
+    const platformPackage = dirname(createRequire(entry).resolve(`@deepseek-ai/node-addon-system-${process.platform}-${process.arch}/package.json`))
+    expect(nodeEnvironment().addonBinary().startsWith(platformPackage + sep)).toBe(true)
   })
 })

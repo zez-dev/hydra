@@ -11,10 +11,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { createUserMessage, expandAssistantStream, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, LlmCallConfig, MessageSource, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, ContextFormed, MessageSource, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-// Type-only: resolves the `agent/turn-stopping` and `agent/status` declarations.
-import type {} from '@deepseek-ai/dsh-agent'
+// Also resolves the `agent/turn-stopping`, `agent/pre-step`, and `agent/status` declarations.
+import type { Agent, ModelSelection, PreStepDecision } from '@deepseek-ai/dsh-agent'
 
 export const name = 'auto-continue'
 export const inject = ['agents', 'llm']
@@ -51,8 +51,19 @@ export const Config: z<Config> = z.object({
   maxReasoningContinuationsPerTurn: z.natural().default(1),
 })
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The continuation message this guard steers. The kind is the name released
+     * Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-auto-continue': { kind: 'plugin:dsh-auto-continue' } & ContextFormed
+  }
+}
+
 /** Source stamped on every continuation message the guard steers. */
-export const CONTINUATION_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-auto-continue' }
+export const CONTINUATION_SOURCE: MessageSource = { kind: 'plugin:dsh-auto-continue' }
 
 /** Verbatim continuation instruction the model receives. */
 export const CONTINUATION_TEXT =
@@ -71,6 +82,23 @@ interface LatestSettlement {
   hasContent: boolean
   /** Characters of visible answer text. */
   visibleChars: number
+}
+
+/** A selection a reasoning continuation recorded and the one it replaced. */
+interface LoweredSelection {
+  readonly lowered: Readonly<ModelSelection>
+  readonly replaced: Readonly<ModelSelection>
+}
+
+/**
+ * Whether a model choice is exactly the given selection.
+ * @param current - the agent's current choice, if any.
+ * @param selection - the selection to compare against.
+ * @returns true when provider, model, and reasoning effort all match.
+ */
+function sameSelection(current: Readonly<ModelSelection> | undefined, selection: Readonly<ModelSelection>): boolean {
+  return current !== undefined && current.provider === selection.provider
+    && current.model === selection.model && current.reasoningEffort === selection.reasoningEffort
 }
 
 /**
@@ -108,14 +136,42 @@ export function apply(ctx: Context, config: Config): void {
   const latest = new Map<SessionId, LatestSettlement>()
   const continuations = new Map<SessionId, { turn: number; count: number }>()
   const reasoningContinuations = new Map<SessionId, { turn: number; count: number }>()
-  /** Agents whose next request is a reasoning continuation, so it asks for the lowest effort. */
-  const lowEffortNext = new Set<SessionId>()
+  /** The lowest-effort selection each pending reasoning continuation recorded, until the one it replaced is put back. */
+  const lowered = new Map<SessionId, LoweredSelection>()
+
   /**
-   * The effort each lowered request replaced, put back on the agent's next
-   * request: the lowered effort is logged in that request's header, and the
-   * loop and the Web selection seed later requests from the logged header.
+   * Record the route's lowest selectable effort for the agent's next step.
+   * @param agent - the agent about to run a reasoning continuation.
+   * @param signal - the stopping turn's cancellation signal, for the route lookup.
    */
-  const restoreEffort = new Map<SessionId, { lowered: ReasoningEffortId; replaced: ReasoningEffortId | undefined }>()
+  async function lowerEffort(agent: Agent, signal: AbortSignal): Promise<void> {
+    const current = agent.model.current()
+    /* v8 ignore next -- the stopping turn ran a request, so the agent has a selection */
+    if (current === undefined) return
+    let effort: ReasoningEffortId | undefined
+    try {
+      effort = lowestReasoningEffort(await ctx.llm.resolveModelInfo(current.provider, current.model, signal))
+    } catch (_unresolvedRoute) {
+      // The loop's own call preparation fails loud on a route it cannot resolve; the effort is a preference.
+      return
+    }
+    if (effort === undefined) return
+    const selection: ModelSelection = { provider: current.provider, model: current.model, reasoningEffort: effort }
+    agent.model.select(selection)
+    lowered.set(agent.id, { lowered: selection, replaced: current })
+  }
+
+  /**
+   * Put back the selection a reasoning continuation replaced, unless a newer
+   * choice already replaced the lowered one.
+   * @param agent - the agent whose selection a reasoning continuation may have lowered.
+   */
+  function putBack(agent: Agent): void {
+    const entry = lowered.get(agent.id)
+    if (entry === undefined) return
+    lowered.delete(agent.id)
+    if (sameSelection(agent.model.current(), entry.lowered)) agent.model.select(entry.replaced)
+  }
 
   ctx.on('session/event', (session, event) => {
     if (event.type === 'assistant/message') {
@@ -132,7 +188,6 @@ export function apply(ctx: Context, config: Config): void {
       latest.delete(session.id)
       continuations.delete(session.id)
       reasoningContinuations.delete(session.id)
-      lowEffortNext.delete(session.id)
     }
   })
 
@@ -140,40 +195,24 @@ export function apply(ctx: Context, config: Config): void {
     latest.delete(agent.id)
     continuations.delete(agent.id)
     reasoningContinuations.delete(agent.id)
-    lowEffortNext.delete(agent.id)
-    restoreEffort.delete(agent.id)
+    lowered.delete(agent.id)
   })
 
-  // A reasoning continuation's request asks for the route's lowest effort;
-  // the effort rides the logged request header like any other call setting,
-  // so the next request puts back the effort it replaced unless the chain
-  // now proposes a different one, which is a newer choice.
-  ctx.on('agent/request', async ({ agent, signal }, next): Promise<LlmCallConfig> => {
-    const resolved = await next()
-    // A cancelled request is discarded, so it neither lowers an effort nor puts one back.
-    if (signal.aborted) return resolved
-    const restore = restoreEffort.get(agent.id)
-    if (!lowEffortNext.delete(agent.id)) {
-      if (restore === undefined) return resolved
-      restoreEffort.delete(agent.id)
-      if (resolved.reasoningEffort !== restore.lowered) return resolved
-      const { reasoningEffort: _lowered, ...rest } = resolved
-      return restore.replaced === undefined ? rest : { ...rest, reasoningEffort: restore.replaced }
-    }
-    let effort: ReasoningEffortId | undefined
-    try {
-      effort = lowestReasoningEffort(await ctx.llm.resolveModelInfo(resolved.provider, resolved.model, signal))
-    } catch (_unresolvedRoute) {
-      // The loop's own call preparation fails loud on a route it cannot resolve; the effort is a preference.
-      return resolved
-    }
-    if (effort === undefined) return resolved
-    // A second lowering before the first was put back keeps the effort the first one replaced.
-    restoreEffort.set(agent.id, { lowered: effort, replaced: restore === undefined ? resolved.reasoningEffort : restore.replaced })
-    return { ...resolved, reasoningEffort: effort }
+  // The loop fixes a step's selection before its pre-step, so the step that
+  // claims a reasoning continuation keeps the lowered selection and the steps
+  // after it get the replaced one back.
+  ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> => {
+    const decision = await next()
+    putBack(agent)
+    return decision
   })
 
-  ctx.on('agent/turn-stopping', ({ agent, turn, signal }) => {
+  // A turn cancelled or failed before its continuation step never reaches that pre-step.
+  ctx.on('agent/status', ({ agent, status }) => {
+    if (status === 'idle') putBack(agent)
+  })
+
+  ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
     if (signal.aborted) return
     const settlement = latest.get(agent.id)
     if (settlement === undefined || settlement.turn !== turn || !settlement.truncated || !settlement.hasContent) return
@@ -196,7 +235,6 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       reasoningContinuations.set(agent.id, { turn, count: reasoningCount + 1 })
-      lowEffortNext.add(agent.id)
     }
     continuations.set(agent.id, { turn, count: count + 1 })
     // Consumed: the settlement that triggered this continuation must not
@@ -204,5 +242,7 @@ export function apply(ctx: Context, config: Config): void {
     latest.delete(agent.id)
     const text = cutBeforeAnswer ? REASONING_CONTINUATION_TEXT : CONTINUATION_TEXT
     agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: CONTINUATION_SOURCE }))
+    // The loop reads the selection for the continuation step only after this listener settles.
+    if (cutBeforeAnswer) await lowerEffort(agent, signal)
   })
 }

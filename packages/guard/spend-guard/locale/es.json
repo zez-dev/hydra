@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Límite de gasto",
+    "description": "Pausa el objetivo o detiene el turno cuando se alcanza el presupuesto de tokens de la sesión o del día."
+  }
+}

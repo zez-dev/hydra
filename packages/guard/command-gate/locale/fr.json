@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Filtre de commandes",
+    "description": "Bloque avant leur exécution les commandes shell qui détruiraient du travail non validé ou modifieraient la machine."
+  }
+}

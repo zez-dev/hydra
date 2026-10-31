@@ -1,6 +1,43 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/client/ui-schedule/README.md
-README.md: 37ffbc0ef0b4a55af3238efa700dfdd0b942dd35
-README.zh.md: e381243a5a43f2e03e53a06de2a95746eb4bddf1
+/:
+  en: 265778d19fe0dd76
+  zh: 78b0a191a4bd4e4e
+/deepseek-ai-dsh-client-ui-schedule:
+  en: 862120984d5392eb
+  zh: eb3e5d5a802da592
+/deepseek-ai-dsh-client-ui-schedule/summary:
+  en: 43b5ede65f2c33ce
+  zh: 2a46e44b54e680c7
+/deepseek-ai-dsh-client-ui-schedule/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 405b30feaf48c087
+/deepseek-ai-dsh-client-ui-schedule/use-this-package:
+  en: c1bc1fb352b83036
+  zh: a692f3cf3eec8683
+/deepseek-ai-dsh-client-ui-schedule/use-this-package/send-later:
+  en: d28ed908faccceda
+  zh: 91b564f3fc0ff3d1
+/deepseek-ai-dsh-client-ui-schedule/use-this-package/time-zone-data-source:
+  en: b195bc224fb10d19
+  zh: 3a93f27b250ecc3b
+/deepseek-ai-dsh-client-ui-schedule/understand-the-implementation:
+  en: 1a9e64f155ef3cd8
+  zh: 2a679cfc74d2377e
+/deepseek-ai-dsh-client-ui-schedule/further-exploration:
+  en: 06e265120b05dbf5
+  zh: 08ab1ef979b8ea40
+/deepseek-ai-dsh-client-ui-schedule/model-experience:
+  en: a8838aba5fd29fd8
+  zh: b9f67d82c81dd030
+/deepseek-ai-dsh-client-ui-schedule/model-experience/kv-cache-effect:
+  en: 4b81350950285d47
+  zh: 6dc3d5cf7ca8a622
+/deepseek-ai-dsh-client-ui-schedule/known-limitations-and-deferred-work:
+  en: a28918674a645c1f
+  zh: 9614e2980ab45114
+/deepseek-ai-dsh-client-ui-schedule/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: a4b126f9a4eaca6f

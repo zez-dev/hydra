@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sessões agendadas",
+    "description": "Inicia novas sessões em uma programação cron, recupera na inicialização as execuções perdidas e registra cada resultado."
+  }
+}

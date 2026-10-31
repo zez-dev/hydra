@@ -30,6 +30,9 @@ export class ScriptedRuntime extends PtcRuntime {
   /** Issue every `startChild` before any `childResult`, as `parallel()` does. */
   concurrent = false
 
+  /** Read-only confinement, as the sandboxed executor reports; the engine refuses an unconfined runtime under a read-only policy. */
+  override get sandboxMode(): 'read-only' { return 'read-only' }
+
   /**
    * @param request - the engine's run request.
    * @returns the request with the fields a spec requires.

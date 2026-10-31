@@ -1,5 +1,17 @@
-import type { Message } from '@deepseek-ai/dsh-llm'
+import type { ContextFormed, Message } from '@deepseek-ai/dsh-llm'
 import type { MemoryEntryId, MemoryEntryKind } from '@deepseek-ai/dsh-memory'
+import type { SessionId } from '@deepseek-ai/dsh-session'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The extraction request this plugin sends beside the conversation. The kind
+     * is the name released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-learning': { kind: 'plugin:dsh-learning' } & ContextFormed
+  }
+}
 
 /** One proposed memory entry parsed from the extraction model's answer. */
 export interface LearningCandidate {
@@ -95,8 +107,18 @@ export interface LearningSkillView {
   readonly bytes: number
 }
 
-/** The `ctx.learning` service: the promotion path `/learn skill` and the Web card share. */
+/** The `ctx.learning` service: the promotion path `/learn skill` and the Web card share, and turn-review settlement. */
 export interface LearningService {
+  /**
+   * Wait for the turn review that the session's latest finished turn started. The
+   * review is pending from that turn's `turn/end`, before its job starts, so a
+   * one-shot host that awaits this before exiting does not cancel it.
+   * @param sessionId - the session whose review to wait for.
+   * @returns a promise that settles when the review has filed its result, failed,
+   *   or been cancelled or yielded, bounded by the review's own deadline; it settles
+   *   at once when no review is pending.
+   */
+  settled(sessionId: SessionId): Promise<void>
   /**
    * Write one memory entry as `<skillsRoot>/<name>/SKILL.md`, register it live when a skill
    * registry is mounted, and mark the entry `promoted`.

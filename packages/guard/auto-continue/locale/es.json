@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Continuación automática",
+    "description": "Continúa un turno automáticamente cuando la respuesta se corta por el límite de tokens de salida."
+  }
+}

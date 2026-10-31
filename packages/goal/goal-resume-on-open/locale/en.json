@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Goal resume on open",
+    "description": "Re-arm a session's active goal when the session is opened, after asking or automatically."
+  }
+}

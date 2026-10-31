@@ -7,7 +7,7 @@ import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   captureStableAria, compareOrRefreshGolden, launchWebScaffold, seedSession, readPersistedEvents, parseSeedFixture, realizeSeedFixture,
-  settleConversationAtBottom, watchConsole, webSnapshotMode, type WebScaffold,
+  watchConsole, webSnapshotMode, type WebScaffold,
 } from './scaffold.ts'
 import { expandOwningTurnProcess, newEnglishPage } from './support.ts'
 
@@ -54,10 +54,10 @@ describe.skipIf(MODE === 'record')('web e2e: historical Cordis cards', () => {
     const stop = page.locator('[data-tool="cordis_stop"]').first()
     await expandOwningTurnProcess(page, stop)
     await expect.poll(() => stop.getAttribute('data-state')).toBe('ok')
-    // The Host tab click scrolls up only when the chat's follow has already
-    // pushed the opened card below the fold; settle on the floor so the
-    // capture does not depend on which happened first.
-    await settleConversationAtBottom(page)
+    // The golden shows a reader above the tail; tool expansion can leave scroll sampling pending.
+    const scrollport = page.locator('[data-conversation-scroll]')
+    await scrollport.evaluate((element) => { element.scrollTop = 0 })
+    await page.getByRole('button', { name: 'Back to bottom', exact: true }).waitFor()
     const snapshot = (await captureStableAria(page, '[class*="centerCol"]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)

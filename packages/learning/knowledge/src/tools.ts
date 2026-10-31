@@ -271,11 +271,11 @@ async function offerSummaries(
   if (jobs === undefined) return `Summaries: ${(await ctx.knowledgeWorkspaces.summarize(cwd, name, route, signal)).text}.`
   const id = startKnowledgeJob(
     jobs,
-    agent,
+    agent.session.id,
     `knowledge_add summaries for ${name} (${files} files)`,
     'knowledge summaries cancelled',
     jobSignal => ctx.knowledgeWorkspaces.summarize(cwd, name, route, jobSignal),
-    ({ summarized, text }) => ({ detail: `${summarized} summarized`, output: text }),
+    ({ summarized, text }) => ({ detail: `${summarized} summarized`, result: text }),
   )
   return `Summarizing its files with ${route.provider}/${route.model} as background job ${id}; searches use each summary as soon as it is written.`
 }

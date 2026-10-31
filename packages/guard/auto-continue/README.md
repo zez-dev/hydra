@@ -34,7 +34,7 @@ The shipped `dsh-base` bundle mounts the guard with `maxContinuationsPerTurn: 8`
 |---|---|---|
 | `maxContinuationsPerTurn` | required (`8` in `dsh-base`) | Continuations steered within one turn; each is a full model request over the whole context |
 | `minVisibleChars` | `80` | A cut answer whose visible text is shorter than this was cut before its answer, usually because a reasoning model's thinking spent the cap; it is continued only within `maxReasoningContinuationsPerTurn`. |
-| `maxReasoningContinuationsPerTurn` | `1` | Continuations per turn for an answer cut before its visible text. Such a continuation asks the model to answer now (`REASONING_CONTINUATION_TEXT`), and its request asks the route for its lowest selectable reasoning effort (`off`, `none`, `minimal`, or `low`, whichever the route offers first), which the logged request header records. The loop and the Web model selection seed later requests from that header, so the agent's next request puts back the effort the lowered one replaced, or the route's default, unless that request already proposes a different effort, which counts as a newer choice. They count toward `maxContinuationsPerTurn`. `0` stops such a turn at once. |
+| `maxReasoningContinuationsPerTurn` | `1` | Continuations per turn for an answer cut before its visible text. Such a continuation asks the model to answer now (`REASONING_CONTINUATION_TEXT`), and its request uses the route's lowest selectable reasoning effort (`off`, `none`, `minimal`, or `low`, whichever the route offers first), which the guard records as the agent's model selection. The steps after the continuation get back the selection the lowered one replaced, or the route's default, unless a newer choice replaced the lowered selection first. They count toward `maxContinuationsPerTurn`. `0` stops such a turn at once. |
 
 -----
 
@@ -43,11 +43,11 @@ The shipped `dsh-base` bundle mounts the guard with `maxContinuationsPerTurn: 8`
 
 The guard observes `session/event`: every `assistant/message` records whether its embedded stream ended with a `max-tokens` finish and whether the message carries non-blank content; `turn/start` clears both the record and the turn's continuation count. On the serial `agent/turn-stopping` event it steers `CONTINUATION_TEXT` through `agent.steer()` when the latest settlement of that turn was truncated with content and the cap is not reached. Steering makes the loop observe pending input and run another step; the turn's durable `turn/end` reason stays `max-tokens` because the loop keeps that outcome sticky. A user cancellation aborts the signal before the listener runs, and an errored step settles as `assistant/attempt`, which the guard ignores.
 
+For a reasoning continuation the listener then resolves the route's lowest effort and records it with `agent.model.select()`, which logs a `model/selection` event before the loop reads the selection for the continuation step. The loop fixes each step's selection before `agent/pre-step`, so the guard's pre-step listener records the replaced selection again for the steps after the continuation; when the turn ends before that step, the agent's `agent/status` change to `idle` records it instead. A put-back is skipped when the agent's selection is no longer the lowered one, because a newer choice replaced it.
+
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Plugin entry: settlement tracking, the turn-stopping listener, config |
-
-No invariant companion is published because the per-session settlement records, continuation counts, and the effort each lowered request replaced are private to the guard's own `agent/turn-stopping` and `agent/request` listeners; the first two reset at each `turn/start`, and the third is consumed by the agent's next request.
+| [`src/index.ts`](src/index.ts) | Plugin entry: settlement tracking, the turn-stopping listener, the effort selection and its put-back, config |
 
 -----
 
@@ -58,7 +58,7 @@ No invariant companion is published because the per-session settlement records, 
 
 #### What the model sees
 
-One user message after a truncated assistant message, logged as `user/message` with source `{ kind: 'plugin', plugin: 'dsh-auto-continue' }`:
+One user message after a truncated assistant message, logged as `user/message` with source `{ kind: 'plugin:dsh-auto-continue' }`:
 
 ##### Verbatim continuation text
 
@@ -78,7 +78,7 @@ Append-only: the continuation appends after the truncated assistant message, so 
 
 - **No stitching** — the two assistant messages stay separate in history and in the UI; nothing joins the truncated text with its continuation.
 - **Cap is per turn, not per session** — a task that truncates on every turn keeps continuing every turn; the cap only bounds one answer.
-- **The effort to put back lives in memory** — a Host restart between a reasoning continuation and the agent's next request leaves the lowered effort in the logged header, and later requests keep it until a new choice is made.
+- **The selection to put back lives in memory** — a Host restart after a reasoning continuation records its lowered selection and before the continuation step starts leaves that selection recorded, and later requests keep it until a new choice is made.
 
 -----
 

@@ -1,6 +1,6 @@
 /**
  * CommandUiRuntime tests on a real cordis Context with fake slash/connection
- * faces and real session scopes (createScope): session-keyed candidate
+ * faces and retained TestSessions: session-keyed candidate
  * synthesis (host catalog by sessionId + contributions by availability,
  * collision fail-loud), the dispatch decision table cell by cell, matchSpace
  * hot-key policy, matchEnter strong-wait / reject, the sessionId execute
@@ -11,10 +11,11 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { CommandResult } from '@deepseek-ai/dsh-commands/types'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands/brand'
-import { createScope, scopeOf } from '@deepseek-ai/dsh-api-session-controller/client'
+import { scopeOf } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
-import { IconGoalOutline16 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { RemoteError, TestRemote, TestSessions } from '@deepseek-ai/dsh-client-test-runtime'
+import type { SessionFixture } from '@deepseek-ai/dsh-client-test-runtime'
+import { IconGoalOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ClientSessionContext, ConsumeTokenRequest, InputTriggerPick, InputTriggerSource, SubmitAttachment } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { CommandContribution, CommandDecoration, PopupSelectSpec, SelectOption } from '../src/client/contract.ts'
 import type { CommandDescriptor } from '../src/client/directory.ts'
@@ -45,6 +46,8 @@ interface BenchOptions {
   translate?: (namespace: string, key: string, params?: Record<string, unknown>) => string
   addressed?: SessionId
   addressedMode?: 'continuable' | 'one-shot'
+  initialOpen?: SessionFixture['initialOpen']
+  snapshot?: SessionFixture['snapshot']
 }
 
 /**
@@ -117,18 +120,30 @@ async function bench(opts: BenchOptions = {}) {
       opts.translate?.(ns, key, params)
       ?? `${ns}:${key}${params === undefined ? '' : JSON.stringify(params)}`,
   })
-  // Real scope tags behind a fake sessions face.
-  const scopes = new Map<SessionId, { ctx: Context; fiber: { dispose(): Promise<void> } }>()
-  const bindings = new Map<SessionId, { sessionId: SessionId; session: { sessionId: SessionId }; ctx: Context }>()
-  const removeSessions = ctx.provide('sessions', {
-    scope: (id: SessionId) => scopes.get(id)?.ctx,
-    scopeOf: (c: Context) => scopeOf(c),
-    sessionOf: (scopeCtx: Context) => [...bindings.values()].find(binding => binding.ctx === scopeCtx)?.session,
-    binding: (id: SessionId) => bindings.get(id),
-    subagentAddress: (id: SessionId) => id === opts.addressed
-      ? { parentSessionId: sid('parent'), childSessionId: id, mode: opts.addressedMode ?? 'continuable' }
-      : undefined,
+  const sessions = new TestSessions(async (action) => { await action() }, ctx)
+  onTestFinished(async () => {
+    await sessions.disposeScopes()
+    await ctx.fiber.dispose()
   })
+  const removeSessions = ctx.provide('sessions', sessions)
+  for (const id of new Set(['s1', 's2', 'other', 'ghost', ...opts.addressed === undefined ? [] : [opts.addressed]])) {
+    await sessions.add({
+      id,
+      ...opts.initialOpen === undefined ? {} : { initialOpen: opts.initialOpen },
+      ...opts.snapshot === undefined ? {} : { snapshot: opts.snapshot },
+    })
+  }
+  const mint = (key: string) => {
+    const id = sid(key)
+    const target = id === opts.addressed
+      ? { parentSessionId: sid('parent'), childSessionId: id, mode: opts.addressedMode ?? 'continuable' }
+      : id
+    const binding = sessions.binding(id) ?? sessions.retainFor(ctx, target).binding
+    return { ctx: binding.ctx, fiber: binding.ctx.fiber }
+  }
+  mint('s1')
+  mint('s2')
+  if (opts.addressed !== undefined) mint(opts.addressed)
   const remote = Object.assign(new TestRemote(ctx), { commands: commandsRemote, subagents: subagentsRemote })
   ctx.provide('remote.commands', commandsRemote)
   ctx.provide('remote.subagents', subagentsRemote)
@@ -155,24 +170,13 @@ async function bench(opts: BenchOptions = {}) {
   const command = ctx.get('commandUi') as CommandUiRuntime
   const source = registered.get('/ command')
   if (source === undefined) throw new Error('command source not registered')
-  const mint = (key: string) => {
-    const id = sid(key)
-    const handle = createScope(ctx, id)
-    const binding = { sessionId: id, session: { sessionId: id }, ctx: handle.ctx }
-    scopes.set(id, handle)
-    bindings.set(id, binding)
-    handle.ctx.effect(() => () => {
-      if (bindings.get(id) === binding) bindings.delete(id)
-    })
-    return handle
-  }
   /** Warm one session's catalog through the source's own candidate pull. */
   const warm = async (session: ClientSessionContext) => {
     await source.candidates(session, { query: '', position: 'leading', drilled: false, signal: new AbortController().signal })
   }
   return {
     ctx, fiber, command, source, mint, warm, listCalls, executeCalls, executions, registered, notices, focuses, remote, subagentCalls,
-    removeSessions, removeConversation,
+    removeSessions, removeConversation, sessions,
   }
 }
 
@@ -228,15 +232,51 @@ describe('registration', () => {
   it('the warm hook prewarms the session key: one pull per session, no duplicate over pending', async () => {
     const { source, listCalls } = await bench()
     source.warm!(proj('s1'))
-    expect(listCalls).toEqual([{ sessionId: sid('s1') }])
+    await vi.waitFor(() => { expect(listCalls).toEqual([{ sessionId: sid('s1') }]) })
     source.warm!(proj('s2'))
-    expect(listCalls).toEqual([{ sessionId: sid('s1') }, { sessionId: sid('s2') }])
+    await vi.waitFor(() => { expect(listCalls).toEqual([{ sessionId: sid('s1') }, { sessionId: sid('s2') }]) })
     source.warm!(proj('s1')) // s1 already pending → no duplicate pull
     expect(listCalls).toHaveLength(2)
   })
 })
 
 describe('candidates', () => {
+  it('waits for initial history and retains the Session until the catalog RPC settles', async () => {
+    const opened = Promise.withResolvers<undefined>()
+    const response = Promise.withResolvers<{ commands: CommandDescriptor[] }>()
+    const b = await bench({ initialOpen: () => opened.promise, commands: () => response.promise })
+    try {
+      const pending = b.source.candidates(proj('s1'), req(''))
+      expect(b.sessions.retainInfo(sid('s1')).getSnapshot().retainedBy.commandCatalog).toBe(1)
+      expect(b.listCalls).toEqual([])
+      opened.resolve(undefined)
+      await vi.waitFor(() => { expect(b.listCalls).toHaveLength(1) })
+      expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(2)
+      response.resolve({ commands: S1_CMDS })
+      await pending
+      expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(1)
+    } finally {
+      opened.resolve(undefined)
+      response.resolve({ commands: S1_CMDS })
+    }
+  })
+
+  it.each([true, false])('refuses an unsuccessful history open (reported error: %s)', async (reported) => {
+    const error = new RemoteError('gateway/internal', 'history unavailable', {})
+    const b = await bench({ snapshot: { openState: 'error', openError: reported ? error : null } })
+    await expect(b.source.candidates(proj('s1'), req(''))).rejects.toThrow(reported ? 'history unavailable' : 'is not open')
+    expect(b.listCalls).toEqual([])
+    expect(b.sessions.retainInfo(sid('s1')).getSnapshot().referenceCount).toBe(1)
+  })
+
+  it('does not reopen a Session released before catalog lookup', async () => {
+    const b = await bench()
+    await b.mint('s1').fiber.dispose()
+    await expect(b.source.candidates(proj('s1'), req(''))).rejects.toThrow('requires a retained session')
+    expect(b.sessions.binding(sid('s1'))).toBeUndefined()
+    expect(b.listCalls).toEqual([])
+  })
+
   it('lists a continuable child\'s own commands through its parent address, never the session route', async () => {
     const b = await bench({ addressed: sid('child') })
     const list = await b.source.candidates(proj('child'), req('g'))
@@ -397,7 +437,7 @@ describe('candidates', () => {
         name: 'goal',
         label: 'command:label.goal',
         description: 'command:description.goal',
-        icon: IconGoalOutline16,
+        icon: IconGoalOutlineRegular,
         hint: '<objective>',
         section: 'command:section.add',
       })
@@ -714,6 +754,7 @@ describe('matchEnter (enter column)', () => {
       commands: () => new Promise((resolve) => { release = resolve }),
     })
     const wait = source.matchEnter!(proj('s1'), '/goal args', signal(), { attachments: 0 })
+    await vi.waitFor(() => { expect(release).toBeTypeOf('function') })
     release({ commands: S1_CMDS })
     const outcome = await wait
     if (outcome === undefined || outcome === 'handled' || !('claim' in outcome)) throw new Error('expected claim')
@@ -725,6 +766,34 @@ describe('matchEnter (enter column)', () => {
       commands: () => Promise.reject(new Error('warmup boom')),
     })
     await expect(source.matchEnter!(proj('s1'), '/goal', signal(), { attachments: 0 })).rejects.toThrow('warmup boom')
+  })
+
+  it('matchClaim waits for a cold catalog and answers only the space column claim without acting', async () => {
+    let release!: (value: { commands: CommandDescriptor[] }) => void
+    const { command, source, mint, executeCalls } = await bench({
+      commands: () => new Promise((resolve) => { release = resolve }),
+    })
+    const run = vi.fn()
+    command.register({ name: 'file', label: () => 'file', available: () => true, ui: { kind: 'action', run } })
+    const consumes: ConsumeTokenRequest[] = []
+    mint('s1').ctx.on('slash/input-consume-token', (r) => { consumes.push(r); return true })
+    const wait = source.matchClaim!(proj('s1'), '/goal', signal())
+    await vi.waitFor(() => { expect(release).toBeTypeOf('function') })
+    release({ commands: S1_CMDS })
+    await expect(wait).resolves.toMatchObject({ name: 'goal', token: '/goal ' })
+    for (const token of ['/plan', '/file', '/xyz', 'goal']) {
+      await expect(source.matchClaim!(proj('s1'), token, signal())).resolves.toBeUndefined()
+    }
+    expect(run).not.toHaveBeenCalled()
+    expect(consumes).toEqual([])
+    expect(executeCalls).toEqual([])
+  })
+
+  it('matchClaim rejects when warmup fails', async () => {
+    const { source } = await bench({
+      commands: () => Promise.reject(new Error('warmup boom')),
+    })
+    await expect(source.matchClaim!(proj('s1'), '/goal', signal())).rejects.toThrow('warmup boom')
   })
 
   it('leadingInput claims args-tolerant (bare and with trailing text)', async () => {
@@ -876,7 +945,7 @@ describe('execute payload', () => {
     const after = vi.fn()
     const warn = vi.spyOn(b.ctx.logger, 'warn').mockImplementation(() => undefined)
     b.ctx.on('command/executed', () => { throw syncFailure })
-    const rejectingListener = (() => Promise.reject(asyncFailure)) as unknown as () => void
+    const rejectingListener = (() => Promise.reject(asyncFailure)) as () => void
     b.ctx.on('command/executed', rejectingListener)
     b.ctx.on('command/executed', after)
 
@@ -943,10 +1012,12 @@ describe('detached admission notices', () => {
   })
 
   it('a torn-down scope drops the failure notice', async () => {
-    const { source, warm, notices } = await bench({
+    const { source, warm, notices, mint } = await bench({
       execute: () => Promise.reject(new Error('orphan failure')),
     })
-    await warm(proj('ghost')) // never minted: scopeFor misses
+    const scope = mint('ghost')
+    await warm(proj('ghost'))
+    await scope.fiber.dispose()
     menuPick(source, 'plan', proj('ghost'))
     await flush()
     expect(notices).toEqual([])
@@ -1159,6 +1230,7 @@ describe('directory invalidation events', () => {
     ctx.emit('connection/reset')
     // Hard reset: silent until the rewarm lands.
     expect(source.matchSpace!(proj('s2'), '/attach')).toBeUndefined()
+    await vi.waitFor(() => { expect(release).toBeTypeOf('function') })
     release({ commands: S2_CMDS })
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(source.matchSpace!(proj('s2'), '/attach')).not.toBeUndefined()

@@ -3,15 +3,16 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { ToolCallId } from '@deepseek-ai/dsh-llm'
-import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { ReasoningEffortId, ToolCallId } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, LlmResolvedModelInfo, PreparedAdapterCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Research from '@deepseek-ai/dsh-research'
@@ -44,6 +45,48 @@ class ScoringAdapter extends MockAdapter {
     }
     yield* super.stream(options)
   }
+}
+
+/** A scoring route whose model lookup fails while its requests still dispatch. */
+class UnresolvableScoringAdapter extends ScoringAdapter {
+  override resolveModel(): Promise<LlmResolvedModelInfo> {
+    return Promise.reject(new Error('model lookup unavailable'))
+  }
+
+  override prepareCall(provider: string, model: string): Promise<PreparedAdapterCall> {
+    return Promise.resolve({ model: { provider, id: model, name: model }, stream: options => this.stream(options) })
+  }
+}
+
+/** Offers the given reasoning efforts and answers each scoring request with `reply`; other requests fall through to the script. */
+class ThinkingScoringAdapter extends MockAdapter {
+  scoringRequests: GenerateOptions[] = []
+  reply: (options: GenerateOptions) => StreamChunk[] = () => textResponse('[]')
+  constructor(efforts: readonly string[]) {
+    super([], { efforts: efforts.map(id => ({ id: ReasoningEffortId(id), name: id })) })
+  }
+
+  override async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+    if (options.purpose !== 'research-score') {
+      yield* super.stream(options)
+      return
+    }
+    this.scoringRequests.push(options)
+    yield* this.reply(options)
+  }
+}
+
+/** An answer filed entirely as reasoning, ending with the given finish. */
+function reasoningOnly(text: string, kind: 'stop' | 'max-tokens'): StreamChunk[] {
+  return [
+    { type: 'block-start', index: 0, blockType: 'reasoning' },
+    { type: 'reasoning-delta', index: 0, text },
+    { type: 'finish', reason: { kind } },
+  ]
+}
+
+function scoringEvents(agent: Agent) {
+  return agent.session.snapshotEvents().flatMap(event => event.type === 'session/research-score' ? [event.data] : [])
 }
 
 /** Ends each scoring request with the next queued finish reason and no text; other requests fall through to the script. */
@@ -88,7 +131,7 @@ async function fakeAgent(ctx: Context, cwd: string, id = 'scoring-agent'): Promi
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -161,7 +204,7 @@ describe('hypothesis scoring after an experiment', () => {
     const ctx = await setup(adapter)
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
     const h2 = (await run({ action: 'hypothesis', text: 'Width matters' })).value as { id: string }
     adapter.scoringAnswers.push(`[{"hypothesisId":"${h1.id}","score":0.2,"reason":"loss rose"},{"hypothesisId":"${h2.id}","score":0.7,"reason":"loss fell"},{"hypothesisId":"h-ghost","score":0.5,"reason":"unknown"}]`)
@@ -186,7 +229,7 @@ describe('hypothesis scoring after an experiment', () => {
     ctx.logger.warn = ((...args: unknown[]) => { warnings.push(String(args[0])); warn(...args as [string]) }) as typeof ctx.logger.warn
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
     adapter.scoringAnswers.push(`[{"hypothesisId":"${h1.id}","score":0.6,"reason":"promising"}]`)
     await run({ action: 'experiment', what: 'a', result: 'b' })
@@ -206,7 +249,7 @@ describe('hypothesis scoring after an experiment', () => {
     ctx.logger.warn = ((...args: unknown[]) => { warnings.push(String(args[0])); warn(...args as [string]) }) as typeof ctx.logger.warn
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     await run({ action: 'hypothesis', text: 'Depth matters' })
     await run({ action: 'experiment', what: 'a', result: 'b' })
     await run({ action: 'experiment', what: 'c', result: 'd' })
@@ -214,12 +257,63 @@ describe('hypothesis scoring after an experiment', () => {
     expect(warnings).toContain('research: scoring failed for "opt": scoring model unexpectedly requested a tool')
   })
 
+  it('asks the scoring route for its lowest reasoning effort and logs it, so a route that cannot turn thinking off answers within the cap', async () => {
+    // The efforts of a route such as Claude Sonnet 5.5: at its default effort the reasoning fills the cap.
+    const adapter = new ThinkingScoringAdapter(['low', 'medium', 'high', 'xhigh', 'max'])
+    const ctx = await setup(adapter)
+    const agent = await fakeAgent(ctx, root!)
+    await research(ctx, agent, 'Find the optimum --slug opt')
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
+    adapter.reply = options => options.reasoningEffort === undefined
+      ? reasoningOnly('weighing every experiment at length', 'max-tokens')
+      : textResponse(`[{"hypothesisId":"${h1.id}","score":0.8,"reason":"loss fell"}]`)
+    await run({ action: 'experiment', what: 'train deeper', result: 'loss 0.2' })
+    expect(adapter.scoringRequests.map(request => [request.reasoningEffort, request.maxTokens])).toEqual([['low', 256]])
+    expect(scoringEvents(agent)).toMatchObject([{ reasoningEffort: 'low', maxTokens: 256 }])
+    expect(ctx.research.storeFor(root!).get('opt')!.hypotheses[0]).toMatchObject({ score: 0.8, scoreReason: 'loss fell' })
+  })
+
+  it('asks the scoring route once more at its default effort when the lowest effort leaves no answer text', async () => {
+    const adapter = new ThinkingScoringAdapter(['off', 'high'])
+    const ctx = await setup(adapter)
+    const agent = await fakeAgent(ctx, root!)
+    await research(ctx, agent, 'Find the optimum --slug opt')
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const h1 = (await run({ action: 'hypothesis', text: 'Depth matters' })).value as { id: string }
+    const answer = `[{"hypothesisId":"${h1.id}","score":0.6,"reason":"promising"}]`
+    adapter.reply = options => options.reasoningEffort === undefined ? textResponse(answer) : reasoningOnly(answer, 'stop')
+    await run({ action: 'experiment', what: 'a', result: 'b' })
+    expect(adapter.scoringRequests.map(request => request.reasoningEffort)).toEqual(['off', undefined])
+    const logged = scoringEvents(agent)
+    expect(logged.map(data => data.reasoningEffort)).toEqual(['off', undefined])
+    expect(logged[1]).not.toHaveProperty('reasoningEffort')
+    expect(ctx.research.storeFor(root!).get('opt')!.hypotheses[0]).toMatchObject({ score: 0.6, scoreReason: 'promising' })
+  })
+
+  it.each([
+    ['offers no reasoning efforts', () => new ScoringAdapter([])],
+    ['fails its model lookup', () => new UnresolvableScoringAdapter([])],
+  ])('asks a scoring route that %s once at its default effort', async (_route, create) => {
+    const adapter = create()
+    const ctx = await setup(adapter)
+    const agent = await fakeAgent(ctx, root!)
+    await research(ctx, agent, 'Find the optimum --slug opt')
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    await run({ action: 'hypothesis', text: 'Depth matters' })
+    adapter.scoringAnswers.push('')
+    await run({ action: 'experiment', what: 'a', result: 'b' })
+    expect(adapter.scoringRequests).toHaveLength(1)
+    expect(adapter.scoringRequests[0]).not.toHaveProperty('reasoningEffort')
+    expect(scoringEvents(agent)[0]).not.toHaveProperty('reasoningEffort')
+  })
+
   it('skips scoring when disabled or when no hypothesis is open', async () => {
     const adapter = new ScoringAdapter([])
     const ctx = await setup(adapter, { scoring: { enabled: true, maxOutputTokens: 256, timeoutMs: 5000, provider: 'mock', model: 'mock' } })
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     await run({ action: 'experiment', what: 'a', result: 'b' })
     expect(adapter.scoringRequests).toHaveLength(0)
   })

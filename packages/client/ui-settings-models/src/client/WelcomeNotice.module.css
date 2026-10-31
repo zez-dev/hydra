@@ -12,6 +12,17 @@
   margin-top: 12px;
 }
 
+.copy .disclaimer {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.disclaimer a {
+  color: var(--dsw-alias-link);
+}
+
 .error {
   margin: 16px 0 0;
   font-size: 14px;

@@ -23,6 +23,7 @@ import type { TableValueOf } from '@deepseek-ai/dsh-storage-domain'
 import * as StorageJson from '@deepseek-ai/dsh-storage-json'
 import * as offPeak from '@deepseek-ai/dsh-off-peak'
 import * as offPeakTools from '@deepseek-ai/dsh-off-peak/tools'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import { MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 
 /** One window covering the small hours, so the tests drive the clock across it. */
@@ -82,6 +83,7 @@ class FailingStorage implements StorageBackend {
         loadAll: () => unit.loadAll(),
         putRecord: (table, key, value) => write(() => unit.putRecord(table, key, value)),
         deleteRecord: (table, key) => write(() => unit.deleteRecord(table, key)),
+        deleteRecords: (table, keys) => write(() => unit.deleteRecords(table, keys)),
         setGlobal: value => write(() => unit.setGlobal(value)),
         close: () => unit.close(),
       }
@@ -750,14 +752,14 @@ describe('the off_peak tool', () => {
 
   it('queues a task for the model and lists what is waiting', async () => {
     const test = await harness()
-    const queued = await test.ctx.tools.execute({
+    const queued = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t1'), name: 'off_peak', agent: test.agent,
       arguments: { action: 'queue', task: 'refresh the dependency audit' },
     })
     expect(queued.isError).toBe(false)
     expect(test.ctx.offPeak.list()).toHaveLength(1)
 
-    const listed = await test.ctx.tools.execute({
+    const listed = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t2'), name: 'off_peak', agent: test.agent, arguments: { action: 'list' },
     })
     expect(listed.value).toMatchObject({ open: false })
@@ -767,7 +769,7 @@ describe('the off_peak tool', () => {
     vi.setSystemTime(new Date(2026, 8, 11, 2, 0, 0, 0))
     const test = await harness()
 
-    const listed = await test.ctx.tools.execute({
+    const listed = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t4'), name: 'off_peak', agent: test.agent, arguments: { action: 'list' },
     })
 
@@ -777,7 +779,7 @@ describe('the off_peak tool', () => {
   it('refuses to queue without an owning session', async () => {
     const test = await harness()
 
-    const result = await test.ctx.tools.execute({
+    const result = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t5'), name: 'off_peak', arguments: { action: 'queue', task: 'refresh the dependency audit' },
     })
 
@@ -789,7 +791,7 @@ describe('the off_peak tool', () => {
   it("queues the task in the session's workspace", async () => {
     const test = await harness(NIGHT, { cwd: root! })
 
-    await test.ctx.tools.execute({
+    await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t6'), name: 'off_peak', agent: test.agent,
       arguments: { action: 'queue', task: 'refresh the dependency audit' },
     })
@@ -801,7 +803,7 @@ describe('the off_peak tool', () => {
     const stored: StoredEntry = { id: 'hand-edited', sessionId: 'off-peak-elsewhere', kind: 'goal-round', queuedAt: Date.now(), state: 'queued' }
     const test = await harness(NIGHT, { stored: [stored] })
 
-    const listed = await test.ctx.tools.execute({
+    const listed = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t7'), name: 'off_peak', agent: test.agent, arguments: { action: 'list' },
     })
 
@@ -810,7 +812,7 @@ describe('the off_peak tool', () => {
 
   it('rejects a queue call with no task', async () => {
     const test = await harness()
-    const result = await test.ctx.tools.execute({
+    const result = await executeModelToolFixture(test.ctx, {
       signal, callId: ToolCallId('t3'), name: 'off_peak', agent: test.agent, arguments: { action: 'queue' },
     })
     expect(result.isError).toBe(true)

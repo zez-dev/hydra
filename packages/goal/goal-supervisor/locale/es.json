@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Supervisor de objetivos",
+    "description": "Reanuda al iniciar las sesiones guardadas con objetivos activos, dentro de un límite de concurrencia y un presupuesto diario de rondas."
+  }
+}

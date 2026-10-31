@@ -7,7 +7,7 @@
 
 import { localDateKey } from '@deepseek-ai/dsh-util-time'
 import { FOOTER_MARK } from './report.ts'
-import type { DailyTotals, WeekDay, WeeklyInput, WeeklyTime, WeekSeries } from './types.ts'
+import type { DailyTotals, DigestWeeklyInput, WeekDay, WeeklyTime, WeekSeries } from './types.ts'
 
 /** Weekday names accepted by `weeklyOn`, index = JavaScript `getDay()`. */
 const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
@@ -192,7 +192,7 @@ export function aggregateWeek(dates: readonly string[], dailies: readonly DailyT
  * @param input - the aggregated week plus the live moved and open items.
  * @returns the report text.
  */
-export function renderWeekly(input: WeeklyInput): string {
+export function renderWeekly(input: DigestWeeklyInput): string {
   const { series } = input
   const trend = (label: string, pick: (totals: DailyTotals) => number | null, total: number | null): string => {
     const values = series.days.map(day => day.reported ? pick(day.totals) : null)

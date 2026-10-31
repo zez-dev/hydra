@@ -104,13 +104,17 @@ function mountList(count: number, rowHeight: number, viewportHeight: number, led
   })
   Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return viewportHeight } })
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get(this: HTMLElement) { return heightOf(this) } })
-  // Only the props the window and the placeholder read are real; the seat's other props never reach a renderer here.
+  // Only the props the window and the placeholder read are real; the seat's own hooks answer with no bottom
+  // membership, no folding policy, and a fresh row ref, and its other props never reach a renderer here.
   const props = {
     order: state.order,
     listRef,
     ledger,
     useChatNode,
+    useChatNodeBottom: () => false,
     useChatNodeProcess: () => undefined,
+    usePresentation: () => false,
+    useGroupAction: () => ({ current: null }),
     historyIncomplete: false,
     compactTranscript: false,
     useStore: () => undefined,

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Verificação de metas",
+    "description": "Confirma com uma solicitação de modelo separada que uma meta foi atingida antes que o modelo possa marcá-la como concluída."
+  }
+}

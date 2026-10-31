@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sessions planifiées",
+    "description": "Lance de nouvelles sessions selon une planification cron, rattrape au démarrage les exécutions manquées et enregistre chaque résultat."
+  }
+}

@@ -1,6 +1,31 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write apps/cli/reference/README.md
-README.md: 9ff0dce30f6de58c7b84f54186f7780900b319fc
-README.zh.md: e1ed9a9165b993cb4ea8a82af6641d5befd77a07
+/hydra-cli-behavior-reference:
+  en: aa1a8094a9c2e8fb
+  zh: 0b1d9f22d8fa41bb
+/hydra-cli-behavior-reference/profile-boot:
+  en: fbb9877f4c4c696c
+  zh: dc4c079ba02c833c
+/hydra-cli-behavior-reference/profile-boot/app-arguments:
+  en: 3d56daa0cf45ddba
+  zh: 8b236796987a8069
+/hydra-cli-behavior-reference/profile-boot/config-schema-dump:
+  en: a356f8a68f3b3685
+  zh: c718713b5d709295
+/hydra-cli-behavior-reference/startup-diagnostics:
+  en: d6368bf97a02bd57
+  zh: 2ab7888a108961ce
+/hydra-cli-behavior-reference/plugin-management:
+  en: 7c52c380c976d77c
+  zh: 66c5f414871d45dc
+/hydra-cli-behavior-reference/web-profile:
+  en: ed5ce1d2efb370c9
+  zh: 6b4edc2dd6d8510b
+/hydra-cli-behavior-reference/shared-deployment-behavior:
+  en: 2782190b41663d20
+  zh: 1036eee238499524
+/hydra-cli-behavior-reference/source-execution:
+  en: 05c2b23790f7b296
+  zh: 51f809020fb230a1

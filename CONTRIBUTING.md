@@ -19,6 +19,7 @@ Hydra is developed and tested on Linux. Reports from macOS and Windows are espec
 - Keep each pull request to one change, and add or update tests for any change in behavior.
 - Before opening it, run `pnpm run typecheck`, `pnpm run lint`, and the tests of the packages you changed, for example `pnpm exec vitest run packages/learning/memory`.
 - Follow the conventions in [AGENTS.md](AGENTS.md); coding agents read the same file.
+- Plugin metadata is not English-only: a new plugin package needs a title and description in `locale/en.json` and in every other shipped language (`zh`, `ja`, `es`, `fr`, `de`, `ru`, `pt`); `pnpm exec tsx scripts/verify-locale-metadata.ts` lists what is missing.
 - Hydra does not maintain the Chinese translations of its documentation, so the translation-pairing check is expected to fail. Every other check should pass.
 
 Contributions are released under the [MIT License](LICENSE), the same license as DeepSeek Harness.
@@ -38,9 +39,10 @@ Start with the [development guide](docs/development.md) and the [architecture do
 The `master` branch mirrors DeepSeek Harness; `main` is Hydra.
 
 1. Bring `master` up to date: `gh repo sync zez-dev/hydra --branch master`, or **Sync fork** on GitHub while viewing `master`.
-2. On a new branch from `main`, merge `master` and resolve the conflicts. Regenerate what the checks name as stale; `pnpm run check:ci:static` lists every generated file that is out of date (translation pairing is expected to fail).
-3. Open a pull request. The Hydra check must pass before it is merged.
-4. If the merge added a workflow under `.github/workflows/`, disable it under **Actions** (or with `gh workflow disable`): only `hydra-check.yml` should run here, because upstream's workflows need DeepSeek's runners and secrets.
+2. On a new branch from `main`, merge `master` and resolve the conflicts. Regenerate what the checks name as stale; `pnpm run check:ci:static` lists every generated file that is out of date. Translation pairing is expected to fail, because Hydra's own README lines are English-only.
+3. Set the `version` of every Hydra-only package to the upstream release: `/doctor` reports its own package version as the DeepSeek Harness version. If the merge took upstream's PWA icons, redraw them from Hydra's `apps/web/public/favicon.svg` with `pnpm -C apps/web run render:app-icons`.
+4. Open a pull request. The Hydra check must pass before it is merged.
+5. If the merge added a workflow under `.github/workflows/`, disable it under **Actions** (or with `gh workflow disable`): only `hydra-check.yml` should run here, because upstream's workflows need DeepSeek's runners and secrets.
 
 ### Publish a release
 

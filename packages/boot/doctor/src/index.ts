@@ -4,22 +4,29 @@
  * the `./tools` entry returns the same report as JSON. Checks cover the
  * Harness home, the workspace, sandboxing, the native addon, git, mounted
  * Hydra plugins, tool calling compat rows, credentials, and an optional live
- * model probe. The only mutation is `--fix`, which creates the two `.dsh/`
- * workspace folders. Named exports preserve Loader injection metadata.
+ * model probe. A check that throws becomes one `fail` row naming the error,
+ * and the other checks still run. The only mutation is `--fix`, which creates
+ * the two `.dsh/` workspace folders. Named exports preserve Loader injection
+ * metadata.
  * @module @deepseek-ai/dsh-doctor
  */
 
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Context, FiberState } from '@deepseek-ai/cordis'
+import type { Entry } from '@deepseek-ai/cordis-plugin-loader'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-app-boot'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
+import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { FinishReason } from '@deepseek-ai/dsh-llm'
+import type { SkillLockStatusEntry } from '@deepseek-ai/dsh-skill-lock'
 import {
   checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError, errorMessage, firstLine,
-  renderReport, summarize, WORKSPACE_FOLDERS,
+  renderReport, row, summarize, WORKSPACE_FOLDERS,
 } from './checks.ts'
 import { nodeEnvironment } from './host.ts'
 import type {
@@ -72,26 +79,26 @@ const FIBER_STATE_NAMES: Record<FiberState, string> = {
   [5 as FiberState.UNLOADING]: 'unloading',
 }
 
-/** Structural seams read only when mounted. */
-interface LoaderEntrySeam {
-  /** The Loader assigns every row an `id`, generated when cordis.yml names none. */
-  options: { id: string; name: string; config?: unknown; disabled?: unknown }
-  fiber?: { state: FiberState; inject: Record<string, unknown>; ctx: { get(name: string): unknown } } | null
+/** One check of the report: the rows it observes, computed synchronously or asynchronously. */
+type DoctorCheck = () => DoctorRow[] | Promise<DoctorRow[]>
+
+/**
+ * Whether a value from a Loader row's raw config is an object.
+ * @param value - raw config value.
+ * @returns whether its members can be read.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
 }
-interface LoaderSeam {
-  entries(): Iterable<LoaderEntrySeam>
-}
-interface CredentialsSeam {
-  resolve(ref: string): Promise<{ value: string } | undefined>
-}
-interface SettingsSeam {
-  get(ns: string): unknown
-}
-interface DefaultModelSeam {
-  currentSelection(): { provider: string; model: string } | undefined
-}
-interface ProfileSeam {
-  name: string
+
+/**
+ * One member of a Loader row's raw config object.
+ * @param value - raw config value.
+ * @param key - member name.
+ * @returns the member, or `undefined` when `value` is not an object.
+ */
+function member(value: unknown, key: string): unknown {
+  return isRecord(value) ? value[key] : undefined
 }
 
 /**
@@ -116,37 +123,46 @@ export function parseDoctorInput(rawInput: string): { probe: boolean; fix: boole
   return { probe, fix, ...route === undefined ? {} : { route } }
 }
 
-/** The skill-lock service, read structurally so doctor works without that package. */
-interface SkillLockSeam {
-  status(cwd: string, signal?: AbortSignal): Promise<readonly { readonly state: string; readonly name: string }[]>
-}
-
 /**
  * Install `ctx.doctor` and `/doctor`.
  * @param ctx - plugin context carrying `commands` and `llm`; `loader`,
- *   `credentials`, `settings`, `agentDefaultModel`, `profileContext`, and the Hydra services are read when mounted.
+ *   `credentials`, `skillLock`, `agentDefaultModel`, `profileContext`, and the Hydra services are read when mounted.
  * @param config - deployment configuration.
  */
 export function apply(ctx: Context, config: Config): void {
   // Read per run, so an environment set on `ctx.doctor.internals` after activation applies.
   const environment = (): DoctorEnvironment => service.internals.environment ?? nodeEnvironment()
 
-  function loaderEntries(): LoaderEntrySeam[] {
-    const loader = ctx.get('loader') as LoaderSeam | undefined
-    if (loader === undefined || typeof loader.entries !== 'function') return []
-    return [...loader.entries()]
+  function loaderEntries(): Entry[] {
+    const loader = ctx.get('loader')
+    return loader === undefined ? [] : [...loader.entries()]
   }
 
   function rowConfig(packageName: string): Record<string, unknown> | undefined {
-    const entry = loaderEntries().find(candidate => candidate.options.name === packageName)
-    const value = entry?.options.config
-    return value !== null && typeof value === 'object' ? value as Record<string, unknown> : undefined
+    const value: unknown = loaderEntries().find(candidate => candidate.options.name === packageName)?.options.config
+    return isRecord(value) ? value : undefined
+  }
+
+  /**
+   * Run one check so that a throw becomes a single `fail` row naming the error, logged in full.
+   * @param section - report section the check fills.
+   * @param check - the check.
+   * @param name - check name of the failure row.
+   * @returns the check's rows, or the failure row.
+   */
+  async function contained(section: string, check: DoctorCheck, name = 'could not run'): Promise<DoctorRow[]> {
+    try {
+      return await check()
+    } catch (error) {
+      ctx.logger.warn(error)
+      return [row(section, name, 'fail', firstLine(String(error)), 'address the cause the error names; the log under $DSH_HOME/logs has the full error')]
+    }
   }
 
   async function checkSkillLock(cwd: string): Promise<DoctorRow[]> {
-    const lock = ctx.get('skillLock') as SkillLockSeam | undefined
+    const lock = ctx.get('skillLock')
     if (lock === undefined) return []
-    let entries: readonly { readonly state: string; readonly name: string }[]
+    let entries: readonly SkillLockStatusEntry[]
     try {
       entries = await lock.status(cwd)
     } catch (error) {
@@ -185,8 +201,8 @@ export function apply(ctx: Context, config: Config): void {
     for (const pkg of ['@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh']) {
       const entry = loaderEntries().find(candidate => candidate.options.name === pkg)
       // The Loader mounts no fiber for a disabled row, whether `disabled` is `true` or an expression.
-      if (entry?.fiber === undefined || entry.fiber === null) continue
-      const required = (entry.options.config as Record<string, unknown> | undefined)?.['requireDescription']
+      if (entry?.fiber === undefined) continue
+      const required = member(entry.options.config, 'requireDescription')
       const short = pkg.replace('@deepseek-ai/dsh-', '')
       rows.push(required === false
         ? { section: 'tools', check: `${short} description`, status: 'ok', detail: 'optional' }
@@ -200,7 +216,7 @@ export function apply(ctx: Context, config: Config): void {
     const entries = loaderEntries()
     for (const entry of entries) {
       const fiber = entry.fiber
-      if (fiber === undefined || fiber === null || entry.options.disabled === true) continue
+      if (fiber === undefined || entry.options.disabled === true) continue
       const state = FIBER_STATE_NAMES[fiber.state]
       if (state === 'active') continue
       const missing = state === 'pending' ? Object.keys(fiber.inject).filter(service => fiber.ctx.get(service) === undefined) : []
@@ -223,19 +239,23 @@ export function apply(ctx: Context, config: Config): void {
 
   async function checkCredentials(): Promise<DoctorRow[]> {
     const rows: DoctorRow[] = []
-    const credentials = ctx.get('credentials') as CredentialsSeam | undefined
-    const settings = ctx.get('settings') as SettingsSeam | undefined
-    const refs = new Map<string, string>()
-    refs.set('deepseek-official', 'DEEPSEEK_API_KEY')
-    const piAi = settings === undefined ? undefined : settings.get('llm-pi-ai') as { providers?: Record<string, { apiKeyEnv?: string } | undefined> } | undefined
-    for (const [provider, profile] of Object.entries(piAi?.providers ?? {})) {
-      if (typeof profile?.apiKeyEnv === 'string') refs.set(provider, profile.apiKeyEnv)
+    const credentials = ctx.get('credentials')
+    const refs = new Map<string, string>([['deepseek-official', 'DEEPSEEK_API_KEY']])
+    // Each provider profile on an enabled pi-ai row is one route; a disabled row has no fiber and registers none.
+    for (const entry of loaderEntries()) {
+      if (entry.options.name !== '@deepseek-ai/dsh-llm-pi-ai' || entry.fiber === undefined) continue
+      const providers = member(entry.options.config, 'providers')
+      for (const [provider, profile] of Object.entries(isRecord(providers) ? providers : {})) {
+        const ref = member(profile, 'apiKeyEnv')
+        if (typeof ref === 'string') refs.set(provider, ref)
+      }
     }
     for (const [provider, ref] of refs) {
       let resolved = false
       if (credentials !== undefined) {
         try {
-          resolved = ((await credentials.resolve(ref))?.value ?? '').length > 0
+          // Raw row config is unvalidated: a store answers a malformed reference as unset or by throwing.
+          resolved = ((await credentials.resolve(ref as CredentialRef))?.value ?? '').length > 0
         } catch {
           // A broken credential store reads as unresolved.
           resolved = false
@@ -292,27 +312,31 @@ export function apply(ctx: Context, config: Config): void {
   async function run(options: DoctorOptions = {}): Promise<DoctorReport> {
     const env = environment()
     const cwd = options.cwd ?? options.agent?.session.header.cwd ?? process.cwd()
-    const profile = (ctx.get('profileContext') as ProfileSeam | undefined)?.name ?? 'web'
+    const profile = ctx.get('profileContext')?.name ?? 'web'
     if (options.fix === true) {
       for (const folder of WORKSPACE_FOLDERS) await mkdir(join(cwd, folder), { recursive: true })
     }
-    const rows: DoctorRow[] = [
-      ...checkVersion(env),
-      ...checkHome(env, profile),
-      ...checkWorkspace(env, cwd),
-      ...checkSandbox(env),
-      ...checkNativeAddon(env),
-      ...checkGit(env, cwd),
-      ...checkPlugins(),
-      ...checkTools(),
-      ...await checkSkillLock(cwd),
-      ...await checkCredentials(),
+    const checks: [section: string, check: DoctorCheck][] = [
+      ['about', () => checkVersion(env)],
+      ['home', () => checkHome(env, profile)],
+      ['workspace', () => checkWorkspace(env, cwd)],
+      ['sandbox', () => checkSandbox(env)],
+      ['native', () => checkNativeAddon(env)],
+      ['git', () => checkGit(env, cwd)],
+      ['plugins', checkPlugins],
+      ['tools', checkTools],
+      ['skills', () => checkSkillLock(cwd)],
+      ['credentials', checkCredentials],
     ]
+    const rows: DoctorRow[] = []
+    for (const [section, check] of checks) rows.push(...await contained(section, check))
     if (options.probe === true) {
-      const route = options.route ?? (ctx.get('agentDefaultModel') as DefaultModelSeam | undefined)?.currentSelection()
-      rows.push(route === undefined
-        ? { section: 'credentials', check: 'probe', status: 'warn', detail: 'no default route to probe', fix: 'pass provider/model, for example /doctor --probe zhipu/glm-4.5' }
-        : await probeRoute(route, options.agent))
+      rows.push(...await contained('credentials', async () => {
+        const route = options.route ?? ctx.get('agentDefaultModel')?.currentSelection()
+        return [route === undefined
+          ? { section: 'credentials', check: 'probe', status: 'warn', detail: 'no default route to probe', fix: 'pass provider/model, for example /doctor --probe zhipu/glm-4.5' }
+          : await probeRoute(route, options.agent)]
+      }, 'probe'))
     }
     return { generatedAt: new Date().toISOString(), rows, summary: summarize(rows) }
   }

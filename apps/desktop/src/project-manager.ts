@@ -22,11 +22,8 @@ import {
 import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
-import {
-  initProfile, PROFILE_TEMPLATES, sanitizeProfile, type ProfileTemplate,
-} from '@deepseek-ai/dsh-app-boot'
-import { migrateDesktopProfileLinks } from './profile-packages.ts'
-import { cleanProfileCorePackages } from './profile-core-cleanup.ts'
+import { initProfile, removeLinkProjections, sanitizeProfile } from '@deepseek-ai/dsh-app-boot'
+import { PROFILE_TEMPLATES, type ProfileTemplate } from '@deepseek-ai/dsh-official-bundles'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
@@ -76,20 +73,19 @@ export class DesktopProjectManager {
    * @returns Backup path after the locked profile write, or undefined if the patch was absent.
    */
   async disableAllPlugins(): Promise<string | undefined> {
-    return this.withLock(() => sanitizeProfile('dsh', this.paths.profile, WEB_PROFILE.bundles))
+    return this.withLock(() => sanitizeProfile('hydra', this.paths.profile, WEB_PROFILE.bundles))
   }
 
   /**
    * Load application metadata and prepare the external plugin profile without installing packages.
-   * @param production - Remove application-owned profile packages before packaged Host startup.
    */
-  async applyRelease(production = false): Promise<void> {
+  async applyRelease(): Promise<void> {
     await this.withLock(() => {
-      const descriptor = readDesktopRuntime(this.runtime.dsh)
-      cleanProfileCorePackages(this.paths.profile, descriptor.sharedPackages.map(entry => entry.name), production)
+      // Validation only: an unreadable or mismatched runtime descriptor stops preparation before the Host starts.
+      readDesktopRuntime(this.runtime.dsh)
       migrateProfileSettings(this.paths.profile)
-      migrateDesktopProfileLinks(this.paths.profile)
       createPluginProfile(this.paths.profile)
+      removeLinkProjections(this.paths.profile)
     })
   }
 

@@ -3,42 +3,27 @@
     - button "Ask a research subagent to"
     - text: /
     - 'button "Switch subagent: event-sourcing researcher"': event-sourcing researcher
-  - img
   - text: Standard mode
-  - button "More actions":
-    - img
-  - button "Open right sidebar":
-    - img
+  - button "More actions"
+  - button "Open right sidebar"
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
-- button "System prompt":
-  - img
-  - img
-  - text: System prompt
-- text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. {{clock}}"
-- button "Copy":
-  - img
-- 'button "Rewind to here: redo this turn in a new conversation"':
-  - img
-- button "Context injection @deepseek-ai/dsh-system-prompt":
-  - img
-  - img
-  - text: Context injection @deepseek-ai/dsh-system-prompt
+  - button "More conversation views"
+- text: "Explain event sourcing in one sentence.Your parent agent id is \"session-{{uuid}}\". Before you finish, send your result to that agent with send_message({ agent_id: \"session-{{uuid}}\", message: \"<self-contained result>\" }). The parent shares your workspace but does not automatically receive your transcript, tool output, or reasoning. Send earlier messages as well when a finding changes what the parent should do next; sending a message does not end your turn. If your closing text follows your last message to the parent with no tool call or new input in between, the parent does not receive it, so end with one short line saying you sent the result, without repeating or summarizing it. {{clock}}"
+- button "Copy"
+- 'button "Rewind to here: redo this turn in a new conversation"'
 - paragraph: partial
 - status: The dragon is thinking…
+- text: The dragon is thinking for {{duration}} ···
 - list:
   - listitem:
     - text: Keep working until I stop you again.
-    - button "Edit queued message":
-      - img
-    - button "Remove queued message":
-      - img
-    - button "Steer queued message":
-      - img
+    - button "Edit queued message"
+    - button "Remove queued message"
+    - button "Steer queued message"
 - textbox "Parent session offline; sending is unavailable but you can still stop the run" [disabled]
-- button "Add files or run commands" [disabled]:
-  - img
+- button "Add files or run commands" [disabled]
 - 'button "Access mode, current: Custom" [disabled]': Custom
 - button "Stop generating"
 - button "Send message" [disabled]

@@ -1,0 +1,40 @@
+# Bilingual-pair consistency record for 2026-10-31-agent-team-take-turns.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.md
+/agent-note-teammates-that-take-turns:
+  en: 2d40adf78049bfed
+  zh: 719be2b9e9deee85
+/agent-note-teammates-that-take-turns/problem:
+  en: 247affa120b2bb16
+  zh: cd2447b656dc1aa3
+/agent-note-teammates-that-take-turns/decision:
+  en: 25b6a1072cd8b5d4
+  zh: ee5af5250ce409bd
+/agent-note-teammates-that-take-turns/deadlock-freedom:
+  en: d4d605b84cf6790b
+  zh: 388d5e4d730e9919
+/agent-note-teammates-that-take-turns/alternatives-considered:
+  en: 6119e2aff3b6be5a
+  zh: 6119e2aff3b6be5a
+/agent-note-teammates-that-take-turns/alternatives-considered/why-not-maxactivesubagents-1:
+  en: 578546531e8d0ccf
+  zh: f3866f8076509747
+/agent-note-teammates-that-take-turns/alternatives-considered/why-not-gate-only-at-agent-pre-step:
+  en: d2b671b10daaccf2
+  zh: c29f7a6212888856
+/agent-note-teammates-that-take-turns/alternatives-considered/why-not-keep-messages-in-the-team-until-the-turn-arrives:
+  en: 7612e84c95544640
+  zh: b22932963b48e841
+/agent-note-teammates-that-take-turns/alternatives-considered/why-not-include-the-lead-in-the-rotation:
+  en: c84a7a4a33b3305c
+  zh: 19fe1a4b3699bc9a
+/agent-note-teammates-that-take-turns/alternatives-considered/why-not-a-count-such-as-maxactiveteammates:
+  en: e2c91200cef210d5
+  zh: 8c70a68c2e7a0cd3
+/agent-note-teammates-that-take-turns/testing:
+  en: 90900844da5837a2
+  zh: 51f3f0a3809234db
+/agent-note-teammates-that-take-turns/consequences:
+  en: cfb369e95a1588a4
+  zh: effef5b2af0f972a

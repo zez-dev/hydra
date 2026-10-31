@@ -1,0 +1,10 @@
+version: 1
+scenario: team-take-turns
+profile: headless
+composition: team-take-turns
+recording: authored
+header:
+  class: team-take-turns
+  pin: true
+workspace:
+  final: true

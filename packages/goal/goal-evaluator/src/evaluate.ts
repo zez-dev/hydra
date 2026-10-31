@@ -31,9 +31,9 @@ export function collectEvidence(events: readonly SessionEvent[], limit: number, 
       continue
     }
     if (event.type !== 'tool/result') continue
-    const [block] = event.data.message.content
-    const text = block.content.map(part => part.type === 'text' ? part.text : `[${part.type}]`).join('')
-    results.push({ callId: block.toolCallId, text })
+    const message = event.data.message
+    const text = message.content.map(part => part.type === 'text' ? part.text : `[${part.type}]`).join('')
+    results.push({ callId: message.toolCallId, text })
   }
   return results.slice(-limit).map(({ callId, text }) => {
     const body = text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 1))}…`

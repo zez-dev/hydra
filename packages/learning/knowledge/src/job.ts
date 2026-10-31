@@ -5,7 +5,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { JobId, JobStart } from '@deepseek-ai/dsh-jobs'
+import type { JobId, JobSpec } from '@deepseek-ai/dsh-jobs'
 
 declare module '@deepseek-ai/dsh-jobs' {
   interface JobKindMap {
@@ -14,24 +14,24 @@ declare module '@deepseek-ai/dsh-jobs' {
 }
 
 /**
- * Start one knowledge run as a `knowledge-enrich` job owned by an agent.
- * The job completes with `complete`'s detail and output, ends `killed` when it
+ * Start one knowledge run as a `knowledge-enrich` job owned by a session.
+ * The job completes with `complete`'s detail and result, ends `killed` when it
  * was cancelled, and ends `failed` with the error message otherwise.
  * @param jobs - the job registry.
- * @param owner - the agent that owns the job; its disposal cancels the run.
+ * @param owner - the session that owns the job; the disposal of its live agent cancels the run.
  * @param label - the job label.
  * @param cancelled - the cancellation message when the job is killed without a reason.
  * @param work - the work, given the job's cancellation signal.
- * @param complete - the completed job's detail and output from the work's result.
+ * @param complete - maps the work's return value to the completed job's detail and result.
  * @returns the job id.
  */
 export function startKnowledgeJob<T>(
   jobs: Context['jobs'],
-  owner: NonNullable<JobStart['owner']>,
+  owner: NonNullable<JobSpec['owner']>,
   label: string,
   cancelled: string,
   work: (signal: AbortSignal) => Promise<T>,
-  complete: (result: T) => { detail: string; output: string },
+  complete: (result: T) => { detail: string; result: string },
 ): JobId {
   const controller = new AbortController()
   return jobs.start({

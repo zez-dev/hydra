@@ -7,12 +7,13 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
-import type { JobStart } from '@deepseek-ai/dsh-jobs'
+import { JobId, type JobSpec } from '@deepseek-ai/dsh-jobs'
 import LlmRuntime, { createUserMessage, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import * as Knowledge from '@deepseek-ai/dsh-knowledge'
 import * as KnowledgeTools from '@deepseek-ai/dsh-knowledge/tools'
@@ -107,7 +108,7 @@ async function call(
   name: string,
   args: Record<string, unknown>,
 ): Promise<{ isError: boolean; text: string }> {
-  const result = await ctx.tools.execute({
+  const result = await executeToolFixture(ctx, {
     signal: new AbortController().signal, callId: ToolCallId(`call-${name}`), name, arguments: args, ...agent === undefined ? {} : { agent },
   })
   return { isError: result.isError, text: result.content.map(block => (block.type === 'text' ? block.text : '')).join('') }
@@ -210,15 +211,15 @@ describe('knowledge_add and the workspace collections a session reaches', () => 
     const inline = await call(ctx, agent, 'knowledge_add', { path: await notes(join(root!, 'second')) })
     expect(inline.text).toContain('Summaries: summarized 2, failed 0, 0 still waiting')
 
-    const starts: JobStart[] = []
-    ctx.provide('jobs', { start: (spec: JobStart) => starts.push(spec) && `knowledge-enrich-${starts.length}` } as unknown as Context['jobs'])
+    const starts: JobSpec[] = []
+    ctx.provide('jobs', { start: (spec: JobSpec) => starts.push(spec) && `knowledge-enrich-${starts.length}` } as unknown as Context['jobs'])
     const answers = ['allowed-once', 'allowed-once']
     vi.spyOn(ctx.approval, 'request').mockImplementation(() => Promise.resolve(answers.shift() as ApprovalOutcome))
     const queued = await call(ctx, agent, 'knowledge_add', { path: await notes(join(root!, 'third')) })
     expect(queued.text).toContain('Summarizing its files with mock/mock as background job knowledge-enrich-1')
     expect(starts[0]).toMatchObject({ kind: 'knowledge-enrich', label: 'knowledge_add summaries for third (2 files)' })
-    expect(starts[0]?.owner).toBe(agent)
-    const run = starts[0]!.run()
+    expect(starts[0]?.owner).toBe(agent.session.id)
+    const run = starts[0]!.run({ id: JobId('knowledge-enrich-1'), append() {}, updateProgress() {} })
     await expect(run.done).resolves.toMatchObject({ status: 'completed', detail: '2 summarized' })
   })
 

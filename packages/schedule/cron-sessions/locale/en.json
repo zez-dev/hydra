@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Scheduled sessions",
+    "description": "Start fresh sessions on a cron schedule, catch up on missed runs at startup, and record each outcome."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Vérification des objectifs",
+    "description": "Confirme par une requête de modèle distincte qu'un objectif est atteint avant que le modèle puisse le marquer comme terminé."
+  }
+}

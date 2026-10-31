@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Poursuite automatique",
+    "description": "Poursuit automatiquement un tour lorsque la réponse est coupée par la limite de jetons de sortie."
+  }
+}

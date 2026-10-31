@@ -1,5 +1,17 @@
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * The recall message this plugin adds to a step, in `recall` form. The kind
+     * is the name released Hydra logs migrate this plugin's sources to.
+     * @persistenceAttribution
+     */
+    'plugin:dsh-memory': { kind: 'plugin:dsh-memory' } & ContextFormed
+  }
+}
 
 /** Opaque identity of one stored memory entry; crosses the model, command, and storage boundaries. */
 export type MemoryEntryId = Branded<'MemoryEntryId'>

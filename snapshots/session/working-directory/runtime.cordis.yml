@@ -1,0 +1,10 @@
+# The scenario removes its own `second` directory with `rm -rf` after leaving
+# it. Hydra's command gate refuses that rule when nobody can confirm it, so
+# this scenario allows the one rule and keeps every other gate rule.
+- id: command-gate
+  config:
+    mode: confirm
+    unattendedMode: deny
+    allow: [rm-destructive]
+    denyExtra: []
+    temporaryRoots: []

@@ -6,7 +6,8 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { buildWindow, langFromPath, readMetaFromMeta, READ_MAX_BYTES, READ_MAX_LINE_LENGTH } from '../src/read-render.ts'
+import { languageForPath } from '@deepseek-ai/dsh-util-code-language'
+import { buildWindow, langFromPath, readMetaFromMeta, READ_MAX_BYTES, READ_MAX_LINE_LENGTH, windowCapReserveBytes } from '../src/read-render.ts'
 import type { ReadWindow } from '../src/read-render.ts'
 
 const DEFAULT_CAPS = { maxLineLength: READ_MAX_LINE_LENGTH, maxBytes: READ_MAX_BYTES }
@@ -115,15 +116,150 @@ describe('buildWindow', () => {
       expect(result.lines.map(l => l.text)).toEqual(['one', 'two'])
     })
   })
+
+  describe('numbered-line budget (maxNumberedBytes)', () => {
+    // As the model reads them: "1: aaaa" (7 bytes), "\n2: bbbb" (8), "\n3: cccc" (8).
+    const THREE = 'aaaa\nbbbb\ncccc'
+
+    it('stops before the numbered line that would exceed the budget, counting prefixes and separators', async () => {
+      const result = await buildWindow(whole(THREE), { ...READ_ALL, maxNumberedBytes: 22 }, 'f')
+      expect(result.lines.map(l => l.number)).toEqual([1, 2])
+      expect(result.totalLines).toBe(3)
+      expect(result.truncatedByNumberedBytes).toBe(true)
+      expect(result.truncatedByBytes).toBe(false)
+    })
+
+    it('admits a line that ends exactly at the budget', async () => {
+      const result = await buildWindow(whole(THREE), { ...READ_ALL, maxNumberedBytes: 23 }, 'f')
+      expect(result.lines.map(l => l.number)).toEqual([1, 2, 3])
+      expect(result.truncatedByNumberedBytes).toBe(false)
+    })
+
+    it('counts the longer prefix of a multi-digit line number', async () => {
+      // "9: x" (4 bytes) + "\n10: x" (6 bytes) = 10 bytes.
+      const ten = Array.from({ length: 10 }, () => 'x').join('\n')
+      const over = await buildWindow(whole(ten), { ...READ_ALL, offset: 9, maxNumberedBytes: 9 }, 'f')
+      expect(over.lines.map(l => l.number)).toEqual([9])
+      const exact = await buildWindow(whole(ten), { ...READ_ALL, offset: 9, maxNumberedBytes: 10 }, 'f')
+      expect(exact.lines.map(l => l.number)).toEqual([9, 10])
+    })
+
+    it('counts UTF-8 bytes, not characters', async () => {
+      // "1: éé" is 7 bytes (5 characters); "\n2: é" is 6 bytes (5 characters).
+      const result = await buildWindow(whole('éé\né'), { ...READ_ALL, maxNumberedBytes: 12 }, 'f')
+      expect(result.lines.map(l => l.text)).toEqual(['éé'])
+      expect(result.truncatedByNumberedBytes).toBe(true)
+    })
+
+    it('returns the first selected line even when it alone exceeds the budget', async () => {
+      const result = await buildWindow(whole(THREE), { ...READ_ALL, offset: 2, maxNumberedBytes: 3 }, 'f')
+      expect(result.lines).toEqual([{ number: 2, text: 'bbbb' }])
+      expect(result.totalLines).toBe(3)
+      expect(result.truncatedByNumberedBytes).toBe(true)
+    })
+
+    it('does not report a cut when the only line exceeds the budget and nothing follows it', async () => {
+      const result = await buildWindow(whole('aaaa'), { ...READ_ALL, maxNumberedBytes: 3 }, 'f')
+      expect(result.lines).toEqual([{ number: 1, text: 'aaaa' }])
+      expect(result.truncatedByNumberedBytes).toBe(false)
+    })
+
+    it('leaves the stop to maxBytes when the selected text reaches it first', async () => {
+      const result = await buildWindow(whole(THREE), { ...READ_ALL, maxBytes: 9, maxNumberedBytes: 100 }, 'f')
+      expect(result.lines.map(l => l.number)).toEqual([1, 2])
+      expect(result.truncatedByBytes).toBe(true)
+      expect(result.truncatedByNumberedBytes).toBe(false)
+    })
+
+    it('applies the budget across chunk boundaries', async () => {
+      const result = await buildWindow(chunked(THREE, 3), { ...READ_ALL, maxNumberedBytes: 22 }, 'f')
+      expect(result.lines.map(l => l.number)).toEqual([1, 2])
+      expect(result.totalLines).toBe(3)
+    })
+  })
 })
 
+describe('windowCapReserveBytes', () => {
+  it('reserves the envelope, the blank line, and the capped footer at 16-digit line numbers', () => {
+    // "<path>/abs/a.txt</path>\n<type>file</type>\n<content>\n" (52) + "\n\n" (2) + "\n</content>" (11)
+    // + "(Output capped at 500 bytes, the most one read returns in this context window.
+    // Showing lines 1-9007199254740991 of 9007199254740991. Use offset=9007199254740992 to continue.)" (174).
+    expect(windowCapReserveBytes('/abs/a.txt', 1, 500)).toBe(239)
+  })
+
+  it('grows with the path, the offset, and the cap digits', () => {
+    expect(windowCapReserveBytes('/abs/é.txt', 1, 500)).toBe(239 + 1)
+    expect(windowCapReserveBytes('/abs/a.txt', 20001, 500)).toBe(239 + 4)
+    expect(windowCapReserveBytes('/abs/a.txt', 1, 20400)).toBe(239 + 2)
+  })
+})
+
+/**
+ * The short `lang` values a recorded read persisted, transcribed verbatim.
+ * Changing any value changes replay-visible output for an already-recorded
+ * session, so this table is the test's independent expectation rather than a
+ * second read of the implementation's own data.
+ */
+const PERSISTED_READ_LANG_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ts: 'ts', tsx: 'tsx', mts: 'ts', cts: 'ts',
+  js: 'js', jsx: 'jsx', mjs: 'js', cjs: 'js',
+  json: 'json', jsonc: 'json',
+  py: 'py', rb: 'rb', go: 'go', rs: 'rs', java: 'java',
+  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', hpp: 'cpp', cxx: 'cpp',
+  cs: 'cs', kt: 'kotlin', swift: 'swift', php: 'php',
+  sh: 'sh', bash: 'sh', zsh: 'sh',
+  yaml: 'yaml', yml: 'yaml', toml: 'toml', ini: 'ini',
+  md: 'md', markdown: 'md', mdx: 'mdx',
+  html: 'html', htm: 'html', css: 'css', scss: 'scss', less: 'less',
+  sql: 'sql', xml: 'xml', lua: 'lua',
+}
+
 describe('langFromPath', () => {
-  it('maps a known extension to its language hint, case-insensitively', () => {
+  it('keeps every already-persisted suffix byte-identical', () => {
+    expect(Object.keys(PERSISTED_READ_LANG_BY_EXTENSION)).toHaveLength(43)
+    for (const [extension, hint] of Object.entries(PERSISTED_READ_LANG_BY_EXTENSION)) {
+      expect(langFromPath(`file.${extension}`), extension).toBe(hint)
+    }
+  })
+
+  it('gives every other suffix the language short id', () => {
+    // A suffix with no persisted value has none to preserve, so the projection
+    // applies the language's short name instead of the canonical grammar id.
+    expect(langFromPath('build.ps1')).toBe('ps1')
+    expect(langFromPath('table.csv')).toBe('csv')
+    expect(langFromPath('deploy.bat')).toBe('bat')
+    expect(langFromPath('.env')).toBe('env')
+    expect(langFromPath('server.log')).toBe('log')
+    expect(langFromPath('message.proto')).toBe('proto')
+    expect(langFromPath('infra.tf')).toBe('tf')
+    expect(langFromPath('paper.tex')).toBe('tex')
+    expect(langFromPath('model.jl')).toBe('jl')
+    expect(langFromPath('top.v')).toBe('v')
+    expect(langFromPath('build.gradle')).toBe('gradle')
+    // A later suffix of an already-known language follows that language's short name.
+    expect(langFromPath('app.conf')).toBe('ini')
+    expect(langFromPath('task.rake')).toBe('rb')
+    expect(langFromPath('events.jsonl')).toBe('json')
+    expect(langFromPath('page.xhtml')).toBe('html')
+    expect(langFromPath('logo.svg')).toBe('xml')
+    expect(langFromPath('notebook.ipynb')).toBe('json')
+  })
+
+  it('maps a known extension to its persisted short hint, case-insensitively', () => {
     expect(langFromPath('src/a.ts')).toBe('ts')
     expect(langFromPath('src/a.TSX')).toBe('tsx')
     expect(langFromPath('/abs/module.mjs')).toBe('js')
     expect(langFromPath('conf.yml')).toBe('yaml')
     expect(langFromPath('README.md')).toBe('md')
+  })
+
+  it('keeps the canonical ids the Client code surfaces use out of the persisted hint', () => {
+    // The Client reads the shared table directly; only this projection owns the
+    // persisted value, so the two intentionally differ for the suffixes a
+    // recorded session already holds.
+    expect(languageForPath('src/a.ts')).toBe('typescript')
+    expect(languageForPath('README.md')).toBe('markdown')
+    expect(langFromPath('src/a.ts')).not.toBe(languageForPath('src/a.ts'))
   })
 
   it('reads the extension after the last path segment and last dot', () => {

@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import LlmRuntime, { createUserMessage, LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createToolResultMessage, createUserMessage, LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
@@ -85,7 +85,7 @@ async function liveAgent(ctx: Context, id = 'errors-agent'): Promise<{ agent: Ag
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id))
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -99,16 +99,11 @@ function call(session: Session, turn: number, id: string, name: string, command:
   session.append('tool/call', { turn, step: 1, callId: ToolCallId(id), name, arguments: JSON.stringify({ command }) })
 }
 
-function result(session: Session, turn: number, id: string, name: string, text: string, failed: boolean): void {
+function result(session: Session, turn: number, id: string, text: string, failed: boolean): void {
   session.append('tool/result', {
     turn,
     step: 1,
-    message: {
-      id: `m-${id}` as never,
-      role: 'user',
-      content: [{ type: 'tool-result', toolCallId: ToolCallId(id), content: [{ type: 'text', text }], ...failed ? { isError: true } : {} }],
-      source: { kind: 'tool', toolName: name, callId: ToolCallId(id) },
-    } as never,
+    message: createToolResultMessage({ callId: ToolCallId(id), content: [{ type: 'text', text }], isError: failed }),
     ...failed ? { error: { name: 'ToolError', code: 'EXIT' } } : {},
   }, { surfaceOp: 'append' })
 }
@@ -118,9 +113,9 @@ function recordFailureThenFix(session: Session, turn: number): void {
   session.append('turn/start', { turn })
   session.append('user/message', createUserMessage({ content: [{ type: 'text', text: `task ${turn}` }], source: { kind: 'user' } }), { surfaceOp: 'append' })
   call(session, turn, `${turn}-a`, 'bash', 'pnpm test')
-  result(session, turn, `${turn}-a`, 'bash', 'bash: pnpm: command not found', true)
+  result(session, turn, `${turn}-a`, 'bash: pnpm: command not found', true)
   call(session, turn, `${turn}-b`, 'bash', 'export PATH="$HOME/.local/bin:$PATH" && pnpm test')
-  result(session, turn, `${turn}-b`, 'bash', 'Tests 3 passed', false)
+  result(session, turn, `${turn}-b`, 'Tests 3 passed', false)
   session.append('turn/end', { turn, reason: 'completed' } as never)
 }
 
@@ -149,19 +144,19 @@ describe('collectErrorPairs', () => {
     const { session } = await liveAgent(ctx)
     session.append('turn/start', { turn: 1 })
     call(session, 1, 'x', 'bash', 'false')
-    result(session, 1, 'x', 'bash', 'exit 1', true)
+    result(session, 1, 'x', 'exit 1', true)
     call(session, 1, 'y', 'read_file', 'a')
-    result(session, 1, 'y', 'read_file', 'contents', false)
+    result(session, 1, 'y', 'contents', false)
     session.append('turn/end', { turn: 1, reason: 'completed' } as never)
     expect(collectErrorPairs(session.snapshotEvents(), 1, 5)).toEqual([])
     session.append('turn/start', { turn: 2 })
     for (const index of [1, 2, 3]) {
       call(session, 2, `f${index}`, 'bash', `cmd ${index}`)
-      result(session, 2, `f${index}`, 'bash', `error ${index}`, true)
+      result(session, 2, `f${index}`, `error ${index}`, true)
     }
     for (const index of [1, 2, 3]) {
       call(session, 2, `ok${index}`, 'bash', `fixed ${index}`)
-      result(session, 2, `ok${index}`, 'bash', `done ${index}`, false)
+      result(session, 2, `ok${index}`, `done ${index}`, false)
     }
     session.append('turn/end', { turn: 2, reason: 'completed' } as never)
     expect(collectErrorPairs(session.snapshotEvents(), 2, 5)).toHaveLength(3)

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Panel de uso",
+    "description": "Muestra los totales de tokens, un mapa de calor diario de 12 meses y una tabla por modelo en la barra lateral derecha."
+  }
+}

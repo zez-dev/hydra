@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`dsh-compaction-tool-result-pruner` keeps oversized tool output from filling the context window. Once a compaction trigger qualifies, it replaces over-budget text with a bounded head, a short "middle pruned" marker, and a bounded tail; below-pressure conversations remain unchanged. The complete original result remains in the session log for exact replay and inspection. Trimming makes no model call and may relieve enough token pressure to skip summarization. Character budgets only approximate token use; the token meter determines whether pressure was relieved.
+`dsh-compaction-tool-result-pruner` keeps oversized tool output from filling the context window. Once a compaction trigger qualifies, it replaces over-budget text with a bounded head, a marker naming how many characters were cut, and a bounded tail; below-pressure conversations remain unchanged. Results the model has already read are trimmed first; one it has not read is cut only as a last resort, and its marker says so. The complete original result remains in the session log for exact replay and inspection. Trimming makes no model call and may relieve enough token pressure to skip summarization.
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@ With these rows, oversized tool results are trimmed automatically as part of con
 
 ### What gets trimmed
 
-Every tool result whose text exceeds the threshold is replaced by a trimmed version: the configured head, a short "middle pruned" marker, and the configured tail. Rich content such as images and structured blocks keeps its order and all logged image-offload selections. The replacement keeps the tool call, step, errors, and metadata — only the text content changes. If a replacement cannot be recorded, the run fails and the trims already applied stay in place.
+Each trimmed tool result keeps the configured head, a marker that names how many characters were cut, and the configured tail. Under pressure, results the model has already read — those before its latest answer — are trimmed first; a result it has not read yet is trimmed only when a summary of older history cannot relieve pressure either, and its marker says the model has not read the cut span and should repeat the call with a narrower range. Overflow recovery trims every over-budget result. Rich content such as images and structured blocks keeps its order and all logged image-offload selections. The replacement keeps the tool call, step, errors, and metadata — only the text content changes. If a replacement cannot be recorded, the run fails and the trims already applied stay in place.
 
 ### Setting the size limits
 
@@ -53,11 +53,11 @@ All settings are optional; the defaults trim any result with more than 8,192 tex
 | `headChars` | `4096` | Leading Unicode code points retained. |
 | `tailChars` | `1024` | Trailing Unicode code points retained. |
 
-Character counts are Unicode code points, so slicing never splits an emoji pair, though a multi-character grapheme can still be cut. Text without a surrogate code unit is counted and sliced by code unit, the same result without materializing every code point, and content whose code-unit length is within the threshold is skipped without counting at all. The head plus the marker plus the tail must fit within the threshold, so a valid configuration trims every over-budget result without growth or repeated rewriting. An unknown setting rejects the plugin at construction.
+Character counts are Unicode code points, so slicing never splits an emoji pair, though a multi-character grapheme can still be cut. Text without a surrogate code unit is counted and sliced by code unit, the same result without materializing every code point, and content whose code-unit length is within the threshold is skipped without counting at all. The head plus the longest marker (133 code points) plus the tail must fit within the threshold, so a valid configuration trims every over-budget result without growth or repeated rewriting. An unknown setting rejects the plugin at construction.
 
 ### When trimming runs
 
-Trimming only runs when a compaction trigger qualifies: `dsh-compaction-basic` invokes it after pressure or overflow is confirmed, before it selects what to condense. Below pressure nothing is trimmed, and trimming itself makes no model call.
+Trimming only runs when a compaction trigger qualifies: `dsh-compaction-basic` invokes it after pressure or overflow is confirmed, before it selects what to condense. Under pressure it trims read results and remeasures; when the request is still above pressure, `dsh-compaction-basic` summarizes older history first and has unread results trimmed only when no summary can make room, at once when the latest step alone is over the threshold, since a summary keeps that step. Overflow recovery trims both at once. Below pressure nothing is trimmed, and trimming itself makes no model call.
 
 -----
 
@@ -79,16 +79,15 @@ The pruner is built on three commitments:
 
 ### Pruning mechanics
 
-Pruning measures `text` blocks by Unicode code point (non-text blocks cost zero), produces a bounded replacement — or none when content is already within budget — and swaps each over-budget tool result for one newly appended `tool/result` that replaces the original event and cites it through `sourceEventSeqs`, immediately preceded by a `compaction/prune` shadow-price event. A session that rejects a replacement fails the run synchronously; replacements committed earlier in the pass stay durable. Non-text blocks keep their original relative positions, and slicing never splits a UTF-16 surrogate pair. Exact signatures are in [`src/index.ts`](src/index.ts).
+Pruning measures `text` blocks by Unicode code point (non-text blocks cost zero), produces a bounded replacement — or none when content is already within budget — and swaps each over-budget tool result for one newly appended `tool/result` that replaces the original event and cites it through `sourceEventSeqs`, immediately preceded by a `compaction/prune` shadow-price event. A session that rejects a replacement fails the run synchronously; replacements committed earlier in the pass stay durable. Non-text blocks keep their original relative positions, and slicing never splits a UTF-16 surrogate pair. A pass takes a scope: `'read'` selects only results an assistant message follows on the surface, which a request has carried because each request carries the whole surface, and `'all'` selects every over-budget result. A replacement keeps its node's surface position, so it is judged where the original stood. Exact signatures are in [`src/index.ts`](src/index.ts).
 
 ### Source map
 
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `ToolResultPruner` service, `pruneSession` / `pruneContent` / `measureContent` |
-| [`src/config.ts`](src/config.ts) | `PRUNE_MARKER`, defaults, code-point counting, budget validation |
-| [`src/types.ts`](src/types.ts) | `ToolResultPruneConfig`, `ResolvedConfig`, `PrunedEntry`, `PruneResult` |
-| — | No runtime invariant companion is published; Session validates each content-only rewrite and its companion owns cross-event enclosure. |
+| [`src/config.ts`](src/config.ts) | `pruneMarker`, defaults, code-point counting, budget validation |
+| [`src/types.ts`](src/types.ts) | `ToolResultPruneConfig`, `ResolvedConfig`, `PruneScope`, `PrunedEntry`, `PruneResult` |
 
 </details>
 
@@ -114,15 +113,15 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-Once a compaction trigger qualifies, future requests see the retained head, `\n\n[... tool result middle pruned ...]\n\n`, and retained tail in place of the removed text. Rich blocks keep their order. The model does not see a second copy of the original.
+Once a compaction trigger qualifies, future requests see the retained head, a marker, and the retained tail in place of the removed text. For a result the model has read, the marker is `\n\n[... N characters cut from the middle to save context; you read them in full earlier ...]\n\n`; for one it has not read, it is `\n\n[... N characters cut from the middle before you read them; repeat the call with a narrower range to see them ...]\n\n`, where `N` is the number of code points cut. Rich blocks keep their order. The model does not see a second copy of the original.
 
 #### Token effect
 
-Each rewritten tool result has at most `thresholdChars` text code points. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
+Each rewritten tool result has at most `thresholdChars` text code points, the marker at most 133 of them. A result the model has not read keeps its full size unless neither trimming read results nor a summary of older history makes room. Pruning itself makes no model call; compaction-basic skips summarization when the remeasured request falls below pressure, otherwise the summarizer reads the pruned surface.
 
 #### KV Cache effect
 
-Replacing an earlier result invalidates reuse from the first changed token. The pruned prefix is eligible for reuse while its route, envelope, and preceding history remain identical.
+Replacing an earlier result invalidates reuse from the first changed token. Trimming a result the model has not read changes nothing an earlier request sent, so it invalidates no cached prefix. The pruned prefix is eligible for reuse while its route, envelope, and preceding history remain identical.
 
 ## Known Limitations and Deferred Work
 
@@ -134,6 +133,7 @@ These limits define when trimming is a poor fit or needs special care; they are 
 - **Character budgets are not token budgets** — provider token density varies, so `ctx.tokenMeter` remains the authority for deciding whether trimming relieved request pressure.
 - **Pruning is syntactic** — it retains the beginning and end without interpreting which middle lines are semantically important.
 - **Grapheme clusters can split** — code-point slicing protects surrogate pairs but does not perform locale-aware grapheme segmentation.
+- **A cut unread span costs a round trip** — when a result the model has not read must be trimmed, the model sees only its head and tail and has to repeat the call with a narrower range.
 
 <a id="dev-note"></a>
 ### Dev Note

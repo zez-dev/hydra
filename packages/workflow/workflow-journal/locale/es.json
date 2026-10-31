@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Diario de flujos de trabajo",
+    "description": "Registra las llamadas a subagentes ya terminadas de cada ejecución de flujo de trabajo para que una ejecución reanudada las reutilice en lugar de repetirlas."
+  }
+}

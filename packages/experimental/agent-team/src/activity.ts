@@ -7,6 +7,16 @@ interface Waiter {
   readonly resolve: () => void
 }
 
+/**
+ * Reject a wait duration outside ten seconds through one hour.
+ * @param timeoutMs - requested wait duration in milliseconds.
+ */
+export function assertWaitTimeout(timeoutMs: number): void {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 3_600_000) {
+    throw new TeamError('timeoutMs must be an integer from 10000 through 3600000', 'TEAM_INVALID_TIMEOUT')
+  }
+}
+
 /** Owns current Team change waiters and releases each at most once. */
 export class TeamActivity {
   private readonly waiters = new Map<TeamId, Set<Waiter>>()
@@ -20,9 +30,7 @@ export class TeamActivity {
    * @returns whether the wait ended by timeout.
    */
   async wait(id: TeamId, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult> {
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 3_600_000) {
-      throw new TeamError('timeoutMs must be an integer from 10000 through 3600000', 'TEAM_INVALID_TIMEOUT')
-    }
+    assertWaitTimeout(timeoutMs)
     signal.throwIfAborted()
     if (this.closed) return { timedOut: false }
     const changed = await new Promise<boolean>((resolve, reject) => {

@@ -32,7 +32,7 @@ A goal's objective, phase, and round count are durable session data, but the per
 |---|---|---|
 | `policy` | required (the shipped `dsh-base` row is disabled; enable it in a profile patch to opt in) | `ask`: re-arm after the approval service answers `allowed-once`; `always`: re-arm every active goal on resume |
 
-`always` reverses the decision recorded in [`2026-07-16-harness-level-loop.md`](../../../.agents/notes/implemented/feature/2026-07-16-harness-level-loop.md), that opening a session is observation and not authority to spend model rounds. Choose it only for a deployment whose owner accepts that a resumed session may start spending immediately. The base bundle (`packages/bundle/base/cordis.patch.yml`) pairs it with `dsh-goal-supervisor`, which resumes stored sessions at boot and bounds the daily spend.
+`always` reverses the decision recorded in [`2026-07-16-harness-level-loop.md`](../../../.agents/notes/archived/feature/2026-07-16-harness-level-loop.md), that opening a session is observation and not authority to spend model rounds. Choose it only for a deployment whose owner accepts that a resumed session may start spending immediately. The base bundle (`packages/bundle/base/cordis.patch.yml`) pairs it with `dsh-goal-supervisor`, which resumes stored sessions at boot and bounds the daily spend.
 
 -----
 

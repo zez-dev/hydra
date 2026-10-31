@@ -1,0 +1,11 @@
+- dialog "Send later":
+  - heading "Send later" [level=2]
+  - button "Close date and time selection"
+  - paragraph: The message is sent in this session at the date and time you choose.
+  - text: Date
+  - button "Date": {{date}}
+  - text: Time
+  - button "Time": {{time}}
+  - text: Time zone UTC+{{clock}} · China Standard Time
+  - button "Cancel"
+  - button "Schedule"

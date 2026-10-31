@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -8,9 +8,10 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import { LocalBashExecutor } from '@deepseek-ai/dsh-bash-local'
@@ -37,7 +38,7 @@ afterEach(async () => {
 const signal = new AbortController().signal
 
 async function setup(overrides: Partial<Research.Config> = {}, withShell = true): Promise<Context> {
-  root = await mkdtemp(join(tmpdir(), 'dsh-research-experiment-'))
+  root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-research-experiment-')))
   spill = await mkdtemp(join(tmpdir(), 'dsh-research-spill-'))
   const ctx = new Context()
   context = ctx
@@ -72,7 +73,7 @@ async function fakeAgent(ctx: Context, cwd: string, id = 'experiment-agent'): Pr
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -144,7 +145,7 @@ describe('run_experiment tool', () => {
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
     const run = (args: Record<string, unknown>) =>
-      ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: args })
+      executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: args })
     const first = await run({
       title: 'baseline',
       command: 'node -e "console.log(\'loss=0.5 cwd=\' + process.cwd())"',
@@ -181,7 +182,7 @@ describe('run_experiment tool', () => {
     const ctx = await setup({ maxExperimentMs: 500 })
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const result = await ctx.tools.execute({
+    const result = await executeToolFixture(ctx, {
       signal, callId: ToolCallId('c1'), name: 'run_experiment', agent,
       arguments: { title: 'slow', command: 'node -e "setTimeout(() => {}, 20000)"', timeoutMs: 60_000 },
     })
@@ -194,26 +195,26 @@ describe('run_experiment tool', () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const hypothesis = await ctx.tools.execute({ signal, callId: ToolCallId('h'), name: 'journal', agent, arguments: { action: 'hypothesis', text: 'Depth matters' } })
+    const hypothesis = await executeToolFixture(ctx, { signal, callId: ToolCallId('h'), name: 'journal', agent, arguments: { action: 'hypothesis', text: 'Depth matters' } })
     const id = (hypothesis.value as { id: string }).id
-    const ok = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true', hypothesisId: id } })
+    const ok = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true', hypothesisId: id } })
     expect(ok.isError).toBe(false)
     expect(ctx.research.storeFor(root!).get('opt')!.experiments[0]).toMatchObject({ hypothesisId: id })
-    const bad = await ctx.tools.execute({ signal, callId: ToolCallId('c2'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true', hypothesisId: 'h-nope' } })
+    const bad = await executeToolFixture(ctx, { signal, callId: ToolCallId('c2'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true', hypothesisId: 'h-nope' } })
     expect(bad.isError).toBe(true)
   })
 
   it('fails clearly without an active research goal or without a shell executor', async () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx, root!)
-    const noGoal = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true' } })
+    const noGoal = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'run_experiment', agent, arguments: { title: 't', command: 'true' } })
     expect(noGoal.isError).toBe(true)
     expect(noGoal.content.map(block => block.type === 'text' ? block.text : '').join('')).toContain('/research')
     await context?.fiber.dispose()
     const bare = await setup({}, false)
     const agent2 = await fakeAgent(bare, root!)
     await research(bare, agent2, 'Find the optimum --slug opt')
-    const noShell = await bare.tools.execute({ signal, callId: ToolCallId('c1'), name: 'run_experiment', agent: agent2, arguments: { title: 't', command: 'true' } })
+    const noShell = await executeToolFixture(bare, { signal, callId: ToolCallId('c1'), name: 'run_experiment', agent: agent2, arguments: { title: 't', command: 'true' } })
     expect(noShell.isError).toBe(true)
     expect(noShell.content.map(block => block.type === 'text' ? block.text : '').join('')).toContain('shell')
   })

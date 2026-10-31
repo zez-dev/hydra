@@ -10,7 +10,7 @@ import type {
   SaveImageAttachment,
   StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
-import LlmRuntime, { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createToolResultMessage, createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { Message, ToolSchema } from '@deepseek-ai/dsh-llm'
 import * as LlmPiAi from '@deepseek-ai/dsh-llm-pi-ai'
 import type { PiAiReplayResponse } from '../src/replay.ts'
@@ -20,7 +20,8 @@ interface ProviderCase {
   provider: 'openai' | 'anthropic'
   api: 'openai-responses' | 'anthropic-messages'
   model: string
-  apiKey?: string
+  /** Environment variable holding the route's key; absent when that variable is unset. */
+  apiKeyEnv?: string
   baseURL?: string
   headers?: Record<string, string>
 }
@@ -38,7 +39,7 @@ const providerCases: ProviderCase[] = [
     api: 'openai-responses',
     model: process.env.DSH_PI_AI_OPENAI_MODEL ?? 'gpt-5.5',
     ...azureOpenAIKey
-      ? { apiKey: azureOpenAIKey, headers: { 'api-key': azureOpenAIKey, Authorization: '' } }
+      ? { apiKeyEnv: 'AZURE_OPENAI_API_KEY', headers: { 'api-key': azureOpenAIKey, Authorization: '' } }
       : {},
     ...openAIBaseURL ? { baseURL: openAIBaseURL } : {},
   },
@@ -46,7 +47,7 @@ const providerCases: ProviderCase[] = [
     provider: 'anthropic',
     api: 'anthropic-messages',
     model: process.env.DSH_PI_AI_ANTHROPIC_MODEL ?? 'claude-opus-4-8',
-    ...anthropicApiKey === undefined ? {} : { apiKey: anthropicApiKey },
+    ...anthropicApiKey === undefined ? {} : { apiKeyEnv: 'ANTHROPIC_API_KEY' },
     ...anthropicBaseURL === undefined ? {} : { baseURL: anthropicBaseURL },
   },
 ]
@@ -59,7 +60,7 @@ async function harness(image?: StoredImageAttachment): Promise<Context> {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(LlmPiAi, {
     providers: Object.fromEntries(providerCases.map(profile => [profile.provider, {
-      ...profile.apiKey === undefined ? {} : { apiKey: profile.apiKey },
+      ...profile.apiKeyEnv === undefined ? {} : { apiKeyEnv: profile.apiKeyEnv },
       ...profile.baseURL === undefined ? {} : { baseURL: profile.baseURL },
       ...profile.headers === undefined ? {} : { headers: profile.headers },
     }])),
@@ -121,7 +122,7 @@ afterEach(async () => {
 function ask(text: string): Message[] {
   return [createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: 'test' },
+    source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
   })]
 }
 
@@ -166,7 +167,7 @@ const lookupTool: ToolSchema = {
 }
 
 for (const profile of providerCases) {
-  describe.skipIf(profile.apiKey === undefined)(
+  describe.skipIf(profile.apiKeyEnv === undefined)(
     `llm-pi-ai ${profile.provider} e2e (${profile.api})`,
     () => {
       it('streams text with usage and native replay metadata', async () => {
@@ -209,13 +210,10 @@ for (const profile of providerCases) {
           messages: [
             ...prompt,
             first.message,
-            createUserMessage({
-              content: [{
-                type: 'tool-result',
-                toolCallId: ToolCallId(call!.id),
-                content: [{ type: 'text', text: 'The code blue means ocean.' }],
-              }],
-              source: { kind: 'plugin', plugin: 'test' },
+            createToolResultMessage({
+              callId: ToolCallId(call!.id),
+              content: [{ type: 'text', text: 'The code blue means ocean.' }],
+              isError: false,
             }),
           ],
           tools: [lookupTool],
@@ -252,7 +250,7 @@ for (const profile of providerCases) {
                 },
                 { type: 'image', attachment: ref },
               ],
-              source: { kind: 'plugin', plugin: 'test' },
+              source: { kind: 'model', provider: 'deepseek-official', model: 'deepseek-v4-flash' },
             })],
             maxTokens: 256,
           })

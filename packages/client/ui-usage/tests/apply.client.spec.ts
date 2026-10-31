@@ -6,7 +6,7 @@ import { apply, inject, NS } from '../src/client/index.ts'
 import { apply as hostApply } from '../src/index.ts'
 import { UsageBody } from '../src/client/UsageBody.tsx'
 import { UsageTitle } from '../src/client/UsageTitle.tsx'
-import { en, zh } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh } from '../src/client/locales.ts'
 
 interface Recorded {
   name: string
@@ -61,7 +61,7 @@ describe('ui-usage apply', () => {
     const definition = tabs.get(USAGE_KIND)
     expect(definition?.id).toBe(USAGE_ID)
     expect(definition?.priority).toBe('builtin')
-    expect(dictionaries.get(NS)).toEqual({ zh, en })
+    expect(dictionaries.get(NS)).toEqual({ zh, en, ja, es, fr, de, ru, pt })
     expect(registered.map(entry => [entry.name, entry.key, entry.locale, entry.component])).toEqual([
       ['sidebar.right.pane.tab', USAGE_ID, NS, UsageBody],
       ['sidebar.right.pane.tab.title', USAGE_ID, undefined, UsageTitle],

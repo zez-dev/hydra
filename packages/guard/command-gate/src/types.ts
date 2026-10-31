@@ -31,6 +31,20 @@ export interface SimpleCommand {
    * only dangerous because of this edge, which a per-command rule cannot see.
    */
   readonly pipesInto?: string
+  /**
+   * The working directories the command may run in, when a `cd` earlier in the
+   * line moved it. Each entry is one directory, written as the `cd` targets
+   * that lead to it from where the line starts, applied in order. Several
+   * entries mean the line leaves open which `cd` took effect, as after
+   * `cd dir;`, so a rule judges each one. Absent when the command runs where
+   * the line starts.
+   */
+  readonly directories?: readonly (readonly string[])[]
+  /**
+   * Set when the program also receives arguments read from standard input at
+   * run time, as `xargs` passes them, so `argv` does not list every operand.
+   */
+  readonly argumentsFromInput?: true
 }
 
 /** What the gate does with one command. */
@@ -51,12 +65,28 @@ export interface CommandContext {
   readonly cwd: string
   /** Absolute workspace root; writes outside it are never the agent's to make. */
   readonly workspace: string
-  /** Absolute roots where destroying files is expected, such as a scratch directory. */
+  /**
+   * Other spellings of the workspace root, such as its resolved path when the
+   * recorded one passes through a symbolic link. A path under any of them is
+   * in the workspace.
+   */
+  readonly workspaceAliases: readonly string[]
+  /**
+   * Absolute roots where destroying files is expected, such as a scratch
+   * directory. A root that encloses the workspace does not make the workspace
+   * expendable.
+   */
   readonly temporaryRoots: readonly string[]
   /** Rule ids the deployment downgraded to `allow`. */
   readonly allow: readonly string[]
   /** Extra argv prefixes to deny, each already split into words. */
   readonly denyExtra: readonly (readonly string[])[]
+  /**
+   * Whether an absolute path names an existing file or directory. The
+   * classifier asks only to tell a `git checkout` path from a branch name, so
+   * it never reads the disk itself.
+   */
+  readonly exists: (path: string) => boolean
 }
 
 /** One blocked attempt, kept for `/commands-gate` and logged to the session. */

@@ -37,13 +37,13 @@ Each `journal` breakthrough is announced through `dsh-notify` as `researchBreakt
 | `recentExperiments` | required (`10` in `dsh-base`) | How many most-recent experiments the block lists |
 | `relatedBreakthroughs` | `5` (schema default; `5` in `dsh-base`) | How many breakthroughs mirrored from other journals the block lists under "Related breakthroughs from other research"; `0` omits the section; read from `ctx.memory` when `dsh-memory` is mounted |
 | `scoring.enabled` | required (`true` in `dsh-base`) | Whether one auxiliary request re-scores the open hypotheses after each recorded experiment |
-| `scoring.maxOutputTokens` | required (`512` in `dsh-base`) | Output cap of one scoring request |
+| `scoring.maxOutputTokens` | required (`512` in `dsh-base`) | Output cap of each scoring request; a route that cannot turn thinking off spends part of it on reasoning |
 | `scoring.timeoutMs` | required (`60000` in `dsh-base`) | Deadline of one scoring request; a late answer is logged and ignored |
 | `scoring.provider`, `scoring.model` | optional | Route of the scoring request; both or neither, absent reuses the session's own route |
 | `maxExperimentMs` | required (`600000` in `dsh-base`) | Upper bound on a `run_experiment` time budget; a larger `timeoutMs` argument is capped |
 | `maxOutputBytes` | required (`20000` in `dsh-base`) | Byte cap on the output a `run_experiment` call records in the journal and returns |
 
-`run_experiment` runs one shell command through the mounted `ctx.shell` executor (so sandboxing applies) in the session's workspace, reads metrics out of its output with the caller's regular expressions, computes deltas against the previous experiment with the same `title`, and records command, exit code, metrics, deltas, and an output excerpt as one journal experiment. After every recorded experiment, from either tool, a logged `session/research-score` request asks the scoring route for `[{ hypothesisId, score, reason }]` over every open hypothesis; scores are written onto the hypothesis lines (`~ score: 0.7 (reason)`), the round instruction lists open hypotheses by support and tells the model to test the highest-scored one first, and an unreadable answer is logged and leaves scores untouched.
+`run_experiment` runs one shell command through the mounted `ctx.shell` executor (so sandboxing applies) in the session's workspace, reads metrics out of its output with the caller's regular expressions, computes deltas against the previous experiment with the same `title`, and records command, exit code, metrics, deltas, and an output excerpt as one journal experiment. After every recorded experiment, from either tool, a logged `session/research-score` request asks the scoring route for `[{ hypothesisId, score, reason }]` over every open hypothesis; scores are written onto the hypothesis lines (`~ score: 0.7 (reason)`), the round instruction lists open hypotheses by support and tells the model to test the highest-scored one first, and an unreadable answer is logged and leaves scores untouched. The request asks for the route's lowest selectable reasoning effort, so a thinking route spends the output cap on the scores, and is asked once more at the route's default effort when that answer has no text; an answer cut at the cap is logged, not retried, and leaves scores untouched.
 
 -----
 
@@ -74,11 +74,11 @@ No invariant companion is published because the journal file is the only durable
 
 #### What the model sees
 
-One `user/message` per research session, sourced `{ kind: 'plugin', plugin: 'dsh-research', form: 'recall' }`, wrapping the journal digest in `<research_journal>` and `</research_journal>`: the objective and slug, one instruction line, the criteria under `Done when:`, the breakthroughs, the open hypotheses, the most recent experiments, the dead ends, and the next steps, each as one `- ` line with the entry id where one exists. When the block would exceed `maxRecallBytes`, sections are kept in priority order (next steps, dead ends, criteria, open hypotheses, recent experiments, breakthroughs, related breakthroughs), a section cut short keeps its newest lines, and one line such as `- (12 older in the journal file)` stands for the rest. After the journal's own breakthroughs, a "Related breakthroughs from other research" list carries up to `relatedBreakthroughs` approved memory entries tagged `breakthrough` whose `research:<slug>` tag names another journal, newest first, each as `[<slug>] <text>`. Those entries exist because `dsh-learning` mirrors every recorded breakthrough into `dsh-memory` as an approved `fact` (tags `research:<slug>` and `breakthrough`, deduplicated by normalized text), so ordinary sessions recall them through the memory block too.
+One `user/message` per research session, sourced `{ kind: 'plugin:dsh-research', form: 'recall' }`, wrapping the journal digest in `<research_journal>` and `</research_journal>`: the objective and slug, one instruction line, the criteria under `Done when:`, the breakthroughs, the open hypotheses, the most recent experiments, the dead ends, and the next steps, each as one `- ` line with the entry id where one exists. When the block would exceed `maxRecallBytes`, sections are kept in priority order (next steps, dead ends, criteria, open hypotheses, recent experiments, breakthroughs, related breakthroughs), a section cut short keeps its newest lines, and one line such as `- (12 older in the journal file)` stands for the rest. After the journal's own breakthroughs, a "Related breakthroughs from other research" list carries up to `relatedBreakthroughs` approved memory entries tagged `breakthrough` whose `research:<slug>` tag names another journal, newest first, each as `[<slug>] <text>`. Those entries exist because `dsh-learning` mirrors every recorded breakthrough into `dsh-memory` as an approved `fact` (tags `research:<slug>` and `breakthrough`, deduplicated by normalized text), so ordinary sessions recall them through the memory block too.
 
 #### Token effect
 
-Capped by `maxRecallBytes`; re-sent on a step that starts work (the user's message, a goal round) when the journal or a related breakthrough changed, and on any step once the previous copy left the surface. A step within a turn never re-sends it: the model sees the changes it made in the results of the `journal` and `run_experiment` calls that made them.
+Capped by `maxRecallBytes`; re-sent on a step that starts work (a user message, a goal round, a webhook delivery, or a scheduled follow-up) when the journal or a related breakthrough changed, and on any step once the previous copy left the surface. A step within a turn never re-sends it: the model sees the changes it made in the results of the `journal` and `run_experiment` calls that made them.
 
 #### KV Cache effect
 
@@ -88,7 +88,7 @@ Append-only: a changed journal appends a new recall message at the next step tha
 
 #### What the model sees
 
-On each goal round, one `user/message` sourced `{ kind: 'plugin', plugin: 'dsh-research' }` after the driver's round message: `Role: researcher`, the objective, the criteria, the six-step loop (read the journal, take the next step or form a hypothesis, run the experiment, record the outcome and dead ends, record a breakthrough at once, replace the next steps), and the rule that `update_goal` `complete` needs every criterion to hold.
+On each goal round, one `user/message` sourced `{ kind: 'plugin:dsh-research' }` after the driver's round message: `Role: researcher`, the objective, the criteria, the six-step loop (read the journal, take the next step or form a hypothesis, run the experiment, record the outcome and dead ends, record a breakthrough at once, replace the next steps), and the rule that `update_goal` `complete` needs every criterion to hold.
 
 #### Token effect
 
@@ -116,7 +116,7 @@ Prefix-stable: the schema does not change between requests.
 
 #### What the model sees
 
-An auxiliary request (`purpose: 'research-score'`), logged as `session/research-score` before it is sent: the system prompt below and one user message with the objective, criteria, open hypotheses with current scores, every experiment, and the dead ends.
+An auxiliary request (`purpose: 'research-score'`) at the route's lowest selectable reasoning effort, logged with that effort as `session/research-score` before it is sent: the system prompt below and one user message with the objective, criteria, open hypotheses with current scores, every experiment, and the dead ends.
 
 ##### Verbatim system prompt
 
@@ -128,7 +128,7 @@ Include every open hypothesis exactly once. Do not invent hypotheses or experime
 
 #### Token effect
 
-One independent request per recorded experiment while any hypothesis is open; nothing enters the session's own model history.
+One independent request per recorded experiment while any hypothesis is open, plus one at the route's default effort when the first answer has no text; nothing enters the session's own model history.
 
 #### KV Cache effect
 

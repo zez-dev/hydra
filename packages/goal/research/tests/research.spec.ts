@@ -8,9 +8,10 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry, { agentEvents } from '@deepseek-ai/dsh-agent'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Research from '@deepseek-ai/dsh-research'
@@ -54,7 +55,7 @@ async function fakeAgent(ctx: Context, cwd: string, id = 'research-agent'): Prom
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -67,7 +68,7 @@ async function fakeAgent(ctx: Context, cwd: string, id = 'research-agent'): Prom
 async function preStep(ctx: Context, agent: Agent, messages: UserMessage[]): Promise<PreStepDecision> {
   return agentEvents(ctx, agent).waterfall(
     'agent/pre-step',
-    { messages, prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
+    { modelSelection: { provider: 'mock', model: 'mock' }, messages, prompt: { systemPrompt: '', tools: [] }, turn: 1, step: 1, signal },
     () => Promise.resolve({ kind: 'enter' as const, messages }),
   )
 }
@@ -260,7 +261,7 @@ describe('/research command and goal', () => {
     const scope = ctx.plugin(() => {})
     const session = ctx.sessions.create(SessionId('no-cwd'), {})
     const agent: Agent = {
-      id: SessionId('no-cwd'), options: {}, session, inbox: unsupportedInbox(), status: 'idle', ctx: scope.ctx,
+      id: SessionId('no-cwd'), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(), status: 'idle', ctx: scope.ctx,
       followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
       runMaintenance: task => task(new AbortController().signal), whenIdle: () => Promise.resolve(),
     }
@@ -299,7 +300,7 @@ describe('/research command and goal', () => {
     const ctx = await setup()
     const agent = await fakeAgent(ctx, root!)
     await research(ctx, agent, 'Find the optimum --slug opt')
-    const run = (args: Record<string, unknown>) => ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
+    const run = (args: Record<string, unknown>) => executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'journal', agent, arguments: args })
     const breakthrough = await run({ action: 'breakthrough', text: 'Scaling law holds' })
     expect(breakthrough.isError).toBe(false)
     const hypothesis = await run({ action: 'hypothesis', text: 'Depth matters' })

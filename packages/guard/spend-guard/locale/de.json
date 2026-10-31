@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Ausgabenlimit",
+    "description": "Pausiert das Ziel oder beendet die Runde, wenn das Token-Budget der Sitzung oder des Tages erreicht ist."
+  }
+}

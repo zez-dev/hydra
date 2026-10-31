@@ -11,6 +11,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
+import { executeModelToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import * as Doctor from '@deepseek-ai/dsh-doctor'
 import * as DoctorTools from '@deepseek-ai/dsh-doctor/tools'
@@ -53,6 +55,7 @@ async function setup(config: Partial<Doctor.Config> = {}) {
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(SessionStore)
   await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
@@ -151,26 +154,26 @@ describe('ctx.doctor', () => {
     }
   })
 
-  it('reads each provider key reference through the credentials service without reporting a key', async () => {
+  it('reads the key reference through the credentials service without reporting the key, and a failing store as unset', async () => {
     const { ctx, cwd } = await setup()
-    ctx.provide('settings', {
-      get: (namespace: string) => namespace === 'llm-pi-ai'
-        ? { providers: { zhipu: { apiKeyEnv: 'ZHIPU_API_KEY' }, local: {}, qwen: { apiKeyEnv: 'QWEN_API_KEY' } } }
-        : undefined,
-    } as never)
+    let locked = false
     ctx.provide('credentials', {
-      resolve: async (ref: string) => {
-        if (ref === 'QWEN_API_KEY') throw new Error('the keychain is locked')
-        return ref === 'DEEPSEEK_API_KEY' ? { value: 'sk-doctor-secret' } : undefined
+      resolve: async () => {
+        if (locked) throw new Error('the keychain is locked')
+        return { value: 'sk-doctor-secret' }
       },
     } as never)
     const report = await ctx.doctor.run({ cwd })
     expect(report.rows.filter(row => row.section === 'credentials')).toEqual([
       { section: 'credentials', check: 'deepseek-official', status: 'ok', detail: 'DEEPSEEK_API_KEY resolves' },
-      { section: 'credentials', check: 'zhipu', status: 'warn', detail: 'ZHIPU_API_KEY is not set', fix: 'put ZHIPU_API_KEY=... in $DSH_HOME/.env or save the key on the Models page' },
-      { section: 'credentials', check: 'qwen', status: 'warn', detail: 'QWEN_API_KEY is not set', fix: 'put QWEN_API_KEY=... in $DSH_HOME/.env or save the key on the Models page' },
     ])
     expect(JSON.stringify(report)).not.toContain('sk-doctor-secret')
+
+    locked = true
+    const unreadable = await ctx.doctor.run({ cwd })
+    expect(unreadable.rows.filter(row => row.section === 'credentials')).toEqual([
+      { section: 'credentials', check: 'deepseek-official', status: 'warn', detail: 'DEEPSEEK_API_KEY is not set', fix: 'put DEEPSEEK_API_KEY=... in $DSH_HOME/.env or save the key on the Models page' },
+    ])
   })
 
   it('reads key references from the host environment when no credentials service is mounted', async () => {
@@ -211,16 +214,32 @@ describe('/doctor and the doctor tool', () => {
   it('returns the report as JSON from the tool and never mutates', async () => {
     const { ctx, cwd } = await setup()
     const agent = await fakeAgent(ctx, cwd)
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'doctor', arguments: {}, agent })
+    const result = await executeModelToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'doctor', arguments: {}, agent })
     expect(result.isError).toBe(false)
     const report = result.value as unknown as DoctorReport
     expect(Array.isArray(report.rows)).toBe(true)
     expect(report.summary).toBeDefined()
   })
 
+  it('prints a check that throws as one failed row naming the error, and every other section', async () => {
+    const { ctx, cwd } = await setup()
+    ctx.doctor.internals = { environment: { ...fakeHost(cwd), spawn: () => { throw new Error('spawn git EPERM\n    at spawnSync') } } }
+    const agent = await fakeAgent(ctx, cwd)
+    const result = await ctx.commands.find(agent, 'doctor')!.handler({ commandId: CommandId('d3'), agent, rawInput: '', attachments: [], signal })
+    expect(result.kind).toBe('success')
+    expect((result as { text?: string }).text).toMatch(/^FAIL +git +could not run +Error: spawn git EPERM$/m)
+
+    const report = await ctx.doctor.run({ cwd })
+    const failures = report.rows.filter(row => row.check === 'could not run')
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toMatchObject({ section: 'git', status: 'fail', detail: 'Error: spawn git EPERM' })
+    expect(failures[0]?.fix).toContain('$DSH_HOME/logs')
+    expect(new Set(report.rows.map(row => row.section))).toEqual(new Set(['about', 'home', 'workspace', 'sandbox', 'native', 'git', 'plugins', 'tools', 'credentials']))
+  })
+
   it('checks the process working directory when the tool runs without an agent', async () => {
     const { ctx } = await setup()
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c2'), name: 'doctor', arguments: { probe: true } })
+    const result = await executeModelToolFixture(ctx, { signal, callId: ToolCallId('c2'), name: 'doctor', arguments: { probe: true } })
     expect(result.isError).toBe(false)
     const report = result.value as unknown as DoctorReport
     expect(report.rows.find(row => row.check === 'git repository')).toMatchObject({ status: 'ok', detail: process.cwd() })

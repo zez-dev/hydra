@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Auto-continue",
+    "description": "Continue a turn automatically when the answer is cut off at the output-token limit."
+  }
+}

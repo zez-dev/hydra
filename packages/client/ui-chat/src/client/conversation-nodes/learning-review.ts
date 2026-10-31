@@ -41,7 +41,7 @@ export const learningReviewDefinition: ConversationNodeDefinition<LearningReview
     const first = context.matches[0]
     const node = context.state?.node ?? (first === undefined ? undefined : nodeFrom(first))
     if (node === undefined) return null
-    return chatNode(context, 'learning-review', node.seq, node)
+    return chatNode(context, 'learning-review', node.seq, node, { groupTree: 'turn' })
   },
 }
 

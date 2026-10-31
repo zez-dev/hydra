@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Befehlssperre",
+    "description": "Blockiert Shell-Befehle, die nicht committete Arbeit zerstören oder den Rechner verändern würden, bevor sie ausgeführt werden."
+  }
+}

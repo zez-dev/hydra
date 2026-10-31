@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Comprobación del entorno",
+    "description": "Comprueba la carpeta de inicio, el espacio de trabajo, el sandbox, git, los plugins y las credenciales de esta instalación, con una solución para cada problema."
+  }
+}

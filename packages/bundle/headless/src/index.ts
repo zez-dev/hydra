@@ -14,14 +14,15 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentOptions } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
+import { installModelSelection } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-fs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, expandAssistantStream } from '@deepseek-ai/dsh-llm'
+import { APPROVAL_POLICIES, setApprovalPolicy, type ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { Session, SessionEvent, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionId, SessionLogOffset, UserMessage } from '@deepseek-ai/dsh-session'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
 // Empty type imports carry the loader Context merge for the settlement await,
 // the cmdline Context merge for the appExit host value, and the sessionQuery
@@ -29,6 +30,16 @@ import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
 import type {} from '@deepseek-ai/dsh-session-query'
+import type {} from '@deepseek-ai/dsh-subagent'
+// Optional service peers stay type-only so profiles can omit their packages.
+import type { CommandExecution } from '@deepseek-ai/dsh-commands'
+import type {} from '@deepseek-ai/dsh-goal'
+import type {} from '@deepseek-ai/dsh-learning'
+// Declares the auto-continue message source the summary recognizes.
+import type {} from '@deepseek-ai/dsh-auto-continue'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type {} from './startup.ts'
 import { internals } from './runner-internals.ts'
 import { projectJsonRun, boundJsonLine } from './json-stream.ts'
 
@@ -46,18 +57,118 @@ export interface Config {
   sessionId?: string
   /** Whether stdout carries the machine-readable event stream instead of final text. */
   json?: boolean
+  /** Permission preset applied before the task; an explicit CLI flag takes precedence. Omission keeps current policy. */
+  permissionMode?: string
+  /** Approval behavior applied after preset selection; an explicit CLI flag takes precedence. Omission keeps current policy. */
+  approvalPolicy?: ApprovalPolicy
 }
 
 export const Config: z<Config> = z.object({
   task: z.string(),
   sessionId: z.string(),
   json: z.boolean(),
+  permissionMode: z.string(),
+  approvalPolicy: z.union([...APPROVAL_POLICIES]),
 })
+
+/** Why a turn ended, as its `turn/end` records it. */
+type TurnReason = SessionEvent<'turn/end'>['data']['reason']
+
+/** Message source auto-continue gives the request that continues an answer cut at the output limit. */
+const CONTINUATION_KIND = 'plugin:dsh-auto-continue'
+
+/** Message source of the runtime's notice that a background subagent finished. */
+const SETTLEMENT_KIND = 'subagent-settled'
+
+/**
+ * Whether `message` is a settlement notice that says only how the child ended.
+ * The subagent runtime puts the child's closing text, structured result, or
+ * diagnostic after a summary line and one note, so a two-block notice has none;
+ * `createSettlementMessage` in `dsh-subagent`'s `continuation-messages.ts` owns that layout.
+ * @param message - one input the parent claimed.
+ * @returns `true` for a notice that brings the parent no result.
+ */
+function bareSettlement(message: UserMessage): boolean {
+  return message.source.kind === SETTLEMENT_KIND && message.content.length === 2
+}
 
 /** Outcome of one owned run interval. */
 interface RunOutcome {
   text: string
-  reason: SessionEvent<'turn/end'>['data']['reason'] | undefined
+  reason: TurnReason | undefined
+  /**
+   * Whether every answer of the final turn that stopped at the output limit
+   * was continued, and the last answer finished normally. The turn still
+   * records `max-tokens`, which stays sticky once any step hit the limit.
+   */
+  continuedPastCut: boolean
+}
+
+/**
+ * Whether the run's final turn delivered its answer.
+ * @param outcome - the summarized run interval.
+ * @returns true for a completed turn, or a cut answer continued to a normal finish.
+ */
+function succeeded(outcome: RunOutcome): boolean {
+  return outcome.reason?.kind === 'completed' || (outcome.reason?.kind === 'max-tokens' && outcome.continuedPastCut)
+}
+
+/**
+ * The stderr line naming why a turn did not complete.
+ * @param reason - the final turn's recorded end reason.
+ * @returns one newline-terminated diagnostic line.
+ */
+function endNotice(reason: TurnReason): string {
+  switch (reason.kind) {
+    case 'error': return `hydra: ${reason.error.code}: ${reason.error.message}\n`
+    case 'aborted': return `hydra: aborted: ${cancelText(reason.reason)}\n`
+    case 'max-tokens': return 'hydra: max-tokens: the answer stopped at the output limit\n'
+    // Other kinds, including ones plugins add to the merge-extensible map, are named as recorded.
+    default: return `hydra: turn ended: ${reason.kind}\n`
+  }
+}
+
+/**
+ * Describe who or what cancelled a turn.
+ * @param cause - the recorded cancellation cause.
+ * @returns a short phrase for the stderr diagnostic.
+ */
+function cancelText(cause: Extract<TurnReason, { kind: 'aborted' }>['reason']): string {
+  switch (cause.kind) {
+    case 'user': return 'cancelled by the user'
+    case 'parent': return 'cancelled by the parent agent'
+    case 'hook': return cause.reason
+    case 'disposed': return 'the agent was disposed'
+    case 'legacy': return 'cancelled'
+    /* v8 ignore next -- closed-union exhaustiveness guard */
+    default: return assertNever(cause)
+  }
+}
+
+/**
+ * Disarm the session's goal when the round driver would continue it, so the
+ * process exits without starting a round it cannot finish. The goal stays
+ * active in the log; a long-lived host can resume it.
+ * @param ctx - plugin context; the goals service is optional.
+ * @param agent - the run's agent.
+ * @returns the disarmed goal's objective, or `undefined` when no armed active goal exists.
+ */
+function holdArmedGoal(ctx: Context, agent: Agent): string | undefined {
+  const goals = ctx.get('goals')
+  const goal = goals?.get(agent)
+  if (goals === undefined || goal === undefined || goal.phase !== 'active' || goal.activation !== 'armed') return undefined
+  goals.disarm(agent)
+  return goal.objective
+}
+
+/**
+ * The command name a slash-command task invokes.
+ * @param task - a task the commands service resolved.
+ * @returns the name between the leading `/` and the first whitespace.
+ */
+function commandName(task: string): string {
+  /* v8 ignore next -- a split always yields a first element. */
+  return task.trim().slice(1).split(/\s/u, 1)[0] ?? ''
 }
 
 /** Process-facing effects of one run: output streams plus the launcher's bounded exit request. */
@@ -68,11 +179,23 @@ interface HeadlessIo {
   exit(code: number): void
 }
 
-/** Aggregate the last assistant text and turn outcome in one owned interval. */
+/**
+ * Aggregate the interval's last assistant text; only its final turn can establish completion.
+ * An answer auto-continue continued is joined with its continuations, and an answer to
+ * settlement notices that bring no result follows the answer before it instead of
+ * replacing it: such a notice only confirms work the parent may already have reported.
+ */
 function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
   let started = false
   let text = ''
-  let reason: SessionEvent<'turn/end'>['data']['reason'] | undefined
+  let reason: TurnReason | undefined
+  // A continuation request makes the next answer extend the cut one instead of replacing it.
+  let continuing = false
+  let uncontinuedCut = false
+  let lastFinish: string | undefined
+  // The input an answer responds to: notices without a result, and anything else.
+  let notices = false
+  let otherInput = false
   const length = session.seq
   for (let seq = firstSeq; seq < length; seq++) {
     // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
@@ -82,19 +205,44 @@ function summarize(session: Session, firstSeq: SessionLogOffset): RunOutcome {
     }
     if (event.type === 'turn/start') {
       started = true
+      reason = undefined
+      continuing = false
+      uncontinuedCut = false
+      lastFinish = undefined
+      notices = false
+      otherInput = false
       continue
     }
     if (!started) continue
+    if (event.type === 'user/message' && event.data.source.kind === CONTINUATION_KIND) {
+      continuing = true
+      uncontinuedCut = false
+    }
+    if (event.type === 'user/message') {
+      if (bareSettlement(event.data)) notices = true
+      else otherInput = true
+    }
+    if (event.type === 'tool/result') otherInput = true
     if (event.type === 'assistant/message') {
       const joined = event.data.message.content
         .filter(block => block.type === 'text')
         .map(block => block.text)
         .join('')
-      if (joined !== '') text = joined
+      if (joined !== '') {
+        text = continuing ? text + joined : notices && !otherInput && text !== '' ? `${text}\n\n${joined}` : joined
+      }
+      continuing = false
+      notices = false
+      otherInput = false
+      const finish = expandAssistantStream(event.data.stream)
+        .map(entry => entry.chunk)
+        .find(chunk => chunk.type === 'finish')
+      lastFinish = finish?.type === 'finish' ? finish.reason.kind : undefined
+      if (lastFinish === 'max-tokens') uncontinuedCut = true
     }
     if (event.type === 'turn/end') reason = event.data.reason
   }
-  return { text, reason }
+  return { text, reason, continuedPastCut: !uncontinuedCut && lastFinish !== undefined }
 }
 
 /**
@@ -133,7 +281,7 @@ function streamReasoning(
       case 'reasoning-delta':
         if (chunk.text === '') return
         if (!open) {
-          stderr.write('dsh: reasoning:\n')
+          stderr.write('hydra: reasoning:\n')
           open = true
         }
         stderr.write(chunk.text)
@@ -167,7 +315,6 @@ function streamReasoning(
 interface AdoptableHeader {
   cwd?: string | undefined
   origin?: 'subagent' | undefined
-  parentSession?: SessionId | undefined
   agentPreset?: string | undefined
 }
 
@@ -192,7 +339,7 @@ function* liveEvents(session: Session): Generator<SessionEvent> {
 function currentPreset(header: AdoptableHeader, events: Iterable<SessionEvent>, sessionId: SessionId): string | undefined {
   let preset = header.agentPreset
   for (const event of events) {
-    // Owned by dsh-agent-presets, which this bundle does not compose, so the
+    // Owned by dsh-agent-preset-registry, which this bundle does not compose, so the
     // event is read structurally rather than through its module augmentation.
     const candidate = event as unknown as { type: string; data?: { agentPreset?: unknown } }
     if (candidate.type !== 'agent-preset/selected') continue
@@ -218,8 +365,8 @@ function assertAdoptable(header: AdoptableHeader, events: Iterable<SessionEvent>
       `session "${sessionId}" runs under agent preset "${preset}", which the one-shot runner does not compose`,
     )
   }
-  if (header.origin === 'subagent' || header.parentSession !== undefined) {
-    throw new Error(`session "${sessionId}" is a subagent or forked session and cannot be driven directly`)
+  if (header.origin === 'subagent') {
+    throw new Error(`session "${sessionId}" is a subagent session and cannot be driven directly`)
   }
   if (header.cwd === undefined) {
     throw new Error(`session "${sessionId}" recorded no working directory, so it cannot be adopted`)
@@ -246,8 +393,8 @@ async function resolveAgent(
   ctx: Context,
   agents: Context['agents'],
   sessionId: SessionId,
-  agentOptions: { provider: string; model: string },
-  setup: (agentCtx: Context) => void,
+  agentOptions: AgentOptions,
+  setup: (agentCtx: Context, agent: Agent) => void | Promise<void>,
   cwd: string,
 ): Promise<Agent> {
   // Resuming promises the caller a log a later process can continue. Without a
@@ -296,14 +443,15 @@ async function resolveAgent(
 function fail(io: HeadlessIo, error: unknown, json: boolean): void {
   const message = error instanceof Error ? error.message : String(error)
   if (json) io.stdout.write(`${boundJsonLine({ type: 'error', message })}\n`)
-  io.stderr.write(`dsh: ${message}\n`)
+  io.stderr.write(`hydra: ${message}\n`)
   io.exit(1)
 }
 
 /**
  * Run one task through one Agent and request process exit.
+ * Live Agent failures require a later durable terminal before a recovered run can succeed.
  * @param ctx - plugin context carrying the Agent, default model, Session, and launcher IO services.
- * @param config - task, optional exact Session identity, and output mode.
+ * @param config - task, exact Session identity, output mode, permission preset, and approval policy.
  * @param io - process-facing effects.
  */
 async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> {
@@ -322,22 +470,52 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     throw new Error('headless-runner: sessionId must not be blank')
   }
 
+  const startup = ctx.get('headlessStartup')
+  const permissionMode = startup?.permissionMode ?? config.permissionMode
+  const approvalPolicy = startup?.approvalPolicy ?? config.approvalPolicy
+  const approval = ctx.get('approval')
+  const permissions = ctx.get('permissionPresets')
+  if (permissionMode !== undefined) {
+    if (permissions === undefined) throw new Error('headless --permission-mode requires the permissionPresets service')
+    permissions.resolve(permissionMode)
+  }
+  if (approvalPolicy !== undefined && approval === undefined) {
+    throw new Error('headless --approval-policy requires the approval service')
+  }
+  const requestedRoots = startup?.additionalWritableRoots
+  if (requestedRoots !== undefined && requestedRoots.length > 0) {
+    const policy = ctx.get('sandboxPolicy')
+    if (policy === undefined || requestedRoots.some(root => !policy.additionalWritableRoots?.includes(root))) {
+      throw new Error('headless --add-dir requires the sandbox-policy row to include headlessStartup.additionalWritableRoots; check the profile overlays')
+    }
+  }
+
   const task = config.task === undefined || config.task === '-'
     ? await internals.readStdin()
     : config.task
   if (task.trim() === '') {
-    throw new Error('a task is required, for example: dsh --profile headless "run the tests"')
+    throw new Error('a task is required, for example: hydra --profile headless "run the tests"')
   }
 
   const selection = defaultModel.currentSelection()
-  const agentOptions = { provider: selection.provider, model: selection.model }
+  const agentOptions: AgentOptions = { ...selection }
   // This bundle composes no preset roster, so the model-facing rows sit in the
   // host plane and the agent reads them from the global layer. A deployment
   // that DOES configure one has to join it here first
-  // (@deepseek-ai/dsh-agent-presets README, "Composing a child agent").
-  const setup = (agentCtx: Context): void => {
-    const selected: ModelSelectionRef = { current: selection, assembled: undefined }
-    installModelSelection(agentCtx, selected)
+  // (@deepseek-ai/dsh-agent-preset-registry README, "Composing a child agent").
+  const setup = (agentCtx: Context, agent: Agent): void => {
+    // A resumed Session continues with this run's configured model.
+    if (config.sessionId !== undefined) {
+      const previous = agent.model.current()
+      const configured = { ...selection }
+      if (configured.reasoningEffort === undefined && previous !== undefined
+        && previous.provider === configured.provider && previous.model === configured.model
+        && previous.reasoningEffort !== undefined) {
+        configured.reasoningEffort = previous.reasoningEffort
+      }
+      agent.model.select(configured)
+    }
+    installModelSelection(agentCtx)
   }
   const sessionId = brandString<SessionId>(config.sessionId ?? `session-${randomUUID()}`)
   const fs = ctx.get('fs')
@@ -357,28 +535,75 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     // re-read the log the runner holds before submitting the task.
     assertAdoptable(agent.session.header, liveEvents(agent.session), sessionId, cwd)
   }
+  if (permissionMode !== undefined && permissions !== undefined) permissions.set(agent.session, permissionMode)
+  if (approvalPolicy !== undefined && approval?.overrideOf(agent.session) !== approvalPolicy) {
+    setApprovalPolicy(agent.session, approvalPolicy)
+  }
   const firstSeq = agent.session.seq
   const projection = config.json === true ? projectJsonRun(ctx, agent, io.stdout, { cwd }) : undefined
   const stopReasoning = projection === undefined ? streamReasoning(ctx, agent, io.stderr) : undefined
+  let failure: { error: unknown; atOffset: SessionLogOffset } | undefined
+  const stopErrors = ctx.on('agent/error', ({ agent: subject, error }) => {
+    if (subject === agent) failure = { error, atOffset: agent.session.seq }
+  })
+  const stopTerminals = ctx.on('session/event', (session, event) => {
+    if (session === agent.session && event.type === 'turn/end'
+      && failure !== undefined && event.seq >= failure.atOffset) failure = undefined
+  })
+  const commandAbort = new AbortController()
   try {
+    let command: CommandExecution | undefined
+    let heldGoal: string | undefined
     try {
-      agent.followup(createUserMessage({
-        content: [{ type: 'text', text: task }],
-        source: { kind: 'user' },
-      }))
-      await agent.whenIdle()
+      // A task naming a registered slash command runs that command, as an
+      // interactive surface would; any other text, including a path that
+      // starts with `/`, is the model's task.
+      command = await ctx.get('commands')?.execute(agent, task.trim(), [], commandAbort.signal)
+      if (command === undefined) {
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: task }],
+          source: { kind: 'user' },
+        }))
+      }
+      const subagents = ctx.get('subagents')
+      while (true) {
+        await agent.whenIdle()
+        const idleSeq = agent.session.seq
+        // Child settlement can wake the parent before the child wait observes it.
+        if (!await subagents?.waitForChildren(agent)
+          && agent.status === 'idle' && agent.session.seq === idleSeq) break
+      }
+      // Synchronous with the exit decision, so the goal driver's next
+      // reservation sees the goal disarmed.
+      heldGoal = holdArmedGoal(ctx, agent)
     } finally {
       stopReasoning?.()
     }
+    // Process exit would cancel the last turn's learning review; it has its own
+    // deadline. Background jobs nobody awaits are not waited for.
+    await ctx.get('learning')?.settled(agent.session.id)
     await sessions.flush(agent.session)
+    if (failure !== undefined) throw failure.error
     const outcome = summarize(agent.session, firstSeq)
-    if (projection === undefined) io.stdout.write(outcome.text + '\n')
-    else projection.finish(outcome.text)
-    if (outcome.reason?.kind === 'error') {
-      io.stderr.write(`dsh: ${outcome.reason.error.code}: ${outcome.reason.error.message}\n`)
+    const result = command?.result
+    // A command answers with its own text; a turn it started adds that turn's answer.
+    const text = command === undefined
+      ? outcome.text
+      : [result?.kind === 'success' ? result.text : undefined, outcome.reason === undefined ? undefined : outcome.text]
+        .filter(part => part !== undefined && part !== '').join('\n')
+    if (projection === undefined) io.stdout.write(text + '\n')
+    else projection.finish(text, outcome.reason)
+    if (result?.kind === 'error') io.stderr.write(`hydra: /${commandName(task)}: ${result.text}\n`)
+    else if (outcome.reason !== undefined && !succeeded(outcome)) io.stderr.write(endNotice(outcome.reason))
+    if (heldGoal !== undefined) {
+      io.stderr.write(`hydra: goal "${heldGoal}" is still active; this headless run answered one task, so the goal's next round did not start\n`)
     }
-    io.exit(outcome.reason?.kind === 'completed' ? 0 : 1)
+    const commandOnly = command !== undefined && outcome.reason === undefined
+    io.exit(result?.kind === 'error' ? 1 : commandOnly || succeeded(outcome) ? 0 : 1)
   } finally {
+    commandAbort.abort()
+    stopErrors()
+    stopTerminals()
     projection?.dispose()
   }
 }

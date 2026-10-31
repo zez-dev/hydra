@@ -8,7 +8,7 @@ import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
@@ -107,7 +107,7 @@ async function withJobs(ctx: Context): Promise<void> {
 }
 
 function jobIdIn(text: string): JobId {
-  const match = /background job (learning-import-\d+)/u.exec(text)
+  const match = /background job (learning-import-[0-9a-f]+)/u.exec(text)
   if (match === null) throw new Error(`no job id in: ${text}`)
   return match[1] as JobId
 }
@@ -116,7 +116,7 @@ async function liveAgent(ctx: Context, cwd: string, id = 'import-agent'): Promis
   const scope = ctx.plugin(() => {})
   const session = ctx.sessions.create(SessionId(id), { meta: { cwd } })
   const agent: Agent = {
-    id: SessionId(id), options: {}, session, inbox: unsupportedInbox(),
+    id: SessionId(id), options: {}, session, model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
@@ -563,13 +563,13 @@ describe('/learn from', () => {
     const result = await invoke(ctx, agent, 'from knowledge/wiki')
     expect(result.kind).toBe('success')
     const text = (result as { text?: string }).text ?? ''
-    expect(text).toMatch(/Importing 2 file\(s\) from knowledge\/wiki as background job learning-import-\d+/u)
+    expect(text).toMatch(/Importing 2 file\(s\) from knowledge\/wiki as background job learning-import-[0-9a-f]+/u)
     const id = jobIdIn(text)
-    expect(ctx.jobs.get(id, agent)).toMatchObject({ kind: 'learning-import', label: '/learn from knowledge/wiki', ownerSession: agent.session.id })
-    const settled = await ctx.jobs.wait(id, 5000, agent)
+    expect(ctx.jobs.get(id, agent.session.id)).toMatchObject({ kind: 'learning-import', label: '/learn from knowledge/wiki', owner: agent.session.id })
+    const settled = await ctx.jobs.wait(id, 5000, agent.session.id)
     expect(settled.status).toBe('completed')
     expect(settled.detail).toBe('1 entries filed')
-    expect(ctx.jobs.read(id, agent).text).toMatch(/Imported 2 file\(s\) in 2 chunk\(s\); 1 candidate/u)
+    expect(ctx.jobs.read(id, agent.session.id).result).toMatch(/Imported 2 file\(s\) in 2 chunk\(s\); 1 candidate/u)
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
   })
 
@@ -580,8 +580,8 @@ describe('/learn from', () => {
     await knowledgeTree(root!)
     const { agent } = await liveAgent(ctx, root!)
     const id = jobIdIn(textOf(await digest(ctx, agent, 'knowledge/wiki')))
-    expect(ctx.jobs.get(id, agent)).toMatchObject({ label: '/digest knowledge/wiki' })
-    expect((await ctx.jobs.wait(id, 5000, agent)).detail).toBe('1 entries filed, 2 skill draft(s)')
+    expect(ctx.jobs.get(id, agent.session.id)).toMatchObject({ label: '/digest knowledge/wiki' })
+    expect((await ctx.jobs.wait(id, 5000, agent.session.id)).detail).toBe('1 entries filed, 2 skill draft(s)')
   })
 
   it('stops a killed import after the current chunk and keeps what was filed', async () => {
@@ -614,10 +614,10 @@ describe('/learn from', () => {
     const id = jobIdIn((result as { text?: string }).text ?? '')
     for (let i = 0; i < 200 && release === undefined; i += 1) await new Promise(resolve => setTimeout(resolve, 10))
     expect(release).toBeDefined()
-    expect(ctx.jobs.kill(id, agent, 'enough')).toBe('requested')
-    const settled = await ctx.jobs.wait(id, 5000, agent)
+    expect(ctx.jobs.kill(id, agent.session.id, 'enough')).toBe('requested')
+    const settled = await ctx.jobs.wait(id, 5000, agent.session.id)
     expect(settled.status).toBe('killed')
-    expect(ctx.jobs.read(id, agent).text).toMatch(/Import cancelled after 2 chunk\(s\); 1 candidate\(s\) were filed/u)
+    expect(ctx.jobs.read(id, agent.session.id).result).toMatch(/Import cancelled after 2 chunk\(s\); 1 candidate\(s\) were filed/u)
     expect(ctx.memory.list().map(entry => entry.text)).toEqual(['Run pnpm test before pushing.'])
   })
 
@@ -628,7 +628,7 @@ describe('/learn from', () => {
     const { agent } = await liveAgent(ctx, root!)
     const result = await invoke(ctx, agent, 'from knowledge/wiki --as-skills')
     expect((result as { text?: string }).text ?? '').toMatch(/^Wrote 2 skill\(s\)/u)
-    expect(ctx.jobs.list(agent)).toEqual([])
+    expect(ctx.jobs.list(agent.session.id)).toEqual([])
   })
 
   it('caps the number of files per import and reports the skipped ones', async () => {
@@ -771,9 +771,9 @@ describe('/learn consolidate', () => {
     const { agent } = await liveAgent(ctx, root!)
     for (const text of ['pnpm test runs vitest in watch mode', 'pnpm test runs vitest once in CI']) await ctx.memory.add({ text, kind: 'fact', tags: [] }, 'approved')
     const started = textOf(await invoke(ctx, agent, 'consolidate'))
-    const id = /background job (learning-consolidate-\d+)/u.exec(started)?.[1] as JobId
-    expect(ctx.jobs.get(id, agent)).toMatchObject({ kind: 'learning-consolidate', label: '/learn consolidate' })
-    expect(await ctx.jobs.wait(id, 5000, agent)).toMatchObject({ status: 'completed', detail: '2 notes became 1' })
-    expect(ctx.jobs.read(id, agent).text).toContain('Consolidated 1 of 1 group(s)')
+    const id = /background job (learning-consolidate-[0-9a-f]+)/u.exec(started)?.[1] as JobId
+    expect(ctx.jobs.get(id, agent.session.id)).toMatchObject({ kind: 'learning-consolidate', label: '/learn consolidate' })
+    expect(await ctx.jobs.wait(id, 5000, agent.session.id)).toMatchObject({ status: 'completed', detail: '2 notes became 1' })
+    expect(ctx.jobs.read(id, agent.session.id).result).toContain('Consolidated 1 of 1 group(s)')
   })
 })

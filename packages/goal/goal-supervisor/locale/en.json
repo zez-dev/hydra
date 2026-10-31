@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Goal supervisor",
+    "description": "Resume stored sessions with active goals at startup, within a concurrency limit and a daily round budget."
+  }
+}

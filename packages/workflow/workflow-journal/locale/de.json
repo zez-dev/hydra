@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Workflow-Journal",
+    "description": "Zeichnet die abgeschlossenen Subagent-Aufrufe jedes Workflow-Laufs auf, damit ein fortgesetzter Lauf sie wiederverwendet, statt sie erneut auszuführen."
+  }
+}

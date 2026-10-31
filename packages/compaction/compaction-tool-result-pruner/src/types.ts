@@ -11,6 +11,14 @@ export interface ToolResultPruneConfig {
   tailChars?: number
 }
 
+/**
+ * Which over-budget tool results one pruning pass may cut. `'read'` cuts only
+ * results a model request has carried, meaning those before the latest assistant
+ * message on the surface; `'all'` also cuts results the model has not read,
+ * with a marker that says so.
+ */
+export type PruneScope = 'read' | 'all'
+
 /** Validated, detached, deeply immutable pruning configuration. */
 export interface ResolvedConfig {
   readonly thresholdChars: number

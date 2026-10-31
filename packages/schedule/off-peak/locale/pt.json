@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Execução fora do horário de pico",
+    "description": "Adia rodadas de metas e tarefas na fila para os horários fora de pico configurados, opcionalmente em um modelo mais barato."
+  }
+}

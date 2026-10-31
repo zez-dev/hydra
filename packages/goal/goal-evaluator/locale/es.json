@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Verificación de objetivos",
+    "description": "Confirma con una solicitud de modelo independiente que un objetivo se ha cumplido antes de que el modelo pueda marcarlo como completado."
+  }
+}

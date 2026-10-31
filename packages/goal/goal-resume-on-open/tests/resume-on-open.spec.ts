@@ -6,7 +6,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import GoalService from '@deepseek-ai/dsh-goal'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { createInboxStub, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ApprovalOutcome, ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 import * as ResumeOnOpen from '@deepseek-ai/dsh-goal-resume-on-open'
@@ -23,7 +23,7 @@ function stubAgent(ctx: Context, rawId: string): { agent: Agent; session: Sessio
   const session = ctx.sessions.create(SessionId(rawId))
   const scope = ctx.plugin(() => {})
   const agent: Agent = {
-    id: session.id, options: {}, session, inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
+    id: session.id, options: {}, session, model: unsupportedModel(), inbox: createInboxStub(), ctx: scope.ctx, status: 'idle',
     send: () => {}, followup: () => {}, steer: () => {}, inject: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),
     whenIdle: () => Promise.resolve(),

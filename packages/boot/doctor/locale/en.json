@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Environment check",
+    "description": "Check this installation's home, workspace, sandbox, git, plugins, and credentials, with a fix for each problem."
+  }
+}

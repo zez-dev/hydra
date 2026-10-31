@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import { executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { coerceArguments, defineTool, flattenNullableParameters, type Config, type JsonSchemaNode } from '@deepseek-ai/dsh-tools'
@@ -10,6 +12,7 @@ async function setup(config: Partial<Config> = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime, config)
+  await ctx.plugin(NativeToolExecutor)
   return ctx
 }
 
@@ -131,7 +134,7 @@ describe('argumentCoercion config', () => {
   it('rejects a stringly-typed integer under the default strict policy', async () => {
     const ctx = await setup()
     ctx.tools.register(readTool)
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', offset: '10' } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', offset: '10' } })
     expect(result.isError).toBe(true)
     expect(result.content[0]).toMatchObject({ type: 'text' })
     expect((result.content[0] as { text: string }).text).toContain('invalid arguments')
@@ -142,7 +145,7 @@ describe('argumentCoercion config', () => {
     ctx.tools.register(readTool)
     let seen: unknown
     ctx.on('tools/pre-execute', (exec, next) => { seen = exec.arguments; return next() })
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', offset: '10', note: null } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', offset: '10', note: null } })
     expect(result.isError).toBe(false)
     expect(result.value).toEqual({ path: 'a', offset: 10, note: null })
     expect(seen).toEqual({ path: 'a', offset: 10, note: null })
@@ -202,7 +205,7 @@ describe('nullableParameters config', () => {
     const assembled = assembly.tools[0]!.parameters as { properties: Record<string, unknown> }
     expect(assembled.properties.note).toEqual({ type: 'string' })
     // Validation still accepts null: the flattening is presentation-only.
-    const result = await ctx.tools.execute({ signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', note: null } })
+    const result = await executeToolFixture(ctx, { signal, callId: ToolCallId('c1'), name: 'read', arguments: { path: 'a', note: null } })
     expect(result.isError).toBe(false)
   })
 })

@@ -1,8 +1,12 @@
-# DeepSeek Harness
+# Hydra
 
 [English](README.md) | 中文
 
-> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
+<a id="disclaimer"></a>
+
+> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的 Web 与桌面应用自带 Claude：Anthropic 路由提供 Claude Opus 5.5、Sonnet 5.5 和 Haiku 5.5，新会话默认使用 Claude Sonnet 5.5；首次启动时输入 API 密钥即可使用，无需登录 DeepSeek 账号，桌面应用的欢迎页还可以为该密钥选择 Anthropic、DeepSeek、OpenAI 或其他提供商。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
+>
+> **免责声明**：Hydra 是独立的社区项目，与 DeepSeek、Anthropic、OpenAI 或任何其他模型提供方均无隶属、背书、赞助或支持关系；相关名称是其各自所有者的商标，仅用于说明 Hydra 所基于或配合使用的软件。Hydra 依 [MIT 许可证](LICENSE)按“原样”提供，不附带任何形式的担保；在法律允许的最大范围内，作者和贡献者不对因使用 Hydra 而产生的任何索赔、损害、数据丢失、安全事件或费用承担责任。Hydra 运行的 AI 智能体可以执行 shell 命令、修改或删除文件，并会把你的代码、提示和文件发送给你配置的模型提供方；你需要自行审查智能体的操作并备份重要数据，自行负责 API 密钥与提供方收取的费用，遵守提供方的服务条款，并对发送给提供方的数据及其适用的法律承担责任。模型输出可能有误；Hydra 生成的任何内容（包括研究与行情数据工具的结果）均不构成财务、法律、医疗或其他专业建议。完整内容见[英文 README 的免责声明](README.md#disclaimer)。
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
 
@@ -50,19 +54,17 @@ pnpm dsh web
 
 - 通过 [GitHub Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions) 提交反馈或 bug 报告。
 - 为你的插件仓库添加 [`dsh-plugin`](https://github.com/topics/dsh-plugin) 话题，便于被发现。
-- 欢迎加入 DeepSeek Harness 企微群：扫码添加企微小助手并填写入群问卷，完成后小助手会邀请你入群。
+- 欢迎加入 DeepSeek Harness 企微群！扫描下方二维码填写入群问卷，小助手会定期发送入群邀请。
 
 <table>
   <thead>
     <tr>
-      <th align="center">企微小助手</th>
       <th align="center">入群问卷</th>
       <th align="center">微信公众号</th>
     </tr>
   </thead>
   <tbody>
     <tr>
-      <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-assistant.png" alt="DeepSeek Harness 企微小助手二维码" width="180" height="180"></td>
       <td align="center"><a href="https://trtgsjkv6r.feishu.cn/share/base/form/shrcnIt5twSVdLGD52KJBckGCgg"><img src="https://cdn.deepseek.com/harness/readme/community-wecom-survey.png" alt="DeepSeek Harness 入群问卷二维码" width="180" height="180"></a></td>
       <td align="center"><img src="https://cdn.deepseek.com/harness/readme/community-wechat-official-account.png" alt="DeepSeek Harness 团队微信公众号二维码" width="180" height="180"></td>
     </tr>
@@ -76,6 +78,8 @@ pnpm dsh web
 ## 开发
 
 请先阅读[开发指南](docs/development.zh.md)与[架构文档](docs/architecture.zh.md)。
+
+`pnpm run dev:web` 会在一个终端里完成构建、启动，并在源码修改时重建 client bundle；`make help` 列出 Web 与 Desktop 对应的 Make target。完整表格见开发指南的「应用命令」一节。
 
 面向 agent：请遵循 [AGENTS.md](AGENTS.md)。
 

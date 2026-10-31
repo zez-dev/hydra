@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { HydraBrandMark, HydraBrandName, HydraHeroMark } from './Brand.tsx'
-import { en, zh, type BrandHydraKey } from './locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh, type BrandHydraKey } from './locales.ts'
 
 export type { BrandHydraKey } from './locales.ts'
 
@@ -29,7 +29,7 @@ export const inject = ['slots', 'locale']
  * @param ctx - Client root context.
  */
 export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-brand-hydra: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en, ja, es, fr, de, ru, pt }), 'ui-brand-hydra: dictionaries')
   ctx.slots.inject('sidebar.brand.mark', () =>
     ctx.slots.inject('sidebar.brand.name', function* () {
       yield ctx.slots.register({ name: 'sidebar.brand.mark' }, HydraBrandMark)

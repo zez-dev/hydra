@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Usage API",
+    "description": "Serve the cross-session token-usage report behind the Web usage dashboard."
+  }
+}

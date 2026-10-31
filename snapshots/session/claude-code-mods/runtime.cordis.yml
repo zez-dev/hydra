@@ -1,0 +1,10 @@
+# The scenario's own mod refuses `git push --force`, and that refusal is what
+# the Session log records. Hydra's command gate would refuse the push before
+# the mod sees it, so this scenario allows the one gate rule.
+- id: command-gate
+  config:
+    mode: confirm
+    unattendedMode: deny
+    allow: [git-force-push]
+    denyExtra: []
+    temporaryRoots: []

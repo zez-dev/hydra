@@ -1,20 +1,19 @@
 ---
-description: "经验证的外部事件、程序化规则与即发即弃 DSH 会话创建的包映射。"
+description: "webhook 包组导览：从 Hydra 的目标和智能体向 webhook、Telegram 和 Discord 渠道发送出站通知，供浏览本组的用户和维护者使用。"
 kind: "package-group"
 ---
 
-# webhook/ — 从已验证外部事件到 DSH 会话
+# packages/webhook
 
 [English](README.md) | 中文
 
 ## 概述
 
-Webhook 系列接收通过身份验证的提供方事件，并运行受信任的程序化规则。规则可以在 Web Workspace 中创建普通根会话。分发仅存在于进程内并采用 fire-and-forget，不拥有交付数据库、队列、重试、去重或 agent（智能体）完成状态。
+webhook 包组承载 Hydra 的出站通知。当目标阻塞或完成、目标轮次驱动在多次瞬时失败后放弃，或智能体轮次出错时，`dsh-notify` 向每个已配置的渠道发送一条简短消息。它在 `dsh-base` 中以禁用状态挂载；部署方启用它并指定渠道。入站提供方事件和程序化规则属于实验性 webhook 包，由 [Webhook 子系统参考](../../docs/subsystems/webhook.zh.md) 描述。
 
 ## 目录
 
 - [包](#packages)
-- [相关文档](#related-documentation)
 - [开发备注](#dev-note)
 
 -----
@@ -22,15 +21,9 @@ Webhook 系列接收通过身份验证的提供方事件，并运行受信任的
 <a id="packages"></a>
 ## 包
 
-| 包 | 角色 | ctx key |
+| 包 | 职责 | ctx 键 |
 |---|---|---|
-| [`webhook/`](webhook/README.zh.md) | 规则注册表、回调生命周期与基于 Workspace 的会话创建 | `ctx.webhookRuntime` |
-| [`webhook-github/`](webhook-github/README.zh.md) | GitHub HTTP 签名验证适配器 | 消费 `ctx.webhookRuntime` 与 `ctx.webServer` |
-
-<a id="related-documentation"></a>
-## 相关文档
-
-提供方适配器负责验证身份并规范化交付。规则拥有任意条件和外部调用，随后返回 `null` 或一个会话请求。[Webhook 子系统参考](../../docs/subsystems/webhook.zh.md)拥有共享类型与时序保证。
+| [`notify/`](notify/README.md) | 向 webhook、Telegram 和 Discord 渠道发送目标、重试和智能体错误的出站通知 | `ctx.notify` |
 
 <a id="dev-note"></a>
 ## 开发备注

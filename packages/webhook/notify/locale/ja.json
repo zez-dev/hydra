@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "通知",
+    "description": "目標、エラー、レポートの通知を webhook、Telegram、Discord のチャンネルに投稿します。"
+  }
+}

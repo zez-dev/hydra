@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { unsupportedInbox, unsupportedModel } from '@deepseek-ai/dsh-agent-loop-testkit'
 import CommandRuntime, { CommandId } from '@deepseek-ai/dsh-commands'
 import type { CommandResult } from '@deepseek-ai/dsh-commands'
 import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import type { LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { Session, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import * as Knowledge from '@deepseek-ai/dsh-knowledge'
 import { mergeRanked, WORKSPACE_KNOWLEDGE_FOLDER } from '@deepseek-ai/dsh-knowledge'
 
@@ -54,6 +55,7 @@ async function boot(collections: { name: string; root: string }[] = [], extra: R
   const base = await fresh()
   const ctx = new Context()
   context = ctx
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(LlmRuntime)
   await ctx.plugin(CommandRuntime)
@@ -69,7 +71,7 @@ async function agentIn(ctx: Context, name: string, cwd: string | undefined): Pro
     ? { version: SESSION_FORMAT_VERSION, id, createdAt: 0, isSeeded: false }
     : { version: SESSION_FORMAT_VERSION, id, createdAt: 0, isSeeded: false, cwd }
   const agent: Agent = {
-    id, options: {}, session: Session.create(id, [], header), inbox: unsupportedInbox(),
+    id, options: {}, session: Session.create(id, [], header), model: unsupportedModel(), inbox: unsupportedInbox(),
     status: 'idle', ctx: scope.ctx,
     followup: () => {}, steer: () => {}, inject: () => {}, send: () => {}, cancel() {},
     runMaintenance: task => task(new AbortController().signal),

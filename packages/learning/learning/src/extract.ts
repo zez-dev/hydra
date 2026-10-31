@@ -386,16 +386,15 @@ export function collectErrorPairs(events: readonly SessionEvent[], turn: number,
       continue
     }
     if (event.type !== 'tool/result') continue
-    for (const block of event.data.message.content) {
-      const call = calls.get(String(block.toolCallId))
-      if (call === undefined) continue
-      outcomes.push({
-        tool: call.name,
-        arguments: call.arguments,
-        text: blocksText(block.content),
-        failed: event.data.error !== undefined || block.isError === true,
-      })
-    }
+    const message = event.data.message
+    const call = calls.get(String(message.toolCallId))
+    if (call === undefined) continue
+    outcomes.push({
+      tool: call.name,
+      arguments: call.arguments,
+      text: blocksText(message.content),
+      failed: event.data.error !== undefined || message.isError === true,
+    })
   }
   const pairs: ErrorPair[] = []
   const used = new Set<number>()

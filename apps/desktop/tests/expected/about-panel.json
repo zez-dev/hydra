@@ -1,27 +1,61 @@
 {
-  "en-US": {
+  "darwin:en-US": {
     "menu": [
-      { "label": "About DeepSeek Harness", "role": "about" },
+      { "label": "About Hydra", "role": "about" },
       { "type": "separator" }
     ],
     "options": {
-      "applicationName": "DeepSeek Harness",
+      "applicationName": "Hydra",
       "applicationVersion": "1.0.0",
       "version": "",
       "copyright": "",
+      "credits": "Hydra is an independent community project. It is not affiliated with or endorsed by DeepSeek or any model provider, and it is provided as is, without warranty.\n\nhttps://github.com/zez-dev/hydra#disclaimer",
+      "website": "https://github.com/zez-dev/hydra#disclaimer",
       "iconPath": "<app icon>"
     }
   },
-  "zh-CN": {
+  "darwin:zh-CN": {
     "menu": [
-      { "label": "关于 DeepSeek Harness", "role": "about" },
+      { "label": "关于 Hydra", "role": "about" },
       { "type": "separator" }
     ],
     "options": {
-      "applicationName": "DeepSeek Harness",
+      "applicationName": "Hydra",
       "applicationVersion": "1.0.0",
       "version": "",
       "copyright": "",
+      "credits": "Hydra 是独立的社区项目，与 DeepSeek 及任何模型提供方均无隶属或背书关系，按“原样”提供，不附带任何担保。\n\nhttps://github.com/zez-dev/hydra#disclaimer",
+      "website": "https://github.com/zez-dev/hydra#disclaimer",
+      "iconPath": "<app icon>"
+    }
+  },
+  "win32:zh-CN": {
+    "menu": [
+      { "label": "关于 Hydra" },
+      { "type": "separator" }
+    ],
+    "options": {
+      "applicationName": "Hydra",
+      "applicationVersion": "1.0.0",
+      "version": "",
+      "copyright": "",
+      "credits": "Hydra 是独立的社区项目，与 DeepSeek 及任何模型提供方均无隶属或背书关系，按“原样”提供，不附带任何担保。\n\nhttps://github.com/zez-dev/hydra#disclaimer",
+      "website": "https://github.com/zez-dev/hydra#disclaimer",
+      "iconPath": "<app icon>"
+    }
+  },
+  "win32:en-US": {
+    "menu": [
+      { "label": "About Hydra" },
+      { "type": "separator" }
+    ],
+    "options": {
+      "applicationName": "Hydra",
+      "applicationVersion": "1.0.0",
+      "version": "",
+      "copyright": "",
+      "credits": "Hydra is an independent community project. It is not affiliated with or endorsed by DeepSeek or any model provider, and it is provided as is, without warranty.\n\nhttps://github.com/zez-dev/hydra#disclaimer",
+      "website": "https://github.com/zez-dev/hydra#disclaimer",
       "iconPath": "<app icon>"
     }
   }

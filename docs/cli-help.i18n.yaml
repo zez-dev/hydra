@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for cli-help.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/cli-help.md
+/:
+  en: d11ca88bdc409249
+  zh: d11ca88bdc409249
+/hydra-cli-help:
+  en: fdbe0e1fcc9f21da
+  zh: 18993eb42dc4ba04
+/hydra-cli-help/contents:
+  en: b77e2d03e46d204d
+  zh: fe5af2b1490555a7
+/hydra-cli-help/hydra:
+  en: 050ee43ed3594677
+  zh: c717fd4c859910a8
+/hydra-cli-help/hydra-plugin:
+  en: 89ecc6945a174053
+  zh: 138b0c1c895d7953
+/hydra-cli-help/hydra-acp:
+  en: e45ab3757f53d0c1
+  zh: e4b4240601e0dda3
+/hydra-cli-help/hydra-headless:
+  en: 934cad63a187be17
+  zh: eac5413d6c803f04
+/hydra-cli-help/hydra-sdk:
+  en: 7be11dae6004f35e
+  zh: a436222bcdd6fdec
+/hydra-cli-help/hydra-sdk-minimal:
+  en: 9370d9bc90a75436
+  zh: 741344c5b9265840
+/hydra-cli-help/hydra-web:
+  en: f839a6e51f806e2f
+  zh: 90c7c2590a76d374

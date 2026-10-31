@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Zielprüfung",
+    "description": "Bestätigt mit einer separaten Modellanfrage, dass ein Ziel erreicht ist, bevor das Modell es als abgeschlossen markieren kann."
+  }
+}

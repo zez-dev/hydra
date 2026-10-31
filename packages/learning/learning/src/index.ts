@@ -36,7 +36,7 @@ import type { ImportMode, ImportSkip, LearnFromRequest, ResearchIngestRequest } 
 import { mirrorBreakthroughs } from '@deepseek-ai/dsh-research'
 import { digestDocument, writeSkillDraft } from './digest.ts'
 import { CONSOLIDATE_SYSTEM_PROMPT, planGroups, renderConsolidation, renderGroup, runConsolidation } from './consolidate.ts'
-import type { LearningCandidate, LearningRequestEventData } from './types.ts'
+import type { LearningCandidate, LearningRequestEventData, TurnTranscript } from './types.ts'
 
 export type * from './types.ts'
 export {
@@ -207,6 +207,18 @@ function reviewDeadlineMs(config: Config, events: readonly SessionEvent[], maxTo
 }
 
 /**
+ * The transcript a turn review sends, when the turn qualifies for one.
+ * @param config - plugin configuration.
+ * @param events - the turn's events as observed live, `turn/start` through `turn/end`.
+ * @param turn - the finished turn number.
+ * @returns the transcript, or `undefined` for a turn with fewer than `minToolCalls` tool calls or no text.
+ */
+function reviewTranscript(config: Config, events: readonly SessionEvent[], turn: number): TurnTranscript | undefined {
+  const transcript = collectTurnTranscript(events, turn, config.maxTranscriptBytes)
+  return transcript.toolCalls < config.minToolCalls || transcript.text.length === 0 ? undefined : transcript
+}
+
+/**
  * Review one finished turn: log the exact request, call the model, store candidates.
  * @param ctx - plugin context.
  * @param config - plugin configuration.
@@ -214,6 +226,7 @@ function reviewDeadlineMs(config: Config, events: readonly SessionEvent[], maxTo
  * @param agent - the agent whose turn finished.
  * @param turn - the finished turn number.
  * @param events - the turn's events as observed live, `turn/start` through `turn/end`.
+ * @param transcript - the turn's transcript from `reviewTranscript`.
  * @param signal - cancellation: the job's, or the maintenance task's without a job registry.
  */
 async function extractTurn(
@@ -223,11 +236,10 @@ async function extractTurn(
   agent: Agent,
   turn: number,
   events: readonly SessionEvent[],
+  transcript: TurnTranscript,
   signal: AbortSignal,
 ): Promise<void> {
   const session = agent.session
-  const transcript = collectTurnTranscript(events, turn, config.maxTranscriptBytes)
-  if (transcript.toolCalls < config.minToolCalls || transcript.text.length === 0) return
   const route = auxiliaryRoute(config, session.requestHeader()?.config)
   if (route === undefined) return
   const deadlineFor = (maxTokens: number): number => reviewDeadlineMs(config, events, maxTokens)
@@ -566,7 +578,7 @@ async function requestTextOnce(
 ): Promise<string> {
   const messages: Message[] = [createUserMessage({
     content: [{ type: 'text', text: request.prompt }],
-    source: { kind: 'plugin', plugin: 'dsh-learning' },
+    source: { kind: 'plugin:dsh-learning' },
   })]
   using callDeadline = deadline(request.signal, request.deadlineMs ?? config.timeoutMs, LEARNING_TIMEOUT_CODE)
   const reasoningEffort = lowerEffort ? await routeLowestEffort(ctx, route, callDeadline.signal) : undefined
@@ -843,13 +855,13 @@ async function importPath(
     id = jobs.start({
       kind: 'learning-import',
       label: `${request.mode === 'auto' ? '/digest' : '/learn from'} ${request.path}`,
-      owner: invocation.agent,
+      owner: invocation.agent.session.id,
       run: () => ({
         cancel: (reason) => { controller.abort(new Error(reason ?? 'learning import cancelled')) },
         done: executeImport(ctx, config, store, roots, request, prepared, session, controller.signal).then(({ result, summary }) => ({
           status: result.kind === 'success' ? 'completed' as const : controller.signal.aborted ? 'killed' as const : 'failed' as const,
           detail: `${summary.candidates} entries filed${summary.drafts.length === 0 ? '' : `, ${summary.drafts.length} skill draft(s)`}`,
-          ...result.text === undefined ? {} : { output: result.text },
+          ...result.text === undefined ? {} : { result: result.text },
         })),
       }),
     })
@@ -927,15 +939,15 @@ async function consolidateMemory(
     id = jobs.start({
       kind: 'learning-consolidate',
       label: `/learn consolidate${all ? ' --all' : ''}`,
-      owner: invocation.agent,
+      owner: invocation.agent.session.id,
       run: () => ({
         cancel: (reason) => { controller.abort(new Error(reason ?? 'consolidation cancelled')) },
         done: run(controller.signal).then(
-          summary => ({ status: 'completed' as const, detail: `${summary.replaced} notes became ${summary.written}`, output: renderConsolidation(summary, all) }),
+          summary => ({ status: 'completed' as const, detail: `${summary.replaced} notes became ${summary.written}`, result: renderConsolidation(summary, all) }),
           (error: unknown) => ({
             status: controller.signal.aborted ? 'killed' as const : 'failed' as const,
             detail: 'stopped',
-            output: `Consolidation stopped: ${error instanceof Error ? error.message : String(error)}`,
+            result: `Consolidation stopped: ${error instanceof Error ? error.message : String(error)}`,
           }),
         ),
       }),
@@ -1070,6 +1082,7 @@ const MAINTENANCE_ATTEMPTS = 20
  * @param agent - the agent whose turn finished.
  * @param turn - the finished turn number.
  * @param events - the turn's events as observed live.
+ * @param transcript - the turn's transcript from `reviewTranscript`.
  * @param controller - cancels the review; the next turn's start aborts it as superseded.
  * @param onSettled - called once the review has settled or yielded.
  * @param nextTurnStarted - whether the next turn started while the review waited to begin.
@@ -1081,6 +1094,7 @@ function startReviewJob(
   agent: Agent,
   turn: number,
   events: readonly SessionEvent[],
+  transcript: TurnTranscript,
   controller: AbortController,
   onSettled: () => void,
   nextTurnStarted: boolean,
@@ -1101,10 +1115,10 @@ function startReviewJob(
     const id = jobs.start({
       kind: 'learning-review',
       label: `learning review of turn ${turn}`,
-      owner: agent,
+      owner: agent.session.id,
       run: () => ({
         cancel: () => { controller.abort({ kind: 'disposed' }) },
-        done: extractTurn(ctx, config, ctx.memory, agent, turn, events, controller.signal)
+        done: extractTurn(ctx, config, ctx.memory, agent, turn, events, transcript, controller.signal)
           .then(() => ({ status: 'completed' as const }), (error: unknown) => {
             const message = error instanceof Error ? error.message : String(error)
             if (controller.signal.aborted || isDisposalCancel(error)) {
@@ -1119,8 +1133,8 @@ function startReviewJob(
           .finally(() => { offDisposed(); onSettled() }),
       }),
     })
-    // A pending wait marks the settled job reported, so tool-jobs sends no notice.
-    void jobs.wait(id, MAX_TIMER_DELAY_MS, agent).catch(() => undefined)
+    // A pending wait makes the settlement `awaited`, so tool-jobs sends no notice.
+    void jobs.wait(id, MAX_TIMER_DELAY_MS, agent.session.id).catch(() => undefined)
     return true
   } catch (error) {
     offDisposed()
@@ -1148,6 +1162,8 @@ export function apply(ctx: Context, config: Config): void {
   const buffered = new Map<SessionId, SessionEvent[]>()
   /** The review in flight per session; the next turn's start cancels it so it never holds the route. */
   const reviewing = new Map<SessionId, AbortController>()
+  /** Settlement of each session's latest turn review, from that turn's end until the review settles. */
+  const pending = new Map<SessionId, Promise<void>>()
   ctx.on('session/event', (session, event) => {
     if (config.reviewTurns === false) return
     if (event.type === 'turn/start') {
@@ -1164,11 +1180,25 @@ export function apply(ctx: Context, config: Config): void {
     if (agent === undefined || reviewed.get(session.id) === event.data.turn) return
     reviewed.set(session.id, event.data.turn)
     const turn = event.data.turn
+    // A turn that gets no review starts no job and claims no maintenance. A
+    // subagent child gets none: its activation disposes it as soon as the turn
+    // ends, which would cancel the review after its request was sent.
+    if (session.header.origin === 'subagent') return
+    const transcript = reviewTranscript(config, events, turn)
+    if (transcript === undefined) return
     const controller = new AbortController()
     const settle = (): void => {
       if (reviewing.get(session.id) === controller) reviewing.delete(session.id)
     }
     controller.signal.addEventListener('abort', settle, { once: true })
+    // Pending from this `turn/end`, before the job starts, so a host that
+    // exits after the turn can wait for the review instead of cancelling it.
+    const finished = Promise.withResolvers<void>()
+    pending.set(session.id, finished.promise)
+    const done = (): void => {
+      if (pending.get(session.id) === finished.promise) pending.delete(session.id)
+      finished.resolve()
+    }
     void (async () => {
       // The review appends its own log events, so it starts after the
       // `turn/end` append that triggered it has finished publishing.
@@ -1177,7 +1207,9 @@ export function apply(ctx: Context, config: Config): void {
       // so only it yields when the next turn starts; a maintenance review
       // cannot overlap a turn and waits for the next idle instead.
       reviewing.set(session.id, controller)
-      if (startReviewJob(ctx, config, agent, turn, events, controller, settle, buffered.has(session.id))) return
+      if (startReviewJob(ctx, config, agent, turn, events, transcript, controller, () => { settle(); done() }, buffered.has(session.id))) {
+        return
+      }
       settle()
       // A goal-driven session goes busy again right after idle, so the
       // maintenance claim can lose the race; wait for the next idle and retry
@@ -1188,7 +1220,7 @@ export function apply(ctx: Context, config: Config): void {
           if (controller.signal.aborted) return
           try {
             await agent.runMaintenance(signal => extractTurn(
-              ctx, config, ctx.memory, agent, turn, events, AbortSignal.any([signal, controller.signal]),
+              ctx, config, ctx.memory, agent, turn, events, transcript, AbortSignal.any([signal, controller.signal]),
             ))
             return
           } catch (error) {
@@ -1205,10 +1237,12 @@ export function apply(ctx: Context, config: Config): void {
         }
       } finally {
         settle()
+        done()
       }
     })()
   })
   ctx.provide('learning', {
+    settled: sessionId => pending.get(sessionId) ?? Promise.resolve(),
     promote: (id, name) => promoteEntry(ctx, ctx.memory, skillsRoot, id, name),
     promoteMany: (ids, name) => promoteEntries(ctx, ctx.memory, skillsRoot, ids, name),
     skills: () => listSkills(skillsRoot),

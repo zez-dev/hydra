@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Control de comandos",
+    "description": "Bloquea antes de ejecutarse los comandos de shell que destruirían trabajo sin confirmar o modificarían la máquina."
+  }
+}

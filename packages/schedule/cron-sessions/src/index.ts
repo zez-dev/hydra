@@ -20,7 +20,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { DomainError, defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 // Type-only: resolves the optional `agentPresets`, `agentDefaultModel`, and `notify` declarations.
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-notify'
 import { cronMatches, isDue, parseCron } from './cron.ts'

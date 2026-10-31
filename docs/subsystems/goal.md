@@ -2,7 +2,7 @@
 
 English | [中文](goal.zh.md)
 
-Types shared by the event-sourced goal service and its policy consumers. The [goal-domain Agent Note](../../.agents/notes/implemented/feature/2026-07-19-persisted-same-session-goal-domain.md) owns the persistence and activation decisions; this page records the exact fields and variants from [`packages/goal/goal/src/types.ts`](../../packages/goal/goal/src/types.ts).
+Types shared by the event-sourced goal service and its policy consumers. The [goal-domain reference](../../packages/goal/goal/README.md) owns the persistence and activation decisions; this page records the exact fields and variants from [`packages/goal/goal/src/types.ts`](../../packages/goal/goal/src/types.ts).
 
 ## Identity and lifecycle
 
@@ -200,7 +200,7 @@ write(cwd: string, at?: Date): Promise<DigestReport>
  * @param at - the moment that defines the last day; defaults to now.
  * @returns the weekly review input.
  */
-collectWeek(cwd: string, at?: Date): Promise<WeeklyInput>
+collectWeek(cwd: string, at?: Date): Promise<DigestWeeklyInput>
 
 /**
  * Render and write the weekly review to `<cwd>/.dsh/reports/week-<YYYY-Www>.md`.
@@ -347,7 +347,8 @@ record(finding: ResearchFinding, source: JournalEntrySource): Promise<void>
 announceBreakthrough(journal: Journal, text: string): void
 
 /**
- * Re-rank a journal's open hypotheses with one logged scoring request. A
+ * Re-rank a journal's open hypotheses with a logged scoring request, sent once
+ * more at the route's default effort when the lowest-effort answer has no text. A
  * disabled scoring config, an absent route, a failed request, and an
  * unreadable answer are each logged and leave the recorded scores unchanged.
  * @param store - the store holding the journal.

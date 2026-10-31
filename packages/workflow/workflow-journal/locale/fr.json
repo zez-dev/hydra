@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Journal des workflows",
+    "description": "Enregistre les appels de sous-agents terminés de chaque exécution de workflow afin qu'une exécution reprise les réutilise au lieu de les relancer."
+  }
+}

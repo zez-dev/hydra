@@ -107,7 +107,7 @@ export const turnMaxTokensDefinition: ConversationNodeDefinition<TurnMaxTokensSt
       turn: state.turn,
       step: lastStep(context),
     }
-    return chatNode(context, 'turn-max-tokens', noticeAnchor(context, state.end.seq), node)
+    return chatNode(context, 'turn-max-tokens', noticeAnchor(context, state.end.seq), node, { groupTree: 'turn' })
   },
 }
 

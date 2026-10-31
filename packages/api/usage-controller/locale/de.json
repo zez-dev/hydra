@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Nutzungs-API",
+    "description": "Liefert dem Web-Nutzungsdashboard den sitzungsübergreifenden Bericht zur Token-Nutzung."
+  }
+}

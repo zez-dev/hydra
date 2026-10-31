@@ -13,6 +13,8 @@
  * @module @deepseek-ai/dsh-command-gate
  */
 
+import { existsSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -53,7 +55,10 @@ export interface Config {
   allow: string[]
   /** Extra command prefixes to deny, each written as it would be typed. */
   denyExtra: string[]
-  /** Absolute paths where destroying files is expected, such as a scratch root. */
+  /**
+   * Absolute paths where destroying files is expected, such as a scratch root.
+   * `/tmp` and the operating system's temporary directory always count too.
+   */
   temporaryRoots: string[]
 }
 
@@ -99,6 +104,34 @@ function workingDirectory(workdir: unknown, workspace: string): string {
 }
 
 /**
+ * A directory as written and as the filesystem resolves it. The classifier
+ * compares paths as text, so the workspace and every temporary root count
+ * under both spellings: on macOS `/tmp` is `/private/tmp`.
+ * @param path - an absolute directory.
+ * @returns the directory, then its resolved path when it can be read.
+ */
+function spellings(path: string): string[] {
+  try {
+    return [path, realpathSync.native(path)]
+  } catch {
+    // realpathSync.native failed: the directory or a parent is missing or
+    // unreadable, so only the written spelling can match a command.
+    return [path]
+  }
+}
+
+/**
+ * The temporary roots commands are judged against: the configured ones plus
+ * `/tmp` and `os.tmpdir()`, the platform temporary directories the sandbox's
+ * `workspace-write` mode lets every command write, each under every spelling.
+ * @param configured - the deployment's `temporaryRoots`.
+ * @returns the roots without duplicates.
+ */
+function temporaryRoots(configured: readonly string[]): string[] {
+  return [...new Set([...configured, '/tmp', tmpdir()].flatMap(root => spellings(root)))]
+}
+
+/**
  * Whether a human can answer an approval for this call right now. An absent
  * approval service and a session whose policy already rejects every ask both
  * mean nobody will.
@@ -122,6 +155,7 @@ export function apply(ctx: Context, config: Config): void {
   const denyExtra = config.denyExtra
     .map(pattern => pattern.trim().split(/\s+/).filter(word => word.length > 0))
     .filter(words => words.length > 0)
+  const temporary = temporaryRoots(config.temporaryRoots)
 
   /** Record one refusal in memory and in the calling session's log. */
   function record(agent: Agent, attempt: BlockedAttempt): void {
@@ -148,9 +182,11 @@ export function apply(ctx: Context, config: Config): void {
     const context: CommandContext = {
       cwd: workingDirectory(call.workdir, workspace),
       workspace,
-      temporaryRoots: config.temporaryRoots,
+      workspaceAliases: spellings(workspace).filter(spelling => spelling !== workspace),
+      temporaryRoots: temporary,
       allow: config.allow,
       denyExtra,
+      exists: existsSync,
     }
     const found: Classification = classifyCommandLine(call.command, context)
     if (found.verdict === 'allow') return next()

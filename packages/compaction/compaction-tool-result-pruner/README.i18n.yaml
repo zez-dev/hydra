@@ -1,6 +1,67 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/compaction/compaction-tool-result-pruner/README.md
-README.md: 7b05154bc02035bb86933e77a60904613f72bbed
-README.zh.md: 06ecb2b3a63f4511cc334878b5c02358c0fad0fd
+/:
+  en: 9ed7a84c51988fdb
+  zh: 4df60a349c2be7dc
+/deepseek-ai-dsh-compaction-tool-result-pruner:
+  en: d1e83d1d335479f8
+  zh: 747c5b2af42365a3
+/deepseek-ai-dsh-compaction-tool-result-pruner/summary:
+  en: 213a06e887f2b8ef
+  zh: 60f3468211c37230
+/deepseek-ai-dsh-compaction-tool-result-pruner/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-compaction-tool-result-pruner/use-this-package:
+  en: 03aed6a1e84dad5f
+  zh: e9a62ff6294041a6
+/deepseek-ai-dsh-compaction-tool-result-pruner/use-this-package/smallest-working-composition:
+  en: 55eadf840a54d2f8
+  zh: cc6bf82f58058c7b
+/deepseek-ai-dsh-compaction-tool-result-pruner/use-this-package/what-gets-trimmed:
+  en: f8596e3b6e82b5f9
+  zh: 13c0d9739b06327f
+/deepseek-ai-dsh-compaction-tool-result-pruner/use-this-package/setting-the-size-limits:
+  en: 18a11d46f9ef60b0
+  zh: a2ab47d662ae8eab
+/deepseek-ai-dsh-compaction-tool-result-pruner/use-this-package/when-trimming-runs:
+  en: 8afc8da6a104ffda
+  zh: 53fb11641b767acf
+/deepseek-ai-dsh-compaction-tool-result-pruner/understand-the-implementation:
+  en: 57aaa53880042873
+  zh: 667f54624411c37d
+/deepseek-ai-dsh-compaction-tool-result-pruner/understand-the-implementation/design-philosophy:
+  en: 5adff8207c6294e0
+  zh: ccba42d804989abb
+/deepseek-ai-dsh-compaction-tool-result-pruner/understand-the-implementation/pruning-mechanics:
+  en: fcfec3393339daaa
+  zh: 8c324d20b07cb0e7
+/deepseek-ai-dsh-compaction-tool-result-pruner/understand-the-implementation/source-map:
+  en: 5807ef77186c857c
+  zh: b627267a95ca4535
+/deepseek-ai-dsh-compaction-tool-result-pruner/further-exploration:
+  en: 3253e154e7610bbd
+  zh: ba28c7411fd5c8bb
+/deepseek-ai-dsh-compaction-tool-result-pruner/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-compaction-tool-result-pruner/model-experience/pruned-tool-result:
+  en: 0b0dfb7ec1bf906f
+  zh: 68f70bde796751cd
+/deepseek-ai-dsh-compaction-tool-result-pruner/model-experience/pruned-tool-result/what-the-model-sees:
+  en: e8ab8889cd7d2b54
+  zh: 133fdce9e3663fce
+/deepseek-ai-dsh-compaction-tool-result-pruner/model-experience/pruned-tool-result/token-effect:
+  en: 9031b70507fa20c7
+  zh: c011e9afc008461e
+/deepseek-ai-dsh-compaction-tool-result-pruner/model-experience/pruned-tool-result/kv-cache-effect:
+  en: 626d841bc3c72188
+  zh: 72b4630d733aae85
+/deepseek-ai-dsh-compaction-tool-result-pruner/known-limitations-and-deferred-work:
+  en: 39598708f19539ba
+  zh: 8e2bab4a8d58b588
+/deepseek-ai-dsh-compaction-tool-result-pruner/known-limitations-and-deferred-work/dev-note:
+  en: 19120c19286532da
+  zh: 49187f1e83b31007

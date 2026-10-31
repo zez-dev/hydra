@@ -12,6 +12,7 @@ import {
   parsePersistedSessionFilename,
   parseSessionFixtureName,
   persistedSessionFilename,
+  redactSessionSnapshotIds,
   sessionFixtureName,
   sessionFixtureNames,
   sessionHeaderVersion,
@@ -35,6 +36,7 @@ import {
   parseSystemPromptSnapshot,
   parseToolSchemasSnapshot,
   refreshFixtureReplacements,
+  reconcileCatalogCreationTimes,
   scenarioSkipped,
   restorePinnedToolSchemas,
   type SharedSnapshotClaim,
@@ -892,6 +894,17 @@ describe('tool-schema snapshots', () => {
       .toEqual({ system: '{{system}}', tools: snapshot.initial })
   })
 
+  it('restores ordered tool names only when they match the sidecar', () => {
+    const schemas = [{ name: 'read' }, { name: 'write' }]
+    expect(restorePinnedToolSchemas({ tools: ['read', 'write'] }, schemas)).toEqual({ tools: schemas })
+    for (const tools of [['write', 'read'], ['read'], ['read', 'missing'], [1, 'write']]) {
+      expect(() => restorePinnedToolSchemas({ tools }, schemas)).toThrow(/must equal/)
+    }
+    for (const schema of [null, 'read', {}, { name: 'other' }]) {
+      expect(() => restorePinnedToolSchemas({ tools: ['read'] }, [schema])).toThrow(/must equal/)
+    }
+  })
+
   it('rejects invalid headers and a missing tool token', () => {
     expect(() => restorePinnedToolSchemas(null, snapshot.initial)).toThrow(/must be an object/)
     expect(() => restorePinnedToolSchemas('invalid', snapshot.initial)).toThrow(/must be an object/)
@@ -943,6 +956,15 @@ describe('stabilizeFixtureMessageIds', () => {
       expect(fixture).toContain(`"id":"${existingId}"`)
       expect(fixture).not.toContain(freshId)
     }
+  })
+
+  it('stabilizes developer message identities through their explicit surface case', () => {
+    const freshId = '11111111-1111-4111-8111-111111111111'
+    const oldId = '22222222-2222-4222-8222-222222222222'
+    const log = (id: string) => JSON.stringify({ type: 'developer/message', data: { turn: 1, step: 1, message: {
+      id, role: 'developer', source: { kind: 'tool-registry' }, content: [{ type: 'tool-addition', toolName: 'search' }],
+    } } }) + '\n'
+    expect(stabilizeFixtureMessageIds([log(freshId)], [log(oldId)])).toEqual([log(oldId)])
   })
 
   it('rewrites only complete messages carried by surface events or durable inbox splices', () => {
@@ -1495,6 +1517,38 @@ describe('stabilizeRefreshLog', () => {
     ].join('\n'))
   })
 
+  it('lends stream clocks from a projected writer baseline, not from another event layout', () => {
+    const header = '{"type":"session","id":"{{session:1}}","createdAt":100,"cwd":"/old"}'
+    const message = (time: number): Record<string, unknown> => ({
+      type: 'assistant/message',
+      data: { stream: [{ type: 'chunk', time, chunk: { type: 'block-start', index: 0 } }] },
+    })
+    const log = (...records: Record<string, unknown>[]): string =>
+      [header, ...records.map(record => JSON.stringify(record)), ''].join('\n')
+    const streamTime = (output: string): unknown =>
+      (JSON.parse(output.split('\n')[1] as string) as { data: { stream: { time: unknown }[] } }).data.stream[0]?.time
+    const fresh = log({ ...message(300), seq: 1, time: 300 })
+
+    expect(streamTime(stabilize(fresh, log(message(100))))).toBe(100)
+    expect(streamTime(stabilize(fresh, log({ type: 'text-chunks', time0: 100, data: { dt: [0] } }, message(100))))).toBe(300)
+  })
+
+  it.each([
+    { name: 'an unchanged', freshText: 'moved to background job' },
+    { name: 'a changed', freshText: 'continues as background job' },
+  ])('tokenizes every occurrence of a job id alike beside $name result text', ({ freshText }) => {
+    const log = (jobId: string, startedAt: number, text: string): string => [
+      '{"type":"session","id":"{{session:1}}","createdAt":100,"cwd":"/old"}',
+      JSON.stringify({ type: 'job/registered', data: { jobId, kind: 'bash', startedAt } }),
+      JSON.stringify({ type: 'tool/result', data: { message: { role: 'tool', content: [{ type: 'text', text: `${text} ${jobId}` }] } } }),
+      '',
+    ].join('\n')
+    const existing = log('{{id:1}}', 100, 'moved to background job')
+
+    expect(redactSessionSnapshotIds([stabilize(log('bash-0123456789abcdef', 200, freshText), existing)]))
+      .toEqual([log('{{id:1}}', 100, freshText)])
+  })
+
   it('keeps fresh correlated ids when record alignment is structurally ambiguous', () => {
     const firstFreshId = '11111111-1111-4111-8111-111111111111'
     const secondFreshId = '22222222-2222-4222-8222-222222222222'
@@ -1567,5 +1621,31 @@ describe('stabilizeRefreshLog', () => {
     const outputIds = stabilize(log(freshNames), log(existingNames)).trim().split('\n').slice(1)
       .map(line => (JSON.parse(line) as { data: { id: string } }).data.id)
     expect(outputIds).toEqual(freshNames.map(name => ids[name as keyof typeof ids]))
+  })
+})
+
+
+describe('raw parent and child catalog clocks', () => {
+  const child = '{"type":"session","id":"child","createdAt":100}\n'
+  const parent = (time: number) => [
+    { type: 'session', id: 'parent', createdAt: 1 },
+    { type: 'subagent/catalog', seq: 0, time: 2, data: { version: 0, childId: 'child', childCreatedAt: time, mode: 'one-shot' } },
+  ].map(row => JSON.stringify(row) + '\n').join('')
+
+  it('rejects mismatched raw clocks before normalization can erase them', () => {
+    expect(() => reconcileCatalogCreationTimes([parent(200), child], 'validate')).toThrow('creation time 200 disagrees with child header 100')
+    expect(reconcileCatalogCreationTimes([parent(100), child], 'validate')).toEqual([parent(100), child])
+  })
+
+  it('keeps retained child clocks in newly generated catalog fixtures', () => {
+    const output = reconcileCatalogCreationTimes([parent(200), child], 'preserve-headers')
+    expect(output).toEqual([parent(100), child])
+    expect(reconcileCatalogCreationTimes(output, 'validate')).toEqual(output)
+    expect(reconcileCatalogCreationTimes(output, 'preserve-headers')).toEqual(output)
+  })
+
+  it('preserves partial corpora and unrelated rows verbatim', () => {
+    const partial = parent(200) + '{"type":"feedback/record","data":null}\n'
+    expect(reconcileCatalogCreationTimes([partial], 'validate')).toEqual([partial])
   })
 })

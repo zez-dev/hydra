@@ -1,20 +1,19 @@
 ---
-description: "Package map for verified external events, programmatic rules, and fire-and-forget DSH Session creation."
+description: "The webhook group map: outbound notifications from Hydra's goals and agents to webhook, Telegram, and Discord channels, for users and maintainers navigating the group."
 kind: "package-group"
 ---
 
-# webhook/ — verified external events to DSH Sessions
+# packages/webhook
 
 English | [中文](README.zh.md)
 
 ## Summary
 
-The Webhook family receives authenticated provider events and runs trusted programmatic rules. A rule can create an ordinary root Session inside a Web Workspace. Dispatch is process-local and fire-and-forget, with no delivery database, queue, retry, deduplication, or Agent-completion state.
+The webhook group carries Hydra's outbound notifications. `dsh-notify` posts a short message to each configured channel when a goal blocks or completes, the goal round driver gives up after repeated transient failures, or an agent turn errors. It is mounted disabled in `dsh-base`; a deployment enables it and names its channels. Inbound provider events and programmatic rules belong to the experimental webhook packages that the [Webhook subsystem reference](../../docs/subsystems/webhook.md) describes.
 
 ## Table of Contents
 
 - [Packages](#packages)
-- [Related documentation](#related-documentation)
 - [Dev Note](#dev-note)
 
 -----
@@ -24,13 +23,7 @@ The Webhook family receives authenticated provider events and runs trusted progr
 
 | Package | Role | ctx key |
 |---|---|---|
-| [`webhook/`](webhook/README.md) | Rule registry, callback lifecycle, and Workspace-backed Session creation | `ctx.webhookRuntime` |
-| [`webhook-github/`](webhook-github/README.md) | Signed GitHub HTTP adapter | consumes `ctx.webhookRuntime` and `ctx.webServer` |
-
-<a id="related-documentation"></a>
-## Related documentation
-
-Provider adapters authenticate and normalize deliveries. Rules own arbitrary conditions and external calls, then return `null` or one Session request. The [Webhook subsystem reference](../../docs/subsystems/webhook.md) owns the shared types and timing guarantees.
+| [`notify/`](notify/README.md) | Outbound goal, retry, and agent-error notifications to webhook, Telegram, and Discord channels | `ctx.notify` |
 
 <a id="dev-note"></a>
 ## Dev Note

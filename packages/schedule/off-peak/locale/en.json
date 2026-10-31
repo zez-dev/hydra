@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Off-peak scheduling",
+    "description": "Defer goal rounds and queued tasks to configured off-peak hours, optionally on a cheaper model."
+  }
+}

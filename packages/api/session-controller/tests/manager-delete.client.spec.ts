@@ -16,7 +16,7 @@ const API_ROSTER = webApp.closure(['@deepseek-ai/dsh-api-gateway'])
 const it = createClientTest({ roster: API_ROSTER })
 
 function summary(sessionId: SessionId, over: Partial<{ parentSessionId: SessionId; origin: 'subagent' }> = {}) {
-  return { sessionId, updatedAt: 100, running: false, blank: false, ...over }
+  return { agentAvailable: true, sessionId, updatedAt: 100, running: false, blank: false, ...over }
 }
 
 function makeManager(mock: RemoteMock, remote: ClientTestFixtures['remote']): SessionManager {

@@ -24,8 +24,8 @@ import {
   aggregateWeek, isClosedOutcome, isoWeekLabel, msUntilWeekly, parseDigestFooter, parseWeeklyOn, renderWeekly, weekDates,
 } from './weekly.ts'
 import type {
-  DailyTime, DailyTotals, DigestCheckpoint, DigestGoal, DigestInput, DigestReport, DigestService, DigestTicket, WeeklyInput, WeeklyReport,
-  WeeklyTime,
+  DailyTime, DailyTotals, DigestCheckpoint, DigestGoal, DigestInput, DigestReport, DigestService, DigestTicket, DigestWeeklyInput,
+  WeeklyReport, WeeklyTime,
 } from './types.ts'
 
 export type * from './types.ts'
@@ -241,7 +241,7 @@ export function apply(ctx: Context, config: Config): void {
     return found
   }
 
-  async function collectWeek(cwd: string, at: Date = new Date()): Promise<WeeklyInput> {
+  async function collectWeek(cwd: string, at: Date = new Date()): Promise<DigestWeeklyInput> {
     const dates = weekDates(at)
     const from = dates[0] ?? localDateKey(at)
     const to = dates[dates.length - 1] ?? localDateKey(at)

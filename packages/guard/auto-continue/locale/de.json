@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Automatisch fortsetzen",
+    "description": "Setzt eine Runde automatisch fort, wenn die Antwort am Limit der Ausgabe-Tokens abgeschnitten wird."
+  }
+}

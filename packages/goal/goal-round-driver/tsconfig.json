@@ -30,7 +30,7 @@
       "path": "../../core/session"
     },
     {
-      "path": "../../runtime-diagnostics/invariants"
+      "path": "../../subagent/subagent"
     }
   ]
 }

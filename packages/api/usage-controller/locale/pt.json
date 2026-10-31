@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "API de uso",
+    "description": "Fornece ao painel de uso da web o relatório de uso de tokens de todas as sessões."
+  }
+}

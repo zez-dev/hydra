@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Usage dashboard",
+    "description": "Show token totals, a 12-month daily heatmap, and a per-model table in the right sidebar."
+  }
+}

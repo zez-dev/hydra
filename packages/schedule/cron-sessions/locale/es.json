@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Sesiones programadas",
+    "description": "Inicia sesiones nuevas según una programación cron, recupera al iniciar las ejecuciones perdidas y registra cada resultado."
+  }
+}

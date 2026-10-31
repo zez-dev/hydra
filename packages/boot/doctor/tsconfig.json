@@ -10,11 +10,16 @@
   "references": [
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
+    { "path": "../../../vendor/loader" },
     { "path": "../../../vendor/schemastery" },
     { "path": "../../../native/system/packages/entry" },
+    { "path": "../app-boot" },
     { "path": "../../core/agent" },
+    { "path": "../../core/agent-default-model" },
     { "path": "../../core/tools" },
+    { "path": "../../credentials/credentials" },
     { "path": "../../interaction/commands" },
-    { "path": "../../llm/llm" }
+    { "path": "../../llm/llm" },
+    { "path": "../../skill/skill-lock" }
   ]
 }

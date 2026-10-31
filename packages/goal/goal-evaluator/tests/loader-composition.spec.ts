@@ -18,6 +18,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutor from '@deepseek-ai/dsh-tool-executor-native'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as GoalRoundDriver from '@deepseek-ai/dsh-goal-round-driver'
@@ -25,6 +26,7 @@ import * as ToolGoal from '@deepseek-ai/dsh-tool-goal'
 import * as CommandGoal from '@deepseek-ai/dsh-command-goal'
 import * as GoalEvaluator from '@deepseek-ai/dsh-goal-evaluator'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import WorkingDirectory from '@deepseek-ai/dsh-working-directory'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import * as WorkspaceChanges from '@deepseek-ai/dsh-workspace-changes'
@@ -49,6 +51,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-session-projection'",
     "- name: '@deepseek-ai/dsh-system-prompt'",
     "- name: '@deepseek-ai/dsh-tools'",
+    "- name: '@deepseek-ai/dsh-tool-executor-native'",
     "- name: '@deepseek-ai/dsh-agent'",
     "- name: '@deepseek-ai/dsh-agent-loop'",
     '  config:',
@@ -59,6 +62,7 @@ async function boot(): Promise<Context> {
     "- name: '@deepseek-ai/dsh-tool-goal'",
     "- name: '@deepseek-ai/dsh-command-goal'",
     "- name: '@deepseek-ai/dsh-fs-local'",
+    "- name: '@deepseek-ai/dsh-working-directory'",
     "- name: '@deepseek-ai/dsh-tool-fs'",
     "- name: '@deepseek-ai/dsh-subprocess-local'",
     "- name: '@deepseek-ai/dsh-workspace-changes'",
@@ -88,6 +92,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
     ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
     ['@deepseek-ai/dsh-tools', ToolRuntime],
+    ['@deepseek-ai/dsh-tool-executor-native', NativeToolExecutor],
     ['@deepseek-ai/dsh-agent', AgentRegistry],
     ['@deepseek-ai/dsh-agent-loop', AgentLoop],
     ['@deepseek-ai/dsh-commands', CommandRuntime],
@@ -97,6 +102,7 @@ async function boot(): Promise<Context> {
     ['@deepseek-ai/dsh-command-goal', CommandGoal],
     ['@deepseek-ai/dsh-goal-evaluator', GoalEvaluator],
     ['@deepseek-ai/dsh-fs-local', LocalFileSystem],
+    ['@deepseek-ai/dsh-working-directory', WorkingDirectory],
     ['@deepseek-ai/dsh-tool-fs', ToolFs],
     ['@deepseek-ai/dsh-subprocess-local', LocalSubprocessRuntime],
     ['@deepseek-ai/dsh-workspace-changes', WorkspaceChanges],
@@ -135,9 +141,9 @@ describe('goal evaluator real Loader composition through cordis.yml', () => {
 
     const result = agent.session.snapshotEvents().find(event => event.type === 'tool/result')
     expect(result).toBeDefined()
-    const block = result?.type === 'tool/result' ? result.data.message.content[0] : undefined
-    expect(block?.isError).toBe(true)
-    const text = block?.content.map(part => part.type === 'text' ? part.text : '').join('') ?? ''
+    const message = result?.type === 'tool/result' ? result.data.message : undefined
+    expect(message?.isError).toBe(true)
+    const text = message?.content.map(part => part.type === 'text' ? part.text : '').join('') ?? ''
     expect(text).toContain('not yet achieved')
     expect(text).toContain('no test run is recorded')
     expect(ctx.goals.get(agent)).toMatchObject({ phase: 'active', id: created.id })

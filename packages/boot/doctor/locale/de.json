@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Umgebungsprüfung",
+    "description": "Prüft Home-Verzeichnis, Arbeitsbereich, Sandbox, git, Plugins und Zugangsdaten dieser Installation und nennt für jedes Problem eine Lösung."
+  }
+}

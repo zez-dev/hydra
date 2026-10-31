@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-alpha.2/hydra-desktop-rename/guide.md
+/:
+  en: 1bb7697638b0de3f
+  zh: 5862ec486a8856bd
+/the-desktop-app-its-command-and-its-folders-are-named-hydra:
+  en: 8d24c31e7b2a1bd2
+  zh: d554154d3be6f629
+/the-desktop-app-its-command-and-its-folders-are-named-hydra/change:
+  en: c551f79d001a914c
+  zh: de11d7bc77ee33fd
+/the-desktop-app-its-command-and-its-folders-are-named-hydra/migration:
+  en: 8d17b9a4b2e5cb28
+  zh: 50ef382044f4e646

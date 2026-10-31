@@ -1,5 +1,7 @@
 /** Shared projection of the live LLM registry into the browser model catalog. */
 
+import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import type { LlmModelInfo } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   ModelCatalog,
@@ -40,6 +42,7 @@ export async function buildModelCatalog(
           name: model.name,
           ...(model.description === undefined ? {} : { description: model.description }),
           ...(reasoning === undefined ? {} : { reasoning }),
+          ...(model.badge === undefined ? {} : { badge: model.badge }),
         }
       }))
       return {
@@ -57,11 +60,30 @@ export async function buildModelCatalog(
       }
     }
   }))
+  const groups = catalog.flatMap(item => item.kind === 'group' ? [item.group] : [])
+    .filter(group => group.models.length > 0)
   return {
     default: { ...defaultSelection },
-    routableProviders: providers.map(provider => provider.id),
-    groups: catalog.flatMap(item => item.kind === 'group' ? [item.group] : [])
-      .filter(group => group.models.length > 0),
+    routableProviders: groups.map(group => group.id),
+    groups,
     failures: catalog.flatMap(item => item.kind === 'failure' ? [item.failure] : []),
   }
+}
+
+/**
+ * Check a GUI selection against the current available provider catalog.
+ * @param ctx - Host LLM registry.
+ * @param selection - stored or explicitly requested selection.
+ * @returns whether the exact model is currently advertised as available.
+ */
+export async function modelAvailable(ctx: Context, selection: ModelSelection): Promise<boolean> {
+  if (!ctx.llm.listProviders().some(provider => provider.id === selection.provider)) return false
+  let models: readonly LlmModelInfo[]
+  try { models = await ctx.llm.listModels(selection.provider) }
+  catch (error) {
+    throw new RemoteError('session/model-unavailable',
+      error instanceof Error ? error.message : String(error),
+      { provider: selection.provider, model: selection.model })
+  }
+  return models.some(model => model.id === selection.model)
 }

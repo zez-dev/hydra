@@ -6,7 +6,7 @@ import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { apply, inject } from '../src/client/index.ts'
 import { HydraBrandMark, HydraBrandName, HydraHeroMark } from '../src/client/Brand.tsx'
 import { apply as hostApply } from '../src/index.ts'
-import { en, zh, type BrandHydraKey } from '../src/client/locales.ts'
+import { de, en, es, fr, ja, pt, ru, zh, type BrandHydraKey } from '../src/client/locales.ts'
 
 afterEach(() => { cleanup() })
 
@@ -44,11 +44,15 @@ describe('Hydra browser-brand plugin', () => {
     expect(en.name).toBe('Hydra')
   })
 
+  it('keeps the product name untranslated in every other shipped language', () => {
+    for (const dictionary of [ja, es, fr, de, ru, pt]) expect(dictionary).toEqual(en)
+  })
+
   it('fills all three brand slots once their holes are declared and removes them on teardown', async () => {
     const { ctx, slots, registered, disposeHoles } = await bench()
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    expect(registered.get('brand-hydra')).toBeDefined()
+    expect(Object.keys(registered.get('brand-hydra') ?? {})).toEqual(['zh', 'en', 'ja', 'es', 'fr', 'de', 'ru', 'pt'])
     for (const hole of HOLES) expect(slots.entries(hole)).toHaveLength(1)
     disposeHoles()
     for (const hole of HOLES) expect(slots.entries(hole)).toHaveLength(0)

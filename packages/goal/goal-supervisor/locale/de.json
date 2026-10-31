@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Zielüberwachung",
+    "description": "Setzt beim Start gespeicherte Sitzungen mit aktiven Zielen fort, innerhalb eines Parallelitätslimits und eines täglichen Rundenbudgets."
+  }
+}

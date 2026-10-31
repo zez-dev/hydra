@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Diário de fluxos de trabalho",
+    "description": "Registra as chamadas de subagentes já concluídas de cada execução de fluxo de trabalho para que uma execução retomada as reutilize em vez de executá-las novamente."
+  }
+}

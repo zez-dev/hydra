@@ -8,8 +8,8 @@ import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { CompactionEngine, ManualCompactionError } from '@deepseek-ai/dsh-compaction'
 import type { CompactionResult, CompactionTrigger } from '@deepseek-ai/dsh-compaction'
-import type { Session, SessionSeq } from '@deepseek-ai/dsh-session'
-import { CONTEXT_WINDOW_EXCEEDED_CODE, createSystemMessage, createUserMessage, messageText } from '@deepseek-ai/dsh-llm'
+import type { EpochHeader, Session, SessionSeq } from '@deepseek-ai/dsh-session'
+import { CONTEXT_WINDOW_EXCEEDED_CODE, LlmError, createSystemMessage, createUserMessage, messageText } from '@deepseek-ai/dsh-llm'
 import { lastAssistantStreamChunk } from '@deepseek-ai/dsh-llm/assistant-stream'
 import type { LlmCallConfig, LlmModelContext, ToolSchema } from '@deepseek-ai/dsh-llm'
 import type { TokenMeasurement } from '@deepseek-ai/dsh-token-meter'
@@ -40,6 +40,7 @@ import type {
   ModelCompactPolicyConfig,
   ResolvedCompactSpec,
   ResolvedConfig,
+  ResolvedTargetPolicy,
 } from './types.ts'
 
 export type {
@@ -56,8 +57,6 @@ export type {
 const SUMMARY_RAISES = 3
 /** Failed summarization attempts one compaction may follow with another range before the failure is reported. */
 const SUMMARY_RETRIES = 4
-/** Source recorded on the scratch message that prices a system prompt not yet logged; never appended. */
-const PENDING_PROMPT_SOURCE = '@deepseek-ai/dsh-compaction-basic'
 
 /** Learned density sits this far above the bound a refusal proves, so the next request is under it, not at it. */
 const REFUSAL_HEADROOM = 1.02
@@ -95,6 +94,23 @@ function tokensThrough(measurement: TokenMeasurement, end: SessionSeq): number {
 /** Summed measured tokens of `nodes`. */
 function sumTokens(nodes: TokenMeasurement['nodes']): number {
   return nodes.reduce((sum, node) => sum + node.tokens, 0)
+}
+
+/**
+ * Heuristic tokens from the latest assistant message to the end of the surface:
+ * the step a summary leaves in place, with the results the model has not read yet.
+ * @param session - the agent-owned session.
+ * @param measurement - current surface measurement.
+ * @returns the summed tokens of that step, or of every node when no assistant message exists.
+ */
+function latestStepTokens(session: Session, measurement: TokenMeasurement): number {
+  const nodes = measurement.nodes
+  let start = nodes.length - 1
+  // Surface nodes are current log seqs, so the events exist.
+  // Existing Session history read; migration deferred.
+  // oxlint-disable-next-line typescript/no-non-null-assertion, typescript/no-deprecated
+  while (start > 0 && session.eventAt(nodes[start]!.seq)!.type !== 'assistant/message') start -= 1
+  return sumTokens(nodes.slice(Math.max(start, 0)))
 }
 
 /**
@@ -208,6 +224,31 @@ function requestCap(agent: Agent): number {
   return agent.session.requestHeader()?.config.maxTokens ?? agent.options.maxTokens ?? 0
 }
 
+/**
+ * Output tokens the routed request reserves, which the provider charges to the
+ * same window as the prompt. The effective envelope's own cap wins; otherwise
+ * the adapter's per-request default, which the adapter materializes when that
+ * envelope omits one. No declared cap means no reservation.
+ */
+function reservedCompletionTokens(header: EpochHeader, defaultMaxTokens: number | undefined): number {
+  return header.config.maxTokens ?? defaultMaxTokens ?? 0
+}
+
+/**
+ * Resolve the budgets the window fit sizes requests, summary ranges, and
+ * overflow recovery with. The fit prices each request's output cap itself, so
+ * the spec carries no output reservation; it carries no `headroomTokens`
+ * either, because these callers do not catch a configuration error and a
+ * headroom at least as large as the window would otherwise fail every request
+ * on that route.
+ * @param policy - merged policy for the routed target.
+ * @param contextWindow - the route's positive context window.
+ * @returns the scaled budgets, whose `thresholdTokens` is the window ratio alone.
+ */
+function fitSpec(policy: ResolvedTargetPolicy, contextWindow: number): ResolvedCompactSpec {
+  return resolveCompactSpec({ ...policy, headroomTokens: 0 }, contextWindow, 0)
+}
+
 /** Resolve the conversation target used to select an optional policy override. */
 function conversationTarget(
   agent: Agent,
@@ -220,6 +261,7 @@ function conversationTarget(
 }
 
 const thresholdRatioSchema = z.number()
+const headroomTokensSchema = z.number().step(1).min(0)
 const retainRatioSchema = z.number()
 const retainTokensSchema = z.number().step(1).min(0)
 const summarizationProviderSchema = z.string()
@@ -238,6 +280,7 @@ const outputRetryFactorSchema = z.number().min(1)
 /** Policy fields shared by the engine configuration and each per-model override, in schema order. */
 const policyFields = {
   thresholdRatio: thresholdRatioSchema,
+  headroomTokens: headroomTokensSchema,
   retainRatio: retainRatioSchema,
   retainTokens: retainTokensSchema,
   summarizationProvider: summarizationProviderSchema,
@@ -325,9 +368,9 @@ export class BasicCompactionEngine extends CompactionEngine {
   }
 
   /**
-   * Register automatic between-step pressure and model-request overflow
-   * recovery. `compactIfNeeded` stays dynamically dispatched so subclass
-   * overrides are honored at event time.
+   * Register between-step pressure, model-switch pressure, and request-overflow
+   * recovery. Pre-step and overflow listeners dispatch through `compactIfNeeded`;
+   * model switches price the proposed header directly. All summaries use `summarize`.
    */
   private _registerAutomaticCompaction(): void {
     const { ctx } = this
@@ -384,6 +427,30 @@ export class BasicCompactionEngine extends CompactionEngine {
       return next()
     })
 
+    // Prepend wraps routing listeners: await their final selection while the
+    // committed header still identifies the model that can summarize the history.
+    ctx.on('agent/request', async ({ agent, signal }, next) => {
+      const config = await next()
+      const previous = agent.session.requestHeader()
+      if (signal.aborted || previous === undefined || config.provider === '' || config.model === ''
+        || (previous.config.provider === config.provider && previous.config.model === config.model)) return config
+      try {
+        const header = { ...previous, config }
+        const result = await this.compactPressure(agent, header, signal, true)
+        if (result !== null) logResult(result, 'model switch')
+      } catch (error: unknown) {
+        signal.throwIfAborted()
+        const message = error instanceof Error ? error.message : String(error)
+        throw new LlmError(
+          `Cannot switch to ${config.provider}/${config.model}: context compaction failed: ${message}. `
+          + 'The previous request model is preserved; retry or select a model with a larger context window.',
+          'MODEL_SWITCH_COMPACTION_FAILED',
+          { cause: error },
+        )
+      }
+      return config
+    }, { prepend: true })
+
     // Last resort for the margin condensing could not close: the request asks
     // for the room that is left instead of the configured cap. The shrunk cap
     // is a header change, so the meter prices that step heuristically; the
@@ -407,7 +474,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       this.rememberContext(agent, info.context)
       const base = agent.options.maxTokens ?? info.defaultMaxTokens
       if (base === undefined || info.context === undefined) return resolved
-      const spec = resolveCompactSpec(resolveTargetPolicy(this.config, resolved), info.context.contextWindow)
+      const spec = fitSpec(resolveTargetPolicy(this.config, resolved), info.context.contextWindow)
       const measurement = ctx.tokenMeter.measure(agent.session)
       const total = this.pricedTotal(measurement, resolved) + Math.round((pending + pendingTools) * this.densityFor(measurement, resolved))
       const room = spec.contextWindow - total - spec.marginTokens
@@ -530,7 +597,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     this.rememberContext(agent, context)
     let budget = chosen
     if (budget === undefined && context !== undefined && target !== undefined && 'target' in config) {
-      const spec = resolveCompactSpec(config, context.contextWindow)
+      const spec = fitSpec(config, context.contextWindow)
       const measurement = this.ctx.tokenMeter.measure(agent.session)
       const room = spec.contextWindow - spec.marginTokens - this.pricedTotal(measurement, target)
         - Math.round(this.instructionTokens() * this.densityFor(measurement, target))
@@ -568,100 +635,176 @@ export class BasicCompactionEngine extends CompactionEngine {
     trigger: CompactionTrigger,
     signal: AbortSignal,
   ): Promise<CompactionResult | null> {
-    const target = routedTarget(agent.session)
-    if (target === undefined) return null
-    const policy = resolveTargetPolicy(this.config, target)
-    const meter = this.ctx.tokenMeter
-    let measurement = meter.measure(agent.session)
+    const header = agent.session.requestHeader()
+    if (header === undefined || routedTarget(agent.session) === undefined) return null
     switch (trigger) {
-      case 'context-overflow':
-        break
       case 'pressure':
-        break
+        return this.compactPressure(agent, header, signal, false)
+      case 'context-overflow': {
+        const target = header.config
+        const policy = resolveTargetPolicy(this.config, target)
+        const meter = this.ctx.tokenMeter
+        let measurement = meter.measure(agent.session)
+        // An unlisted route still recovers: without capacity metadata the whole
+        // surface is condensed, as it was before the fit rule.
+        const context = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+          .then(info => info.context, () => undefined)
+        this.rememberContext(agent, context)
+        // The refused request proves how the provider counts this route.
+        if (context !== undefined) {
+          this.learnRefusal(target, fitSpec(policy, context.contextWindow), measurement.estimatedTokens,
+            requestCap(agent), 'the request')
+        }
+        const prune = this.ctx.get('toolResultPruner')
+        if (prune !== undefined) {
+          prune.pruneSession(agent.session, 'all')
+          measurement = meter.measure(agent.session)
+        }
+        // The summarizer replays the prefix it condenses, so a tail stays out of
+        // the range whenever the whole surface plus the summary cap would not fit.
+        if (context === undefined) {
+          const range = selectCompactableRange(agent.session, measurement, 0)
+          if (range === null) return null
+          return this.compactRegion(range.start, range.end, agent, signal)
+        }
+        return this.condenseFitting(agent.session, measurement, fitSpec(policy, context.contextWindow), 0, agent, target,
+          fit => this.compactFitting(fit, agent, signal))
+      }
       /* v8 ignore next -- closed-union exhaustiveness guard */
       default:
         assertNever(trigger, 'compaction trigger')
     }
+  }
 
-    // Pruning is optional so compaction-basic remains independently composable.
-    // Overflow always qualifies; pressure first resolves the routed model's
-    // capacity and checks its target-specific threshold.
+  /** Price the proposed header; switch checks require history below its threshold. */
+  private async compactPressure(
+    agent: Agent,
+    header: EpochHeader,
+    signal: AbortSignal,
+    requireBelowThreshold: boolean,
+  ): Promise<CompactionResult | null> {
+    const target = header.config
+    const policy = resolveTargetPolicy(this.config, target)
+    const meter = this.ctx.tokenMeter
+    let measurement = meter.measure(agent.session, header)
     const prune = this.ctx.get('toolResultPruner')
-
-    if (trigger === 'context-overflow') {
-      // An unlisted route still recovers: without capacity metadata the whole
-      // surface is condensed, as it was before the fit rule.
-      const context = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
-        .then(info => info.context, () => undefined)
-      this.rememberContext(agent, context)
-      // The refused request proves how the provider counts this route.
-      if (context !== undefined) {
-        this.learnRefusal(target, resolveCompactSpec(policy, context.contextWindow), measurement.estimatedTokens,
-          requestCap(agent), 'the request')
-      }
-      if (prune !== undefined) {
-        prune.pruneSession(agent.session)
-        measurement = meter.measure(agent.session)
-      }
-      // The summarizer replays the prefix it condenses, so a tail stays out of
-      // the range whenever the whole surface plus the summary cap would not fit.
-      if (context === undefined) {
-        const range = selectCompactableRange(agent.session, measurement, 0)
-        if (range === null) return null
-        return this.compactRegion(range.start, range.end, agent, signal)
-      }
-      return this.condenseFitting(agent.session, measurement, resolveCompactSpec(policy, context.contextWindow), 0, agent, target,
-        fit => this.compactFitting(fit, agent, signal))
-    }
-
     const info = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
-    const context = info.context
-    this.rememberContext(agent, context)
+    this.rememberContext(agent, info.context)
     assertNoActiveCompaction(agent.session, 'automatic pressure compaction')
     const targetKey = `${target.provider}/${target.model}`
-    if (context === undefined) {
+    if (info.context === undefined) {
       throw new TargetPressureConfigError(
         targetKey,
         `compaction-basic: no context capacity for ${targetKey}; `
         + 'configure contextWindow on that adapter model',
       )
     }
-    const spec = resolveCompactSpec(policy, context.contextWindow)
-    const outputCap = agent.options.maxTokens ?? info.defaultMaxTokens ?? agent.session.requestHeader()?.config.maxTokens ?? 0
+    const spec = resolveCompactSpec(
+      policy,
+      info.context.contextWindow,
+      reservedCompletionTokens(header, info.defaultMaxTokens),
+    )
+    const outputCap = agent.options.maxTokens ?? info.defaultMaxTokens ?? header.config.maxTokens ?? 0
     const pending = (this.pendingBatchTokens.get(agent) ?? 0) + (this.pendingToolTokens.get(agent) ?? 0)
+    // `spec.thresholdTokens` already nets out the routed output reservation and `headroomTokens`, and
+    // `fitThresholdTokens` nets out `min(outputCap, outputReserveTokens)` plus the margin again; both
+    // test suites accept only this combination. The threshold logged in `compaction/pressure` comes from
+    // `fitSpec`, which omits the reservation and headroom, so it can sit above this condense point.
     const threshold = fitThresholdTokens(spec, outputCap)
     const fits = (current: TokenMeasurement): boolean =>
       this.pricedTotal(current, target) + Math.round(pending * this.densityFor(current, target)) < threshold
     if (fits(measurement)) return null
 
     // Once pressure qualifies, land the model-free pass before choosing a
-    // summary range, then remeasure through the singleton replay fold.
+    // summary range, then remeasure through the singleton replay fold. This
+    // pass cuts only results the model has read; a summary of older history
+    // may make room for the ones it has not.
     if (prune !== undefined) {
-      prune.pruneSession(agent.session)
-      measurement = meter.measure(agent.session)
+      prune.pruneSession(agent.session, 'read')
+      measurement = meter.measure(agent.session, header)
     }
     if (fits(measurement)) return null
 
+    // Cutting a result the model has not read marks it with how to see the cut span.
+    let unreadCut = false
+    const cutUnread = (): boolean => {
+      if (prune === undefined || unreadCut) return false
+      unreadCut = true
+      prune.pruneSession(agent.session, 'all')
+      measurement = meter.measure(agent.session, header)
+      return fits(measurement)
+    }
+    // A summary leaves the latest step in place; when that step alone is over
+    // the threshold, no summary can make room, so its results are cut first.
+    const framing = measurement.estimatedTokens - measurement.surfaceTokens
+    const leastAfterSummary = Math.round(
+      (framing + latestStepTokens(agent.session, measurement) + pending) * this.densityFor(measurement, target),
+    )
+    if (leastAfterSummary >= threshold && cutUnread()) return null
+
+    const condense = await this.pressureCondenser(agent, target, spec, signal)
     let result: CompactionResult | null = null
+    let exhausted = true
     for (let attempt = 0; attempt <= spec.compactionRetries; attempt += 1) {
-      const condensed = await this.condenseFitting(agent.session, measurement, spec, spec.retainTokens, agent, target,
-        fit => this.compactFitting(fit, agent, signal))
+      const condensed = await condense(measurement)
       if (condensed === null) {
-        /* v8 ignore else -- concrete replacement preserves a compactable checkpoint; subclass hooks cannot mutate it. */
-        if (result === null) return null
-        /* v8 ignore next -- paired with the defensive post-success branch above. */
+        exhausted = false
         break
       }
       result = condensed
-      measurement = meter.measure(agent.session)
+      measurement = meter.measure(agent.session, header)
       if (fits(measurement)) return result
     }
-
+    if (cutUnread()) return result
+    if (exhausted) {
+      throw new Error(
+        `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
+        + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold}; `
+        + `window ${spec.contextWindow}, output cap ${outputCap}, margin ${spec.marginTokens})`,
+      )
+    }
+    if (result === null && !requireBelowThreshold) return null
     throw new Error(
-      `compaction still above threshold after ${spec.compactionRetries + 1} compaction attempts `
-      + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold}; `
-      + `window ${spec.contextWindow}, output cap ${outputCap}, margin ${spec.marginTokens})`,
+      'no safe compaction range can reduce context below threshold '
+      + `(${this.pricedTotal(measurement, target)} priced + ${pending} pending tokens >= threshold ${threshold})`,
     )
+  }
+
+  /**
+   * The condensing step for pressure on `target`. The range is fitted to the
+   * window of the session's routed model, which writes the summary unless a
+   * summarization target is configured and which on a model switch is still
+   * the previous route; retention stays the one `spec` sets. A routed model
+   * without capacity metadata condenses the policy range whole, as overflow
+   * recovery does for an unlisted route.
+   * @param agent - agent whose session is condensed.
+   * @param target - route whose pressure requires condensing.
+   * @param spec - that route's resolved budgets.
+   * @param signal - cancellation forwarded to the capacity lookup and summarization.
+   * @returns a function that condenses one range of a measurement, resolving `null` when nothing is condensable.
+   */
+  private async pressureCondenser(
+    agent: Agent,
+    target: Pick<LlmCallConfig, 'provider' | 'model'>,
+    spec: ResolvedCompactSpec,
+    signal: AbortSignal,
+  ): Promise<(measurement: TokenMeasurement) => Promise<CompactionResult | null>> {
+    const summarizer = routedTarget(agent.session)
+    if (summarizer === undefined || (summarizer.provider === target.provider && summarizer.model === target.model)) {
+      return measurement => this.condenseFitting(agent.session, measurement, spec, spec.retainTokens, agent, target,
+        fit => this.compactFitting(fit, agent, signal))
+    }
+    const context = await this.ctx.llm.resolveModelInfo(summarizer.provider, summarizer.model, signal)
+      .then(info => info.context, () => undefined)
+    if (context === undefined) {
+      return async (measurement) => {
+        const range = selectCompactableRange(agent.session, measurement, spec.retainTokens)
+        return range === null ? null : this.compactRegion(range.start, range.end, agent, signal)
+      }
+    }
+    const fitted = fitSpec(resolveTargetPolicy(this.config, summarizer), context.contextWindow)
+    return measurement => this.condenseFitting(agent.session, measurement, fitted, spec.retainTokens, agent, summarizer,
+      fit => this.compactFitting(fit, agent, signal))
   }
 
   /**
@@ -856,7 +999,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     const latest = texts.findLast(node => node.text !== '') ?? texts[0]
     if (latest?.text === rendered) return 0
     if (rendered === '') return 0
-    const priced = this.ctx.tokenMeter.estimateMessage(createSystemMessage(rendered, PENDING_PROMPT_SOURCE))
+    const priced = this.ctx.tokenMeter.estimateMessage(createSystemMessage(rendered))
     const inHistory = session.requestContext()?.systemPromptUpdate === 'in-history'
     return Math.max(0, priced - (inHistory ? 0 : texts[0]?.tokens ?? 0))
   }
@@ -881,7 +1024,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     const target = routedTarget(agent.session)
     const context = this.knownContexts.get(agent)
     if (target === undefined || context === undefined) return undefined
-    const spec = resolveCompactSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
+    const spec = fitSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
     return { spec, pricedTokens: this.pricedTotal(this.ctx.tokenMeter.measure(agent.session), target) }
   }
 
@@ -1042,7 +1185,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     const context = this.knownContexts.get(agent)
     if (target === undefined || context === undefined) return error
     const measurement = this.ctx.tokenMeter.measure(agent.session)
-    const spec = resolveCompactSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
+    const spec = fitSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
     return new ManualCompactionError(error.code, error.message, {
       cause: error.cause,
       facts: {
@@ -1086,7 +1229,7 @@ export class BasicCompactionEngine extends CompactionEngine {
   private instructionTokens(): number {
     this.instructionTokensCache ??= this.ctx.tokenMeter.estimateMessage(createUserMessage({
       content: [{ type: 'text', text: COMPACTION_INSTRUCTION }],
-      source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+      source: { kind: 'user' },
     }))
     return this.instructionTokensCache
   }
@@ -1173,7 +1316,7 @@ export class BasicCompactionEngine extends CompactionEngine {
           const target = routedTarget(agent.session)
           const known = this.knownContexts.get(agent)
           if (target !== undefined && known !== undefined) {
-            return await fitting(target, resolveCompactSpec(resolveTargetPolicy(this.config, target), known.contextWindow), measurement, 0)
+            return await fitting(target, fitSpec(resolveTargetPolicy(this.config, target), known.contextWindow), measurement, 0)
           }
           const range = selectCompactableRange(agent.session, measurement, 0)
           if (range === null) return null
@@ -1193,7 +1336,7 @@ export class BasicCompactionEngine extends CompactionEngine {
               `compaction: the provider refused the summarization request for "${agent.id}" as over its window; `
               + 'retrying with a range about half the size',
             )
-            const spec = resolveCompactSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
+            const spec = fitSpec(resolveTargetPolicy(this.config, target), context.contextWindow)
             // The refused whole-surface request proves the density; the fit at it replaces the halving.
             const learned = this.learnRefusal(target, spec, remeasured.estimatedTokens + this.instructionTokens(),
               this.summaryCaps.get(agent)?.cap ?? spec.summaryCapTokens, 'the summarization request')

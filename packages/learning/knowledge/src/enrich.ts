@@ -6,7 +6,7 @@
  * @module
  */
 
-import { BlockAssembler, createUserMessage, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, lowestReasoningEffort } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, LlmRuntime } from '@deepseek-ai/dsh-llm'
 import type { KnowledgeIndex } from './store.ts'
 import type { KnowledgeEnrichReport, KnowledgeFileSummary, KnowledgeFileType, KnowledgeFolderInput, KnowledgePendingFile } from './types.ts'
@@ -120,7 +120,7 @@ async function requestSummary(
     provider: options.provider,
     model: options.model,
     system,
-    messages: [createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-knowledge' } })],
+    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
     maxTokens: options.maxTokens,
     purpose: 'knowledge-enrich',
     signal: requestSignal,

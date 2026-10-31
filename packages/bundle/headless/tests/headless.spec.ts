@@ -13,13 +13,20 @@ import type {
   ResumeAgentOptions,
 } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
-import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, type StreamChunk } from '@deepseek-ai/dsh-llm'
-import SessionStore from '@deepseek-ai/dsh-session'
+import { LlmAttemptId, ReasoningEffortId, ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage, type MessageId, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import SessionStore, { SessionLogOffset } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import ApprovalService, { setApprovalPolicy, type ApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import type { Session, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import { SessionQueryError } from '@deepseek-ai/dsh-session-query'
-import { createInboxStub } from '@deepseek-ai/dsh-agent-loop-testkit'
+import { AgentModel, modelSelectionProjectionDefinition } from '@deepseek-ai/dsh-agent'
+import { createInboxStub, provideWorkingDirectoryFixture } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { apply, Config } from '../src/index.ts'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { createSettlementMessage } from '@deepseek-ai/dsh-subagent/src/continuation-messages.ts'
+// Declares the auto-continue message source the continuation cases record.
+import type {} from '@deepseek-ai/dsh-auto-continue'
 import { internals } from '../src/runner-internals.ts'
 
 const originalInternals = { ...internals }
@@ -46,6 +53,11 @@ interface BenchOptions {
   readStdin?: () => Promise<string>
   sessionId?: string
   json?: boolean
+  permissionMode?: string
+  startupPermissionMode?: string
+  approvalPolicy?: ApprovalPolicy
+  startupApprovalPolicy?: ApprovalPolicy
+  additionalWritableRoots?: string[]
   observe?: () => Promise<ObservationStub>
   /** Leave the query service unmounted to exercise the fail-loud path. */
   omitSessionQuery?: boolean
@@ -57,6 +69,8 @@ interface BenchOptions {
   preliveMeta?: { cwd?: string; origin?: 'subagent'; agentPreset?: string }
   /** Run when the runner awaits idle, e.g. to append to the attached log. */
   onWhenIdle?: (agent: Agent) => void
+  /** Release child cleanup after the observed parent activity ends. */
+  afterIdle?: () => void
 }
 
 const frameStates = new WeakMap<Agent, { attemptId: ReturnType<typeof LlmAttemptId>; revision: number; index: number }>()
@@ -112,7 +126,7 @@ function appendTurn(
   })
 }
 
-/** Append the preset-selection event owned by dsh-agent-presets. */
+/** Append the preset-selection event owned by dsh-agent-preset-registry. */
 function selectPreset(session: Session, agentPreset: string): void {
   const target = session as unknown as { append(type: string, data: unknown): void }
   target.append('agent-preset/selected', { agentPreset })
@@ -125,6 +139,16 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
   run(): Promise<{ code: number; out: string; err: string; order: string[] }>
 }> {
   const ctx = new Context()
+  if (options.additionalWritableRoots !== undefined
+    || options.startupPermissionMode !== undefined || options.startupApprovalPolicy !== undefined) {
+    ctx.provide('headlessStartup', {
+      task: options.task, sessionId: options.sessionId, json: options.json ?? false,
+      additionalWritableRoots: options.additionalWritableRoots,
+      permissionMode: options.startupPermissionMode,
+      approvalPolicy: options.startupApprovalPolicy,
+    })
+  }
+  provideWorkingDirectoryFixture(ctx)
   if (options.filesystemCwd !== undefined) {
     const cwd = options.filesystemCwd
     ctx.provide('fs', {
@@ -143,25 +167,32 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
   ): Promise<Agent> => {
     const inbox = createInboxStub()
     let idle = Promise.resolve()
+    let running = false
+    const agentOptions = createOptions.agentOptions ?? {}
+    const projection = await ownerCtx.sessionProjections.register(modelSelectionProjectionDefinition)
     const agent: Agent = {
       id: session.id,
-      options: createOptions.agentOptions ?? {},
+      options: agentOptions,
+      model: new AgentModel(() => projection.stateOf(session), session, agentOptions),
       session,
       inbox,
-      status: 'idle',
+      get status() { return running ? 'running' : 'idle' },
       ctx: ownerCtx,
       cancel: () => {},
       runMaintenance: () => Promise.reject(new Error('not used')),
       send: () => {},
       followup: (message: UserMessage) => {
         agent.inbox.append('next-turn', message)
-        idle = Promise.resolve().then(() => script.afterPrompt(session, message, agent))
+        running = true
+        idle = Promise.resolve().then(() => script.afterPrompt(session, message, agent)).finally(() => { running = false })
       },
       steer: () => {},
       inject: () => {},
-      whenIdle: () => {
+      whenIdle: async () => {
         options.onWhenIdle?.(agent)
-        return idle
+        let activity: Promise<void>
+        do { await (activity = idle) } while (activity !== idle)
+        options.afterIdle?.()
       },
     }
     await createOptions.setup?.(ownerCtx, agent)
@@ -217,6 +248,8 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
         ...options.useStdin === true ? {} : { task: options.task ?? 'do the thing' },
         ...options.sessionId === undefined ? {} : { sessionId: options.sessionId },
         ...options.json === undefined ? {} : { json: options.json },
+        ...options.permissionMode === undefined ? {} : { permissionMode: options.permissionMode },
+        ...options.approvalPolicy === undefined ? {} : { approvalPolicy: options.approvalPolicy },
       })
       return { code: await exited, out, err, order }
     },
@@ -224,6 +257,235 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
 }
 
 describe('headless runner', () => {
+  it('does not reuse an earlier completed reason when the final turn has no terminal event', async () => {
+    const test = await bench({ afterPrompt(session, message) {
+      appendTurn(session, 1, message, 'earlier answer', true)
+      session.append('turn/start', { turn: 2 })
+    } }, { json: true })
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(1)
+      const events = result.out.trim().split('\n').map(line => JSON.parse(line) as Record<string, unknown>)
+      expect(events.at(-1)).toMatchObject({ type: 'final', text: 'earlier answer', reason: null })
+    } finally { await test.ctx.fiber.dispose() }
+  })
+  it('rejects an explicit preset when its service is absent before submitting work', async () => {
+    const test = await bench({ afterPrompt() { throw new Error('must not run') } }, { permissionMode: 'workspace-write', json: true })
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(1)
+      expect(result.err).toContain('requires the permissionPresets service')
+    } finally { await test.ctx.fiber.dispose() }
+  })
+
+  it('rejects an unknown preset before creating an Agent', async () => {
+    const test = await bench({ afterPrompt() { throw new Error('must not run') } }, {
+      permissionMode: 'missing', useStdin: true, readStdin() { throw new Error('must not read stdin') },
+    })
+    test.ctx.provide('permissionPresets', { resolve() { throw new Error('unknown preset') } } as never)
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(1)
+      expect(result.err).toContain('unknown preset')
+    } finally { await test.ctx.fiber.dispose() }
+  })
+
+  it.each([false, true])('applies the explicit CLI preset ahead of runner config (overridden=%s)', async (overridden) => {
+    let selected: string | undefined
+    const test = await bench({ afterPrompt(session, message) {
+      expect(selected).toBe('workspace-write')
+      appendTurn(session, 1, message, 'done', true)
+    } }, overridden
+      ? { permissionMode: 'danger-full-access', startupPermissionMode: 'workspace-write' }
+      : { permissionMode: 'workspace-write' })
+    test.ctx.provide('permissionPresets', { resolve() {}, set(_session: Session, name: string) { selected = name } } as never)
+    try { expect(await test.run()).toMatchObject({ code: 0 }) }
+    finally { await test.ctx.fiber.dispose() }
+  })
+
+  it('rejects an explicit approval policy without its service before reading stdin', async () => {
+    const test = await bench({ afterPrompt() { throw new Error('must not run') } }, {
+      approvalPolicy: 'never', useStdin: true, readStdin() { throw new Error('must not read stdin') },
+    })
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(1)
+      expect(result.err).toContain('requires the approval service')
+    } finally { await test.ctx.fiber.dispose() }
+  })
+
+  it('keeps an equal explicit approval override without appending another policy event', async () => {
+    let before = 0
+    const test = await bench({
+      before(session) { setApprovalPolicy(session, 'never'); before = session.seq },
+      afterPrompt(session, message) {
+        expect(session.seq).toBe(before)
+        appendTurn(session, 1, message, 'done', true)
+      },
+    }, { approvalPolicy: 'never' })
+    await test.ctx.plugin(ApprovalService, { policy: 'ask' })
+    try { expect(await test.run()).toMatchObject({ code: 0 }) }
+    finally { await test.ctx.fiber.dispose() }
+  })
+
+  it.each([false, true])('applies Auto and approval policy before submitting a user task (resume=%s)', async (resume) => {
+    let selected = resume ? 'auto' : 'workspace-write'
+    const test = await bench({ afterPrompt(session, message) {
+      expect(selected).toBe('auto')
+      expect(test.ctx.approval.overrideOf(session)).toBe('never')
+      expect(message.source).toEqual({ kind: 'user' })
+      appendTurn(session, 1, message, 'done', true)
+    } }, {
+      approvalPolicy: resume ? 'never' : 'ask',
+      ...resume ? {} : { startupApprovalPolicy: 'never' },
+      ...resume ? {
+        sessionId: 'session-exact',
+        observe: async () => ({ header: { cwd: process.cwd() }, events: [], [Symbol.dispose]() {} }),
+      } : { permissionMode: 'auto' },
+    })
+    await test.ctx.plugin(ApprovalService, { policy: 'ask' })
+    if (resume) test.ctx.sessions.create(brandString<SessionId>('session-exact'), { meta: { cwd: process.cwd() } })
+    test.ctx.provide('permissionPresets', {
+      resolve() {},
+      set(session: Session, preset: string) {
+        selected = preset
+        setApprovalPolicy(session, 'ask')
+      },
+    } as never)
+    try { expect(await test.run()).toMatchObject({ code: 0 }) }
+    finally { await test.ctx.fiber.dispose() }
+  })
+
+  it('refuses CLI directory grants omitted by an overriding policy composition', async () => {
+    const test = await bench({ afterPrompt() { throw new Error('must not run') } }, { additionalWritableRoots: ['/extra'] })
+    try {
+      const result = await test.run()
+      expect(result.code).toBe(1)
+      expect(result.err).toContain('requires the sandbox-policy row')
+    }
+    finally { await test.ctx.fiber.dispose() }
+  })
+
+  it.each([true, false])('requires the composed policy to contain each requested directory (included=%s)', async (included) => {
+    const test = await bench({ afterPrompt(session, message) { appendTurn(session, 1, message, 'done', true) } }, { additionalWritableRoots: ['/extra'] })
+    await test.ctx.plugin(SandboxPolicyService, { additionalWritableRoots: included ? ['/extra'] : [] })
+    try { expect((await test.run()).code).toBe(included ? 0 : 1) }
+    finally { await test.ctx.fiber.dispose() }
+  })
+  it('waits for parent awakened between idle and child observation', async () => {
+    const cleanup = Promise.withResolvers<undefined>()
+    const cleaning = Promise.withResolvers<undefined>()
+    const finalTurn = Promise.withResolvers<undefined>()
+    const parentWait = Promise.withResolvers<undefined>()
+    let turns = 0
+    const test = await bench({
+      async afterPrompt(session, message, parent) {
+        turns += 1
+        if (turns === 1) {
+          await test.ctx.subagents.startActivation({
+            provider: 'external', label: 'work', delivery: 'parent', signal: new AbortController().signal,
+            request: { parent, prompt: [] },
+          })
+          await cleaning.promise
+          appendTurn(session, 1, message, 'waiting for child', true)
+        } else {
+          await finalTurn.promise
+          appendTurn(session, 2, message, 'child result incorporated', true)
+        }
+      },
+    }, {
+      afterIdle: () => { if (turns === 1) cleanup.resolve(undefined) },
+      onWhenIdle: () => { if (turns === 2) parentWait.resolve(undefined) },
+    })
+    await test.ctx.plugin(SubagentRuntime)
+    test.ctx.subagents.registerProvider({
+      name: 'external', inheritsParentContext: false,
+      capabilities: { agentOptions: false, agentPreset: false, outputSchema: false, depthLimit: false },
+      start: async () => ({
+        id: brandString<SessionId>('settlement-child'),
+        result: Promise.resolve({ output: [{ type: 'text' as const, text: 'child answer' }], stopReason: 'completed' as const }),
+        dispose: () => { cleaning.resolve(undefined); return cleanup.promise },
+      }),
+    })
+    try {
+      const run = test.run()
+      expect(await Promise.race([run.then(() => 'exited'), parentWait.promise.then(() => 'waiting')])).toBe('waiting')
+      expect(test.output().out).toBe('')
+      finalTurn.resolve(undefined)
+      await expect(run).resolves.toMatchObject({ code: 0, out: 'child result incorporated\n' })
+    } finally {
+      cleanup.resolve(undefined)
+      finalTurn.resolve(undefined)
+      await test.ctx.fiber.dispose()
+    }
+  })
+
+  it('waits for later child batches started after settlement wakes the parent', async () => {
+    const waiting = [Promise.withResolvers<undefined>(), Promise.withResolvers<undefined>()]
+    const released = [Promise.withResolvers<undefined>(), Promise.withResolvers<undefined>()]
+    let turns = 0
+    let checks = 0
+    const test = await bench({
+      afterPrompt(session, message) {
+        turns += 1
+        appendTurn(session, turns, message, turns === 3 ? 'all children complete' : 'waiting for children', true)
+      },
+    })
+    test.ctx.provide('subagents', {
+      async waitForChildren(parent: Agent) {
+        expect(test.ctx.agents.get(parent.id)).toBe(parent)
+        const batch = checks++
+        if (batch === 2) return false
+        waiting[batch]!.resolve(undefined)
+        await released[batch]!.promise
+        parent.followup(createUserMessage({ content: [{ type: 'text', text: `child batch ${batch + 1} complete` }], source: { kind: 'user' } }))
+        return true
+      },
+    } as never)
+    const run = test.run()
+    try {
+      await waiting[0]!.promise
+      expect(test.output().out).toBe('')
+      released[0]!.resolve(undefined)
+      await waiting[1]!.promise
+      expect(turns).toBe(2)
+      expect(test.output().order).not.toContain('exit')
+      released[1]!.resolve(undefined)
+      await expect(run).resolves.toMatchObject({ code: 0, out: 'all children complete\n' })
+      expect(checks).toBe(3)
+    } finally {
+      for (const release of released) release.resolve(undefined)
+      await run
+      await test.ctx.fiber.dispose()
+    }
+  })
+
+  it('rechecks children after a parent turn completes during the child wait', async () => {
+    let turns = 0
+    let checks = 0
+    const test = await bench({
+      afterPrompt(session, message) {
+        turns += 1
+        appendTurn(session, turns, message, turns === 3 ? 'all batches complete' : 'waiting for batch', true)
+      },
+    })
+    test.ctx.provide('subagents', {
+      async waitForChildren(parent: Agent) {
+        const check = checks++
+        if (check === 2) return false
+        parent.followup(createUserMessage({ content: [{ type: 'text', text: 'batch complete' }], source: { kind: 'user' } }))
+        await parent.whenIdle()
+        // The first observation missed a released child; its parent started another batch.
+        return check !== 0
+      },
+    } as never)
+    try {
+      await expect(test.run()).resolves.toMatchObject({ code: 0, out: 'all batches complete\n' })
+    } finally {
+      await test.ctx.fiber.dispose()
+    }
+  })
+
   it('records a fresh Session in the filesystem provider working directory', async () => {
     const cwd = '/remote/workspace'
     const test = await bench({
@@ -263,8 +525,8 @@ describe('headless runner', () => {
     const test = await bench({
       before(session) {
         const setupMessage = {
-          role: 'user', content: [{ type: 'text', text: 'setup' }], source: { kind: 'user' }, id: 'setup',
-        } as UserMessage
+          role: 'user', content: [{ type: 'text', text: 'setup' }], source: { kind: 'user' }, id: brandString<MessageId>('setup'),
+        } satisfies UserMessage
         appendTurn(session, 0, setupMessage, 'pre-task noise', true)
       },
       async afterPrompt(session, message) {
@@ -365,13 +627,13 @@ describe('headless runner', () => {
     const result = await running
     expect(streamed).toEqual({
       out: '',
-      err: 'dsh: reasoning:\nchecking the workspace safely\nsecond pass\n',
+      err: 'hydra: reasoning:\nchecking the workspace safely\nsecond pass\n',
       order: [],
     })
     expect(result).toEqual({
       code: 0,
       out: 'done\n',
-      err: 'dsh: reasoning:\nchecking the workspace safely\nsecond pass\n',
+      err: 'hydra: reasoning:\nchecking the workspace safely\nsecond pass\n',
       order: ['flush', 'exit'],
     })
     await test.ctx.fiber.dispose()
@@ -410,11 +672,11 @@ describe('headless runner', () => {
     })
     const running = test.run()
     await reasoningAppended.promise
-    expect(test.output().err).toBe('dsh: reasoning:\nunfinished reasoning')
+    expect(test.output().err).toBe('hydra: reasoning:\nunfinished reasoning')
 
     releaseEnd.resolve(undefined)
     await ended.promise
-    expect(test.output().err).toBe('dsh: reasoning:\nunfinished reasoning\n')
+    expect(test.output().err).toBe('hydra: reasoning:\nunfinished reasoning\n')
 
     finish.resolve(undefined)
     await expect(running).resolves.toMatchObject({ code: 1 })
@@ -425,7 +687,7 @@ describe('headless runner', () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, undefined, false) },
     })
-    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: '' })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: aborted: cancelled by the user\n' })
     await test.ctx.fiber.dispose()
   })
 
@@ -445,7 +707,7 @@ describe('headless runner', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: '\n',
-      err: 'dsh: SERVER: provider unavailable\n',
+      err: 'hydra: SERVER: provider unavailable\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -468,7 +730,7 @@ describe('headless runner', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: '\n',
-      err: 'dsh: reasoning:\ntrying recovery\ndsh: SERVER: provider unavailable\n',
+      err: 'hydra: reasoning:\ntrying recovery\nhydra: SERVER: provider unavailable\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -493,7 +755,7 @@ describe('headless runner', () => {
     expect(result).toMatchObject({
       code: 1,
       out: '',
-      err: `dsh: headless summary cannot read seq 0 below captured length ${String(capturedLength)}\n`,
+      err: `hydra: headless summary cannot read seq 0 below captured length ${String(capturedLength)}\n`,
     })
     await test.ctx.fiber.dispose()
   })
@@ -516,7 +778,7 @@ describe('headless runner', () => {
     })
     expect(await test.run()).toMatchObject({
       code: 1,
-      err: 'dsh: a task is required, for example: dsh --profile headless "run the tests"\n',
+      err: 'hydra: a task is required, for example: hydra --profile headless "run the tests"\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -607,13 +869,39 @@ describe('headless runner', () => {
     })
     const session = test.ctx.sessions.create(brandString<SessionId>('session-exact'), { meta: { cwd: process.cwd() } })
     const history = {
-      role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: 'history',
-    } as UserMessage
+      role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: brandString<MessageId>('history'),
+    } satisfies UserMessage
     appendTurn(session, 0, history, 'earlier answer', true)
     const before = session.seq
     expect(await test.run()).toMatchObject({ code: 0, out: 'resumed answer\n', err: '' })
     expect(session.seq).toBeGreaterThan(before)
     await test.ctx.fiber.dispose()
+  })
+
+  it.each(['test-model', 'other-model'])('restores explicit effort only for the declared route (%s)', async (savedModel) => {
+    const test = await bench({
+      afterPrompt(session, message, agent) {
+        expect(agent.model.current()).toEqual({
+          provider: 'test-provider', model: 'test-model',
+          ...savedModel === 'test-model' ? { reasoningEffort: 'high' } : {},
+        })
+        appendTurn(session, 1, message, 'resumed answer', true)
+      },
+    }, {
+      sessionId: 'session-effort',
+      observe: () => Promise.resolve({
+        header: { cwd: process.cwd(), origin: 'user' },
+        events: [],
+        [Symbol.dispose]() {},
+      }),
+    })
+    try {
+      const session = test.ctx.sessions.create(brandString<SessionId>('session-effort'), { meta: { cwd: process.cwd() } })
+      session.append('model/selection', { provider: 'test-provider', model: savedModel, reasoningEffort: ReasoningEffortId('high') })
+      expect(await test.run()).toMatchObject({ code: 0, out: 'resumed answer\n', err: '' })
+    } finally {
+      await test.ctx.fiber.dispose()
+    }
   })
 
   it('rejects a persisted Session recorded in another working directory', async () => {
@@ -702,7 +990,7 @@ describe('headless runner', () => {
     })
     const result = await test.run()
     expect(result.code).toBe(1)
-    expect(result.err).toContain('is a subagent or forked session')
+    expect(result.err).toContain('is a subagent session')
     await test.ctx.fiber.dispose()
   })
 
@@ -770,7 +1058,7 @@ describe('headless runner', () => {
     })
     const result = await test.run()
     expect(result.code).toBe(1)
-    expect(result.err).toContain('is a subagent or forked session')
+    expect(result.err).toContain('is a subagent session')
     await test.ctx.fiber.dispose()
   })
 
@@ -789,8 +1077,8 @@ describe('headless runner', () => {
     const test = await bench({
       before(session) {
         const history = {
-          role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: 'history',
-        } as UserMessage
+          role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: brandString<MessageId>('history'),
+        } satisfies UserMessage
         appendTurn(session, 0, history, 'earlier answer', true)
         selectPreset(session, 'minimal')
       },
@@ -845,8 +1133,8 @@ describe('headless runner', () => {
     const test = await bench({
       before(session) {
         const history = {
-          role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: 'history',
-        } as UserMessage
+          role: 'user', content: [{ type: 'text', text: 'earlier' }], source: { kind: 'user' }, id: brandString<MessageId>('history'),
+        } satisfies UserMessage
         appendTurn(session, 0, history, 'earlier answer', true)
         capturedLength = session.seq
         Object.defineProperty(session, 'eventAt', { value: () => undefined })
@@ -876,19 +1164,23 @@ describe('headless runner', () => {
     await test.ctx.fiber.dispose()
   })
 
-  it('rejects a persisted Session linked to a parent', async () => {
-    const test = await bench({ afterPrompt: () => {} }, {
+  it.each([false, true])('resumes an ordinary fork with historical parent metadata: %s', async (legacy) => {
+    const header = { cwd: process.cwd(), ...(legacy ? { parentSession: brandString<SessionId>('parent-1') } : {}) }
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'fork resumed', true) },
+    }, {
       sessionId: 'session-exact',
-      observe: () => Promise.resolve({
-        header: { cwd: process.cwd(), origin: 'user', parentSession: 'parent-1' },
-        events: [],
-        [Symbol.dispose]() {},
-      }),
+      observe: () => Promise.resolve({ header, events: [], [Symbol.dispose]() {} }),
     })
-    const result = await test.run()
-    expect(result.code).toBe(1)
-    expect(result.err).toContain('is a subagent or forked session')
-    await test.ctx.fiber.dispose()
+    try {
+      const session = test.ctx.sessions.create(brandString<SessionId>('session-exact'), {
+        seed: [], inheritedEventCount: SessionLogOffset(0), meta: { ...header, isSeeded: true },
+      })
+      expect(await test.run()).toMatchObject({ code: 0, out: 'fork resumed\n', err: '' })
+      expect(session.header.parentSession).toBe(header.parentSession)
+    } finally {
+      await test.ctx.fiber.dispose()
+    }
   })
 
   it('propagates a Session query failure that is not a missing log', async () => {
@@ -898,7 +1190,7 @@ describe('headless runner', () => {
     })
     const result = await test.run()
     expect(result.code).toBe(1)
-    expect(result.err).toBe('dsh: log is corrupt\n')
+    expect(result.err).toBe('hydra: log is corrupt\n')
     await test.ctx.fiber.dispose()
   })
 
@@ -990,7 +1282,7 @@ describe('headless runner', () => {
     ctx.provide('agents', { create: () => Promise.reject(new Error('factory exploded')) } as never)
     apply(ctx, { task: 't' })
     expect(await exited).toBe(1)
-    expect(err).toBe('dsh: factory exploded\n')
+    expect(err).toBe('hydra: factory exploded\n')
     await ctx.fiber.dispose()
   })
 
@@ -1012,7 +1304,7 @@ describe('headless runner', () => {
     ctx.provide('agents', { create: () => rejected } as never)
     apply(ctx, { task: 't' })
     expect(await exited).toBe(1)
-    expect(err).toBe('dsh: factory exploded\n')
+    expect(err).toBe('hydra: factory exploded\n')
     await ctx.fiber.dispose()
   })
 
@@ -1048,5 +1340,273 @@ describe('headless runner', () => {
     expect(new Config({})).toEqual({})
     expect(new Config({ task: 'x', sessionId: 'session-x', json: true }))
       .toEqual({ task: 'x', sessionId: 'session-x', json: true })
+  })
+})
+
+/** Append one model step that answers `input` with `text`; its recorded stream finishes with `finish`. */
+function appendStep(
+  session: Session,
+  turn: number,
+  step: number,
+  input: UserMessage,
+  text: string,
+  finish: 'stop' | 'max-tokens',
+): void {
+  session.append('step/start', { turn, step })
+  session.append('user/message', input, { surfaceOp: 'append' })
+  session.append('assistant/message', {
+    stream: [{ type: 'chunk', time: 0, chunk: { type: 'finish', reason: { kind: finish } } }],
+    turn,
+    step,
+    message: createAssistantMessage({
+      content: [{ type: 'text', text }],
+      source: { provider: 'test-provider', model: 'test-model' },
+    }),
+  }, { surfaceOp: 'append' })
+  session.append('step/end', { turn, step })
+}
+
+/** The subagent runtime's notice that `child` finished, with its closing text omitted or included. */
+function settled(child: string, closing: 'omitted' | 'included'): UserMessage {
+  return createSettlementMessage(brandString<SessionId>(child), {
+    output: [{ type: 'text', text: 'the child result' }],
+    stopReason: 'completed',
+  }, true, closing === 'omitted')
+}
+
+/** The continuation request auto-continue steers after a cut answer. */
+function continuation(): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text: 'Continue exactly where you stopped.' }],
+    source: { kind: 'plugin:dsh-auto-continue' },
+  })
+}
+
+describe('headless runner outcome', () => {
+  it('keeps the answer before a reply to settlement notices alone, then adds that reply', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The findings.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        appendStep(session, 2, 1, settled('session-child', 'omitted'), 'Nothing new came in.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The findings.\n\nNothing new came in.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('replaces the answer when a settlement notice brings the child result', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Waiting for the child.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        appendStep(session, 2, 1, settled('session-child', 'included'), 'The child result, incorporated.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The child result, incorporated.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('replaces the answer when settlement notices arrive with other input', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Waiting for the child.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+        session.append('turn/start', { turn: 2 })
+        session.append('user/message', settled('session-child', 'omitted'), { surfaceOp: 'append' })
+        appendStep(session, 2, 1, createUserMessage({
+          content: [{ type: 'text', text: 'Agent session-child sent a message: the result' }],
+          source: { kind: 'agent-message', form: 'relay', senderSessionId: brandString<SessionId>('session-child') },
+        }), 'The final summary.', 'stop')
+        session.append('turn/end', { turn: 2, reason: { kind: 'completed' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The final summary.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('joins an answer auto-continue carried past the output limit and exits 0', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The first half, ', 'max-tokens')
+        appendStep(session, 1, 2, continuation(), 'and the second half.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 0, out: 'The first half, and the second half.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 and says why when the answer still stopped at the output limit', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'The first half, ', 'max-tokens')
+        appendStep(session, 1, 2, continuation(), 'still cut', 'max-tokens')
+        session.append('turn/end', { turn: 1, reason: { kind: 'max-tokens' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({
+      code: 1,
+      out: 'The first half, still cut\n',
+      err: 'hydra: max-tokens: the answer stopped at the output limit\n',
+    })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('prints why an aborted turn stopped', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Fixing the next file.', 'stop')
+        session.append('turn/end', {
+          turn: 1,
+          reason: { kind: 'aborted', reason: { kind: 'hook', reason: 'spend-guard: session token budget reached' } },
+        })
+      },
+    })
+    expect(await test.run()).toMatchObject({
+      code: 1,
+      out: 'Fixing the next file.\n',
+      err: 'hydra: aborted: spend-guard: session token budget reached\n',
+    })
+    await test.ctx.fiber.dispose()
+  })
+
+  it.each([
+    [{ kind: 'parent' }, 'cancelled by the parent agent'],
+    [{ kind: 'disposed' }, 'the agent was disposed'],
+    [{ kind: 'legacy' }, 'cancelled'],
+  ] as const)('names a %o cancellation on stderr', async (cause, phrase) => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, 'Partway.', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: cause } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: 'Partway.\n', err: `hydra: aborted: ${phrase}\n` })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('names any other ending of the final turn as recorded', async () => {
+    const test = await bench({
+      afterPrompt(session, message) {
+        session.append('turn/start', { turn: 1 })
+        appendStep(session, 1, 1, message, '', 'stop')
+        session.append('turn/end', { turn: 1, reason: { kind: 'blocked' } })
+      },
+    })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: turn ended: blocked\n' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('prints the answer of a turn a slash command starts after the command text', async () => {
+    const test = await bench({ afterPrompt() {} }, { task: '/learn from README.md' })
+    test.ctx.provide('commands', {
+      execute: (agent: Agent) => {
+        appendTurn(agent.session, 1, createUserMessage({ content: [{ type: 'text', text: 'learn' }], source: { kind: 'user' } }),
+          'Filed two notes.', true)
+        return Promise.resolve({ commandId: 'command-1', result: { kind: 'success', text: 'Learning from README.md.' } })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'Learning from README.md.\nFiled two notes.\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('runs a known slash command without sending it to the model', async () => {
+    let prompted = false
+    const test = await bench({ afterPrompt() { prompted = true } }, { task: '/doctor' })
+    const lines: string[] = []
+    test.ctx.provide('commands', {
+      execute: (_agent: Agent, line: string) => {
+        lines.push(line)
+        return Promise.resolve({ commandId: 'command-1', result: { kind: 'success', text: 'All checks pass.' } })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'All checks pass.\n', err: '', order: ['flush', 'exit'] })
+    expect(lines).toEqual(['/doctor'])
+    expect(prompted).toBe(false)
+    await test.ctx.fiber.dispose()
+  })
+
+  it('sends a task the commands service does not resolve to the model', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'answered by the model', true) },
+    }, { task: '/Users/someone/project has a failing test' })
+    test.ctx.provide('commands', { execute: () => Promise.resolve(undefined) } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'answered by the model\n', err: '' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('exits 1 with the error a slash command reports', async () => {
+    const test = await bench({ afterPrompt() {} }, { task: '/kb add docs' })
+    test.ctx.provide('commands', {
+      execute: () => Promise.resolve({ commandId: 'command-1', result: { kind: 'error', text: 'no such folder: docs' } }),
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: /kb: no such folder: docs\n' })
+    await test.ctx.fiber.dispose()
+  })
+
+  it('stops an armed goal from starting another round before the run flushes and exits', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'Round one is done.', true) },
+    })
+    const flushesAtDisarm: number[] = []
+    test.ctx.provide('goals', {
+      get: () => ({ objective: 'make every test pass', phase: 'active', activation: 'armed' }),
+      disarm: () => { flushesAtDisarm.push(test.output().order.length); return undefined },
+    } as never)
+    expect(await test.run()).toMatchObject({
+      code: 0,
+      out: 'Round one is done.\n',
+      err: 'hydra: goal "make every test pass" is still active; this headless run answered one task, so the goal\'s next round did not start\n',
+    })
+    expect(flushesAtDisarm).toEqual([0])
+    await test.ctx.fiber.dispose()
+  })
+
+  it('leaves a goal that is not armed alone', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'Goal completed.', true) },
+    })
+    let disarms = 0
+    test.ctx.provide('goals', {
+      get: () => ({ objective: 'make every test pass', phase: 'complete', activation: 'disarmed' }),
+      disarm: () => { disarms += 1; return undefined },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'Goal completed.\n', err: '' })
+    expect(disarms).toBe(0)
+    await test.ctx.fiber.dispose()
+  })
+})
+
+describe('headless runner with a learning review', () => {
+  it('waits for the last turn\'s learning review before it flushes and exits', async () => {
+    const test = await bench({
+      afterPrompt(session, message) { appendTurn(session, 1, message, 'All tests pass.', true) },
+    })
+    const reviewed: string[] = []
+    const flushesAtSettle: number[] = []
+    test.ctx.provide('learning', {
+      settled: (sessionId: string) => {
+        reviewed.push(sessionId)
+        return new Promise<void>((resolve) => {
+          setTimeout(() => { flushesAtSettle.push(test.output().order.length); resolve() }, 20)
+        })
+      },
+    } as never)
+    expect(await test.run()).toMatchObject({ code: 0, out: 'All tests pass.\n', err: '', order: ['flush', 'exit'] })
+    expect(reviewed).toHaveLength(1)
+    expect(flushesAtSettle).toEqual([0])
+    await test.ctx.fiber.dispose()
   })
 })

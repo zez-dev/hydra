@@ -7,7 +7,7 @@
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {
-  CredentialInfo, LlmDiscoveredModel, LlmModelDiscoveryRequest,
+  LlmDiscoveredModel, LlmModelDiscoveryRequest,
   SettingsNamespaceView, SettingsPathOpView,
 } from '@deepseek-ai/dsh-api-remotes/client'
 
@@ -32,12 +32,6 @@ export type ModelDiscoveryOutcome =
 
 /** The Host operations the Models page and its cards invoke. */
 export interface ModelsOperations {
-  /**
-   * Read one credential reference's state.
-   * @param ref - credential reference name.
-   * @returns the state, or undefined when the reference is unknown or the read was refused.
-   */
-  describeCredential(ref: string): Promise<CredentialInfo | undefined>
   /**
    * Store one credential literal under its reference.
    * @param ref - credential reference name.
@@ -71,20 +65,23 @@ export interface ModelsOperations {
    * @returns the candidates, or the refusal.
    */
   discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<ModelDiscoveryOutcome>
+  /**
+   * Make a provider's first available model the default while the available
+   * catalog does not list the saved default.
+   * @param provider - provider route whose credential was just stored.
+   * @returns the refusal message, or undefined once the default is settled.
+   */
+  initializeDefaultModel(provider: string): Promise<string | undefined>
 }
 
 /**
  * Bind the page's Host operations to the plugin's own Remote namespaces.
  * @param ctx - the page plugin's context, which declares `remote.credentials`,
- * `remote.llm`, and `remote.settings` in its own `inject`.
+ * `remote.llm`, `remote.settings`, and `remote.session` in its own `inject`.
  * @returns the callbacks the section and its cards are injected with.
  */
 export function createModelsOperations(ctx: ClientContext): ModelsOperations {
   return {
-    describeCredential: async (ref) => {
-      const response = await ctx.remote.credentials.describe([ref])
-      return response.ok ? response.value[ref] : undefined
-    },
     storeCredential: async (ref, value) => {
       const response = await ctx.remote.credentials.set(ref, value)
       return response.ok ? undefined : response.error.message
@@ -104,6 +101,10 @@ export function createModelsOperations(ctx: ClientContext): ModelsOperations {
       return response.ok
         ? { kind: 'found', models: response.value }
         : { kind: 'refused', message: response.error.message }
+    },
+    initializeDefaultModel: async (provider) => {
+      const response = await ctx.remote.session.initializeDefaultModel(provider)
+      return response.ok ? undefined : response.error.message
     },
   }
 }

@@ -17,7 +17,7 @@
     { "path": "../../core/session" },
     { "path": "../../llm/llm" },
     { "path": "../../interaction/commands" },
-    { "path": "../../preset/agent-presets" },
+    { "path": "../../preset/agent-preset-registry" },
     { "path": "../../storage/storage-domain" },
     { "path": "../../webhook/notify" }
   ]

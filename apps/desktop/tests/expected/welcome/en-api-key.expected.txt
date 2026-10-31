@@ -1,0 +1,9 @@
+Hydra
+Hydra
+Add an API key to get started
+Choose a model provider and enter its API key
+Model provider [select]: Anthropic [selected], DeepSeek, openai
+Enter API key [password]
+Save and continue [disabled]
+Set up later
+Back
