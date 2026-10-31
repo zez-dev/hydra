@@ -1,8 +1,9 @@
 Hydra
 Hydra
 添加一个 API Key 开始使用
-配置 DeepSeek 官方模型，即可开始使用
+选择模型提供商并输入其 API 密钥
+模型提供商 [select]: Anthropic [selected], DeepSeek, openai
 输入 API 密钥 [password]
 保存并继续 [disabled]
 稍后配置
-返回登录
+返回

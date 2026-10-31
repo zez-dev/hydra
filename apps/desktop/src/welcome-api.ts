@@ -1,21 +1,26 @@
 /** Operations available to the isolated native welcome renderer. */
 
-import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { ProductEventMap } from '@deepseek-ai/dsh-client-product-analytics/types'
 import type { DesktopLocale } from './locale.ts'
 
 /** Private native welcome channels, installed only while its window exists. */
 export const WELCOME_IPC = {
+  providers: 'dsh-welcome:providers',
   saveApiKey: 'dsh-welcome:save-api-key',
   analytics: 'dsh-welcome:analytics',
   analyticsEnabled: 'dsh-welcome:analytics-enabled',
   skip: 'dsh-welcome:skip',
-  start: 'dsh-welcome:start',
-  cancel: 'dsh-welcome:cancel',
-  copyLink: 'dsh-welcome:copy-link',
-  state: 'dsh-welcome:state',
+  notice: 'dsh-welcome:notice',
   takeNotice: 'dsh-welcome:take-notice',
 } as const
+
+/** One provider route the welcome configures with an API key alone. */
+export interface WelcomeProvider {
+  /** Provider route the stored key authenticates. */
+  readonly provider: string
+  /** Label the provider directory gives the route. */
+  readonly displayName: string
+}
 
 /** Credential writes return a safe outcome without exposing Host diagnostics. */
 export type WelcomeSaveResult = { readonly ok: true } | { readonly ok: false }
@@ -33,19 +38,15 @@ export interface WelcomeOperations {
   analyticsEnabled(): Promise<boolean>
   /** @returns the pending notification, clearing it before another renderer can receive it. */
   takeNotice(): Promise<WelcomeNotice | undefined>
-  /** @returns account state after starting a login attempt. */
-  startSignIn(): Promise<AccountView>
-  /** @param id - attempt to cancel. @returns the settled state. */
-  cancelSignIn(id: SignInAttemptId): Promise<AccountView>
-  /** @param id - current waiting attempt whose authorization URL is copied to the system clipboard. */
-  copySignInLink(id: SignInAttemptId): Promise<void>
-
+  /** @returns the providers an API key alone configures, in the order the choice lists them. */
+  providers(): Promise<readonly WelcomeProvider[]>
   /**
-   * Store the official provider's key before entering the workspace.
+   * Store one provider's key before entering the workspace.
+   * @param provider - route chosen from {@link WelcomeOperations.providers}.
    * @param value - validated, trimmed API key.
    * @returns whether the write completed, without private error details.
    */
-  saveApiKey(value: string): Promise<WelcomeSaveResult>
+  saveApiKey(provider: string, value: string): Promise<WelcomeSaveResult>
   /**
    * Enter the workspace without writing an onboarding-completion setting.
    * @returns completion after the workspace opens.
@@ -53,10 +54,10 @@ export interface WelcomeOperations {
   skip(): Promise<void>
 }
 
-/** The renderer receives localized copy, login operations, and safe account snapshots. */
+/** The renderer receives localized copy, credential operations, and notice signals. */
 export type WelcomeApi = DesktopLocale & WelcomeOperations & {
-  /** @param listener - safe account snapshot recipient. @returns subscription disposer. */
-  onAccountState(listener: (state: AccountView) => void): () => void
+  /** @param listener - called when the main process holds a notice for this window. @returns subscription disposer. */
+  onNotice(listener: () => void): () => void
 }
 
 /** Authentication facts supplied at cold start or after a completed sign-out. */

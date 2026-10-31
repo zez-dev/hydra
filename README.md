@@ -45,6 +45,7 @@ Model output can be wrong. Nothing Hydra produces, including its research and ma
 
 | Area | What it does |
 |---|---|
+| Claude out of the box | The Web and desktop app ship the Anthropic route with Claude Opus 5.5, Sonnet 5.5, and Haiku 5.5, and new sessions use Claude Sonnet 5.5. The first-run step asks for an API key instead of a DeepSeek account sign-in; the desktop welcome lets you pick Anthropic, DeepSeek, OpenAI, or another provider for that key (`dsh-web-app`, `dsh-client-ui-settings-models`). |
 | Tool calling for GLM, Qwen, and local models | Arguments are coerced before validation, and the shell tools no longer require the UI-only `description` argument (`dsh-tools`, `dsh-tool-bash`). |
 | Turns that keep going | A max-output stop continues by itself, a context-length error triggers compaction and a retry instead of ending the turn, and a summary that comes back without text is retried (`dsh-auto-continue`, `dsh-compaction-basic`). |
 | Goals that run for days | No round cap, retries with backoff after request errors, and an independent check of the model's "complete" claim. Opening a session never restarts a goal; `/goal resume` does (`dsh-goal-evaluator`). |
@@ -69,7 +70,7 @@ Hydra's Web and desktop app ship these upstream features disabled, because they 
 | Session-log upload with requests to the official DeepSeek API, and its Settings switch | `session-log-deepseek`, `ui-settings-session-log` |
 | Desktop usage analytics, which upstream sends to DeepSeek's telemetry collector with no user-facing control | none: `product-analytics` stays loaded with `enabled: false` |
 
-DeepSeek API keys still work through `llm-deepseek`. The CLI and SDK profiles keep these rows, and there the upload goes only with requests to DeepSeek's official API. A profile patch row with the row's `id` and `disabled: false` turns a feature back on; for analytics, the patch row restates the `product-analytics` row's `config` with `enabled: true`.
+The desktop welcome asks for a provider API key and offers no DeepSeek account sign-in. DeepSeek API keys still work through `llm-deepseek`. The CLI and SDK profiles keep these rows, and there the upload goes only with requests to DeepSeek's official API. A profile patch row with the row's `id` and `disabled: false` turns a feature back on; for analytics, the patch row restates the `product-analytics` row's `config` with `enabled: true`.
 
 ## Developer preview
 
@@ -81,7 +82,7 @@ DeepSeek Harness, and therefore Hydra, is in _developer preview_. **Expect compa
 - pnpm 11.7.0 through Corepack, which ships with Node.js: run `corepack enable` once.
 - Git 2.26 or newer.
 - A C compiler for the native addon: `gcc` or `clang` on Linux, the Xcode Command Line Tools on macOS (`xcode-select --install`).
-- A model: a [DeepSeek API key](https://platform.deepseek.com/), another hosted API, or any OpenAI-compatible server such as vLLM, llama.cpp, Ollama, or LM Studio.
+- A model: an [Anthropic API key](https://console.anthropic.com/) for Claude, a [DeepSeek API key](https://platform.deepseek.com/), another hosted API, or any OpenAI-compatible server such as vLLM, llama.cpp, Ollama, or LM Studio.
 
 ## Run
 
@@ -128,7 +129,9 @@ Hydra keeps its settings, sessions, and keys in `~/.dsh`. To use another folder,
 
 ## Set up a model
 
-For DeepSeek, open **Settings → Models** in the Web UI, paste your API key, and save; it works without a restart.
+Hydra's Web and desktop app come with Claude: Claude Opus 5.5, Sonnet 5.5, and Haiku 5.5 on the Anthropic route, with Claude Sonnet 5.5 as the default model. On first start the Web UI asks for your Anthropic API key, and the desktop app's welcome asks for a key and the provider it belongs to; either way it works without a restart. To add the key later, or a key for DeepSeek, open **Settings → Models**, paste it on the provider's card, and save. The Claude models appear in the session's model menu once the key is stored.
+
+When the desktop welcome stores a key for a provider other than Anthropic, that provider's first model becomes the default unless the current default can already answer; pick another model in the session's model menu.
 
 For other providers, add them on the same page, or write them into `~/.dsh/settings.yaml` and put each key in `~/.dsh/.env`. A model that is not in the installed catalog needs its `contextWindow` and `maxTokens`; compaction starts at 80 percent of `contextWindow`.
 

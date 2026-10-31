@@ -87,7 +87,7 @@ export function AccountMenu({
       }} />
     {account.loginVisible && !account.onboarding && <SignInDialog account={account} colorScheme={colorScheme}
       start={start} cancel={cancel} t={t}
-      close={() => { showLogin(false) }} useApiKey={() => { showLogin(false); openOnboarding('deepseek-official') }} />}
+      close={() => { showLogin(false) }} useApiKey={() => { showLogin(false); openOnboarding('provider-key') }} />}
     {signedIn && signOutImpact !== undefined && <SignOutDialog running={signOutImpact} signOut={signOut}
       close={() => { setSignOutImpact(undefined) }} t={t} />}
   </div>

@@ -884,10 +884,12 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
 @Remote('selectModel') selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue>
 
 /**
- * Select the first available account model after login when no provider API key is configured.
- * @returns after saving the first available model or retaining the existing default.
+ * Save a provider's first available model as the default while the saved default is not in the available catalog.
+ * Onboarding calls it after storing that provider's credential.
+ * @param provider - provider route whose first available model becomes the default.
+ * @returns after saving that model, or at once when the catalog lists the saved default.
  */
-@Remote async initializeDefaultModel(): Promise<void>
+@Remote async initializeDefaultModel(provider: string): Promise<void>
 
 /**
  * Describe every currently routable model for Host-generation selectors.

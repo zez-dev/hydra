@@ -68,9 +68,9 @@ describe('providerUsable', () => {
 
 describe('onboardingReadiness', () => {
   it('waits for the first join and skips onboarding when the adapter directory entry is absent', () => {
-    expect(onboardingReadiness(state({ status: 'idle', rows: [] }))).toEqual({ kind: 'loading' })
-    expect(onboardingReadiness(state({ status: 'loading', rows: [] }))).toEqual({ kind: 'loading' })
-    expect(onboardingReadiness(state({ rows: [] }))).toEqual({ kind: 'adapter-absent' })
+    expect(onboardingReadiness(state({ status: 'idle', rows: [] }), 'deepseek-official')).toEqual({ kind: 'loading' })
+    expect(onboardingReadiness(state({ status: 'loading', rows: [] }), 'deepseek-official')).toEqual({ kind: 'loading' })
+    expect(onboardingReadiness(state({ rows: [] }), 'deepseek-official')).toEqual({ kind: 'adapter-absent' })
     expect(onboardingReadiness(state({
       rows: [row({
         entry: {
@@ -78,51 +78,64 @@ describe('onboardingReadiness', () => {
           settingsNs: '',
         },
       })],
-    }))).toEqual({ kind: 'adapter-absent' })
+    }), 'deepseek-official')).toEqual({ kind: 'adapter-absent' })
   })
 
   it('reports a missing writable effective credential', () => {
-    expect(onboardingReadiness(state())).toEqual({ kind: 'credential-missing' })
+    expect(onboardingReadiness(state(), 'deepseek-official')).toEqual({ kind: 'credential-missing' })
+  })
+
+  it('reads the configured onboarding provider at any settings address', () => {
+    const anthropic = otherRow({
+      entry: { ...otherRow().entry, provider: 'anthropic', displayName: 'Anthropic', settingsPath: ['providers', 'anthropic'] },
+      apiKeyEnv: 'ANTHROPIC_API_KEY',
+      credential: missingCredential,
+    })
+    expect(onboardingReadiness(state({ rows: [row(), anthropic] }), 'anthropic')).toEqual({ kind: 'credential-missing' })
+    expect(onboardingReadiness(state({ rows: [row()] }), 'anthropic')).toEqual({ kind: 'adapter-absent' })
+    expect(onboardingReadiness(state({
+      rows: [row(), { ...anthropic, credential: { configured: false, writable: false } }],
+    }), 'anthropic')).toEqual({ kind: 'unavailable', reason: 'credential-read-only' })
   })
 
   it('ends onboarding once any other registered provider can serve requests', () => {
-    expect(onboardingReadiness(state({ rows: [row(), otherRow()] }))).toEqual({ kind: 'provider-ready' })
+    expect(onboardingReadiness(state({ rows: [row(), otherRow()] }), 'deepseek-official')).toEqual({ kind: 'provider-ready' })
     // A provider the user cannot reach yet leaves the prompt in place.
     expect(onboardingReadiness(state({
       rows: [row(), otherRow({ credential: missingCredential })],
-    }))).toEqual({ kind: 'credential-missing' })
+    }), 'deepseek-official')).toEqual({ kind: 'credential-missing' })
   })
 
   it('accepts file and process-environment credentials without prompting', () => {
     expect(onboardingReadiness(state({
       rows: [row({ credential: { configured: true, source: 'file', writable: true } })],
-    }))).toEqual({ kind: 'provider-ready' })
+    }), 'deepseek-official')).toEqual({ kind: 'provider-ready' })
     expect(onboardingReadiness(state({
       rows: [row({ credential: { configured: true, source: 'env', writable: false } })],
-    }))).toEqual({ kind: 'provider-ready' })
+    }), 'deepseek-official')).toEqual({ kind: 'provider-ready' })
   })
 
   it('turns missing capabilities into diagnostics that never block the product', () => {
-    expect(onboardingReadiness(state({ status: 'error', error: 'settings down' }))).toEqual({
+    expect(onboardingReadiness(state({ status: 'error', error: 'settings down' }), 'deepseek-official')).toEqual({
       kind: 'unavailable',
       reason: 'load-failed',
     })
     expect(onboardingReadiness(state({
       rows: [row({ entry: { ...row().entry, active: false } })],
-    }))).toEqual({ kind: 'unavailable', reason: 'provider-inactive' })
+    }), 'deepseek-official')).toEqual({ kind: 'unavailable', reason: 'provider-inactive' })
     expect(onboardingReadiness(state({
       credentialError: 'credentials service is absent',
-    }))).toEqual({
+    }), 'deepseek-official')).toEqual({
       kind: 'unavailable',
       reason: 'credentials-unavailable',
     })
     expect(onboardingReadiness(state({
       rows: [row({ credential: undefined })],
-    }))).toEqual({ kind: 'unavailable', reason: 'credentials-unavailable' })
+    }), 'deepseek-official')).toEqual({ kind: 'unavailable', reason: 'credentials-unavailable' })
     expect(onboardingReadiness(state({
       rows: [row({ credential: { configured: false, writable: false } })],
-    }))).toEqual({ kind: 'unavailable', reason: 'credential-read-only' })
-    expect(onboardingReadiness(state({ writable: false }))).toEqual({
+    }), 'deepseek-official')).toEqual({ kind: 'unavailable', reason: 'credential-read-only' })
+    expect(onboardingReadiness(state({ writable: false }), 'deepseek-official')).toEqual({
       kind: 'unavailable',
       reason: 'settings-read-only',
     })

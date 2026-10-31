@@ -65,12 +65,19 @@ export interface ModelsOperations {
    * @returns the candidates, or the refusal.
    */
   discoverModels(settingsNs: string, request: LlmModelDiscoveryRequest): Promise<ModelDiscoveryOutcome>
+  /**
+   * Make a provider's first available model the default while the available
+   * catalog does not list the saved default.
+   * @param provider - provider route whose credential was just stored.
+   * @returns the refusal message, or undefined once the default is settled.
+   */
+  initializeDefaultModel(provider: string): Promise<string | undefined>
 }
 
 /**
  * Bind the page's Host operations to the plugin's own Remote namespaces.
  * @param ctx - the page plugin's context, which declares `remote.credentials`,
- * `remote.llm`, and `remote.settings` in its own `inject`.
+ * `remote.llm`, `remote.settings`, and `remote.session` in its own `inject`.
  * @returns the callbacks the section and its cards are injected with.
  */
 export function createModelsOperations(ctx: ClientContext): ModelsOperations {
@@ -94,6 +101,10 @@ export function createModelsOperations(ctx: ClientContext): ModelsOperations {
       return response.ok
         ? { kind: 'found', models: response.value }
         : { kind: 'refused', message: response.error.message }
+    },
+    initializeDefaultModel: async (provider) => {
+      const response = await ctx.remote.session.initializeDefaultModel(provider)
+      return response.ok ? undefined : response.error.message
     },
   }
 }

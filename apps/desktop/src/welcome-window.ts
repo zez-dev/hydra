@@ -1,4 +1,3 @@
-import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 /** Native welcome window and its presentation-only renderer. */
 
 import { join } from 'node:path'
@@ -54,7 +53,7 @@ let disposeActiveHandlers: (() => void) | undefined
  * Open the process's sole welcome window with desktop-owned operations.
  * Replaces IPC ownership immediately; the caller closes the previous native window.
  * @param locale - shell-owned localized copy.
- * @param operations - credential write and this-launch-only skip actions.
+ * @param operations - provider list, credential write, and this-launch-only skip actions.
  * @returns the visible window; a failed load destroys it before rejecting.
  */
 export async function openWelcomeWindow(locale: DesktopLocale, operations: WelcomeOperations): Promise<BrowserWindow> {
@@ -66,8 +65,8 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     if (!active) return
     active = false
     for (const channel of [
-      WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.saveApiKey,
-      WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
+      WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.providers,
+      WELCOME_IPC.saveApiKey, WELCOME_IPC.skip,
     ]) {
       ipcMain.removeHandler(channel)
     }
@@ -87,32 +86,22 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     assertSender(event)
     if (typeof attributes !== 'object' || attributes === null || Array.isArray(attributes)) throw new Error('desktop welcome: invalid analytics attributes')
     if (eventName === 'auth_page_click' && 'button_name' in attributes && Object.keys(attributes).length === 1
-      && (attributes.button_name === 'sign_in' || attributes.button_name === 'api-key')) {
+      && attributes.button_name === 'api-key') {
       await operations.analytics?.(eventName, { button_name: attributes.button_name })
     } else if ((eventName === 'auth_page_view' || eventName === 'api_key_save_click') && Object.keys(attributes).length === 0) {
       await operations.analytics?.(eventName, {})
     } else throw new Error('desktop welcome: invalid analytics event')
   })
   ipcMain.handle(WELCOME_IPC.takeNotice, async (event) => { assertSender(event); return operations.takeNotice() })
-  ipcMain.handle(WELCOME_IPC.saveApiKey, async (event, value: unknown) => {
+  ipcMain.handle(WELCOME_IPC.providers, async (event) => { assertSender(event); return operations.providers() })
+  ipcMain.handle(WELCOME_IPC.saveApiKey, async (event, provider: unknown, value: unknown) => {
     assertSender(event)
-    if (typeof value !== 'string' || !/^[\x21-\x7e]+$/.test(value)) return { ok: false }
-    return operations.saveApiKey(value)
+    if (typeof provider !== 'string' || typeof value !== 'string' || !/^[\x21-\x7e]+$/.test(value)) return { ok: false }
+    return operations.saveApiKey(provider, value)
   })
   ipcMain.handle(WELCOME_IPC.skip, async (event) => {
     assertSender(event)
     await operations.skip()
-  })
-  ipcMain.handle(WELCOME_IPC.start, async (event) => { assertSender(event); return operations.startSignIn() })
-  ipcMain.handle(WELCOME_IPC.cancel, async (event, id: unknown) => {
-    assertSender(event)
-    if (typeof id !== 'string') throw new Error('desktop welcome: invalid attempt')
-    return operations.cancelSignIn(id as SignInAttemptId)
-  })
-  ipcMain.handle(WELCOME_IPC.copyLink, async (event, id: unknown) => {
-    assertSender(event)
-    if (typeof id !== 'string') throw new Error('desktop welcome: invalid attempt')
-    return operations.copySignInLink(id as SignInAttemptId)
   })
   window.once('closed', disposeHandlers)
   window.webContents.setWindowOpenHandler(({ url }) => {

@@ -1,8 +1,8 @@
-/** Native account commands and Gateway state stream; no renderer receives credentials. */
+/** Native account state read and Gateway state stream; no renderer receives credentials. */
 import { randomUUID } from 'node:crypto'
 import WebSocket from 'ws'
 import { parseRemoteStreamServerMessage, REMOTE_STREAM_MUX_PATH } from '@deepseek-ai/dsh-api-gateway/stream-protocol'
-import type { AccountClientMetadata, AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 
 /** Authenticated unary caller shared with native onboarding. */
 export type AccountInvoke = (request: { namespace: string; method: string; args: Record<string, unknown> }) => Promise<unknown>
@@ -53,17 +53,23 @@ function validateBrowserDestination(value: string): void {
   }
 }
 
+/**
+ * Gateway refusals of a stream endpoint no mounted Remote serves. A Host composed
+ * without the DeepSeek account Remote answers the account streams with one of these,
+ * and reopening them cannot succeed.
+ */
+const ABSENT_REMOTE_CODES: ReadonlySet<string> = new Set([
+  'gateway/invocation-unavailable', 'gateway/service-unavailable',
+  'gateway/definition-unavailable', 'gateway/method-unavailable',
+])
+
 /** Native account operations and explicitly owned stream lifetime. */
 export interface DesktopAccountBackend {
   /** @returns current account snapshot. */
   state(): Promise<AccountView>
-  /** @param client - this window's identity and current language. @returns new or already-running login attempt. */
-  start(client: AccountClientMetadata): Promise<AccountView>
-  /** @param id - attempt to cancel. @returns cancellation or completed commit state. */
-  cancel(id: SignInAttemptId): Promise<AccountView>
-  /** @param client - this window's identity. @returns state after local sign-out. */
-  signOut(client: AccountClientMetadata): Promise<AccountView>
   /**
+   * Watch account state, credential expiry, and the optional collection policy over one socket.
+   * When the Host refuses the account streams as absent, the watch keeps only the policy stream.
    * @param listener - state recipient.
    * @param failed - stream failure recipient.
    * @param expired - live credential-expiry recipient.
@@ -77,23 +83,21 @@ export interface DesktopAccountBackend {
 }
 
 /**
- * Connect native account operations to the standard authenticated Web backend.
+ * Connect native account reads to the standard authenticated Web backend.
  * @param origin - Host Web origin.
  * @param invoke - validated unary RPC caller.
  * @param cookies - Electron session cookie reader.
- * @returns account operations; watch callers own their subscriptions.
+ * @returns account reads; watch callers own their subscriptions.
  */
 export function desktopAccountBackend(origin: string, invoke: AccountInvoke, cookies: () => Promise<string>): DesktopAccountBackend {
-  const call = async (method: string, args: Record<string, unknown> = {}): Promise<AccountView> =>
-    accountView(await invoke({ namespace: 'account', method, args }))
   return {
-    state: () => call('getState'),
-    start: client => call('startSignIn', { client, callbackOrigin: new URL(origin).origin, loginSource: 'desktop' }),
-    cancel: attemptId => call('cancelSignIn', { attemptId }), signOut: client => call('signOut', { client }),
+    state: async () => accountView(await invoke({ namespace: 'account', method: 'getState', args: {} })),
     watch(listener, failed, expired, onAnalyticsEnabledChanged) {
       let closed = false
       let socket: WebSocket | undefined
       let retry: ReturnType<typeof setTimeout> | undefined
+      // Set once the Host refuses the account streams as absent; later connections skip them.
+      let accountAbsent = false
       const connect = (): void => {
         const streamId = randomUUID()
         const expiryStreamId = randomUUID()
@@ -105,6 +109,7 @@ export function desktopAccountBackend(origin: string, invoke: AccountInvoke, coo
           socket = new WebSocket(url, { headers: { cookie, origin }, maxPayload: 65_536 })
           socket.on('open', () => {
             if (onAnalyticsEnabledChanged !== undefined) socket?.send(JSON.stringify({ type: 'open', streamId: analyticsPolicyStreamId, endpoint: 'productAnalytics/watchPolicy', payload: { args: {} } }))
+            if (accountAbsent) return
             socket?.send(JSON.stringify({ type: 'open', streamId: expiryStreamId, endpoint: 'account/watchExpiry', payload: { args: {} } }))
             socket?.send(JSON.stringify({ type: 'open', streamId, endpoint: 'account/watch', payload: { args: {} } }))
           })
@@ -115,6 +120,13 @@ export function desktopAccountBackend(origin: string, invoke: AccountInvoke, coo
               if (frame.streamId === analyticsPolicyStreamId) {
                 if (frame.type === 'item' && typeof frame.value === 'boolean') onAnalyticsEnabledChanged?.(frame.value)
                 else onAnalyticsEnabledChanged?.(false)
+                return
+              }
+              if ((frame.streamId === streamId || frame.streamId === expiryStreamId)
+                && frame.type === 'error' && ABSENT_REMOTE_CODES.has(frame.error.code)) {
+                accountAbsent = true
+                // Without a policy recipient nothing is left to watch on this Host.
+                if (onAnalyticsEnabledChanged === undefined) { closed = true; socket?.close() }
                 return
               }
               if (frame.streamId === expiryStreamId && frame.type === 'item' && frame.value === 'session-expired') { expired(); return }

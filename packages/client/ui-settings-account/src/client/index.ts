@@ -159,7 +159,7 @@ export function apply(ctx: Context): void {
         else notices.end()
         if (initialize) void (async () => {
           try {
-            const initialized = await ctx.remote.session.initializeDefaultModel()
+            const initialized = await ctx.remote.session.initializeDefaultModel('deepseek-account')
             if (!initialized.ok) console.error('[deepseek-account] default model initialization failed', { reason: 'refused' })
           } catch (_error) {
             console.error('[deepseek-account] default model initialization failed', { reason: 'disconnected' })

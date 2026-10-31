@@ -2647,7 +2647,7 @@ describe('desktop main startup', () => {
   })
 })
 
-it.each(['failed', 'expired'] as const)('focuses DSH once when browser authorization becomes %s', async (phase) => {
+it('opens no browser and steals no focus for account sign-in attempts', async () => {
   await import('../src/main.ts')
   await harness.preparing.promise
   harness.prepared.resolve()
@@ -2656,31 +2656,14 @@ it.each(['failed', 'expired'] as const)('focuses DSH once when browser authoriza
   await Promise.resolve(invoke(DESKTOP_IPC.boot))
   const window = harness.windows[0]!
   window.focus.mockClear()
-  const state: AccountView = {
-    status: 'signed-out', links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
-    attempt: { id: 'test-failed-attempt' as NonNullable<AccountView['attempt']>['id'], phase },
-  }
-  harness.publishAccount(state)
-  harness.publishAccount(state)
-  expect(window.focus).toHaveBeenCalledTimes(1)
-})
-
-it.each([['light', false], ['dark', true]] as const)('opens Platform authorization in the effective %s palette', async (theme, shouldUseDarkColors) => {
-  await import('../src/main.ts')
-  await harness.preparing.promise
-  harness.prepared.resolve()
-  await harness.hostStarted.promise
-  harness.hosts[0]!.ready.resolve()
-  await Promise.resolve(invoke(DESKTOP_IPC.boot))
-  harness.nativeTheme.shouldUseDarkColors = shouldUseDarkColors
-  const state: AccountView = {
-    status: 'signed-out', links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
-    attempt: { id: 'test-theme-attempt' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser',
+  const links = { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' }
+  for (const attempt of [
+    { id: 'waiting' as NonNullable<AccountView['attempt']>['id'], phase: 'waiting-browser' as const,
       authorizeUrl: 'https://platform.deepseek.com/dsh/authorize?state=state-1' },
-  }
-  harness.publishAccount(state)
-  harness.publishAccount(state)
-  expect(harness.openExternal).toHaveBeenCalledExactlyOnceWith(`https://platform.deepseek.com/dsh/authorize?state=state-1&theme=${theme}`)
+    { id: 'failed' as NonNullable<AccountView['attempt']>['id'], phase: 'failed' as const },
+  ]) harness.publishAccount({ status: 'signed-out', links, attempt })
+  expect(harness.openExternal).not.toHaveBeenCalled()
+  expect(window.focus).not.toHaveBeenCalled()
 })
 
 it('disables native product events for a disabled Desktop launch', async () => {

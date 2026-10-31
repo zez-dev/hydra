@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-/** First-run DeepSeek prompt behavior over the shared Models join. */
+/** First-run provider API-key prompt behavior over the shared Models join. */
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -7,8 +7,8 @@ import Schema from '@deepseek-ai/schemastery'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { allowAllAccess, bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
-import { DeepSeekOnboardingDialog } from '../src/client/DeepSeekOnboardingDialog.tsx'
-import type { DeepSeekOnboardingDialogProps } from '../src/client/DeepSeekOnboardingDialog.tsx'
+import { ProviderOnboardingDialog } from '../src/client/ProviderOnboardingDialog.tsx'
+import type { ProviderOnboardingDialogProps } from '../src/client/ProviderOnboardingDialog.tsx'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { ModelsSettingsStore } from '../src/client/store.ts'
 import { createModelsOperations } from '../src/client/operations.ts'
@@ -45,9 +45,9 @@ const DeepSeekConfig = Schema.object({
   })),
 })
 
-type AttentionSnapshot = Parameters<Parameters<DeepSeekOnboardingDialogProps['useSessionStatus']>[0]>[0]
+type AttentionSnapshot = Parameters<Parameters<ProviderOnboardingDialogProps['useSessionStatus']>[0]>[0]
 const noAttention: AttentionSnapshot = new Map()
-const useSessionStatus: DeepSeekOnboardingDialogProps['useSessionStatus'] = selector => selector(noAttention)
+const useSessionStatus: ProviderOnboardingDialogProps['useSessionStatus'] = selector => selector(noAttention)
 
 function deepSeekNamespace(apiKeyEnv: string | null): SettingsNamespaceView {
   const value = apiKeyEnv === null ? {} : { apiKeyEnv }
@@ -75,6 +75,7 @@ function harness(options: {
   settingsWritable?: boolean
   providersFailure?: string
   setFailure?: string
+  initializeFailure?: string
 } = {}) {
   if (document.getElementById('root') === null) {
     const appRoot = document.createElement('div')
@@ -135,16 +136,34 @@ function harness(options: {
       set,
     },
   }
+  return {
+    ...mountProps(face, 'deepseek-official', options.initializeFailure), mutate, set,
+    configure: () => { fileConfigured = true },
+  }
+}
+
+/**
+ * Dialog props over a scripted Remote face.
+ * @param face - the credential, provider, and settings Remotes the page reaches.
+ * @param provider - onboarding provider route.
+ * @param initializeFailure - refusal message for the default-model request.
+ * @returns the dialog props and the spies a test asserts on.
+ */
+function mountProps(face: object, provider: string, initializeFailure?: string) {
+  const initializeDefaultModel = vi.fn((_provider: string) => Promise.resolve(
+    initializeFailure === undefined ? remoteOk(undefined) : remoteFail(initializeFailure),
+  ))
   // The page plugin's context, scripted down to the namespaces it reaches.
-  const ctx = { remote: { ...face, session: { initializeDefaultModel: async () => ({ ok: true, value: undefined }) } } } as never
+  const ctx = { remote: { ...face, session: { initializeDefaultModel } } } as never
   const operations = createModelsOperations(ctx)
   const controller = new ModelsSettingsStore(ctx, settingsSchema, new SettingsDescribeMirror(ctx))
   const openSection = vi.fn()
   const complete = vi.fn()
   const unusedHook = (() => { throw new Error('unused standard hook') }) as never
-  const props: DeepSeekOnboardingDialogProps = {
+  const props: ProviderOnboardingDialogProps = {
     automatic: true,
-    stepId: 'deepseek-official',
+    provider,
+    stepId: 'provider-key',
     complete,
     openSection,
     renderSlot: (_name, _props, options) => options?.fallback,
@@ -159,26 +178,78 @@ function harness(options: {
     schema: settingsSchema,
     t: key => en[key],
   }
-  return {
-    controller, complete, openSection, props, mutate, set,
-    configure: () => { fileConfigured = true },
-  }
+  return { controller, complete, openSection, props, initializeDefaultModel }
 }
 
-describe('DeepSeekOnboardingDialog', () => {
+const PiAiConfig = Schema.object({
+  providers: Schema.dict(Schema.object({
+    displayName: Schema.string(),
+    apiKeyEnv: Schema.string().role('credential-ref'),
+    models: Schema.array(Schema.object({ id: Schema.string().required() })),
+  })),
+})
+
+/**
+ * A composition whose onboarding provider is a pi-ai route: the Anthropic
+ * profile names its credential reference, and the DeepSeek route is declared
+ * but not registered.
+ */
+function anthropicHarness() {
+  let stored = false
+  const anthropic = { displayName: 'Anthropic', apiKeyEnv: 'ANTHROPIC_API_KEY', models: [{ id: 'claude-sonnet-5-5' }] }
+  const piAi: SettingsNamespaceView = {
+    ns: 'llm-pi-ai',
+    schema: JSON.parse(JSON.stringify(PiAiConfig.toJSON())) as JsonValue,
+    value: { providers: { anthropic } },
+    base: { providers: { anthropic } },
+    user: {},
+    autoGenerate: true, applies: 'live',
+    secrets: [],
+    revision: 0,
+  }
+  const mutate = vi.fn()
+  const set = vi.fn((_ref: string, _value: string) => {
+    stored = true
+    return Promise.resolve(remoteOk(undefined))
+  })
+  const face = {
+    llm: {
+      listProviders: () => Promise.resolve(remoteOk([{ id: 'anthropic', name: 'Anthropic' }])),
+      listConfigurableProviders: () => Promise.resolve(remoteOk([
+        { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
+        { provider: 'anthropic', displayName: 'Anthropic', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'anthropic'] },
+      ])),
+      discoverModels: () => Promise.resolve(remoteOk([])),
+    },
+    settings: {
+      describe: () => Promise.resolve(remoteOk({
+        writable: true, hasDocument: false, namespaces: [deepSeekNamespace('DEEPSEEK_API_KEY'), piAi],
+      })),
+      mutate,
+    },
+    credentials: {
+      describe: (refs: readonly string[]) => Promise.resolve(remoteOk(Object.fromEntries(refs.map(ref =>
+        [ref, { configured: ref === 'ANTHROPIC_API_KEY' && stored, writable: true }])))),
+      set,
+    },
+  }
+  return { ...mountProps(face, 'anthropic'), mutate, set }
+}
+
+describe('ProviderOnboardingDialog', () => {
   it('renders when the shell root is absent', async () => {
     const h = harness()
     document.getElementById('root')!.remove()
-    render(<DeepSeekOnboardingDialog {...h.props} />)
+    render(<ProviderOnboardingDialog {...h.props} />)
     expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
   })
 
   it('loads a credential-only modal, inerts the product, and focuses the key', async () => {
     const h = harness()
-    render(<DeepSeekOnboardingDialog {...h.props} />)
+    render(<ProviderOnboardingDialog {...h.props} />)
     expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
     expect(document.getElementById('root')?.inert).toBe(true)
-    expect(screen.getByText(en.onboardingDescription)).toBeTruthy()
+    expect(screen.getByText(en.onboardingDescription.replace('{provider}', 'DeepSeek'))).toBeTruthy()
     const key = screen.getByLabelText<HTMLInputElement>(en.keyInput)
     await waitFor(() => { expect(document.activeElement).toBe(key) })
     expect(screen.queryByText(en.customized)).toBeNull()
@@ -188,7 +259,7 @@ describe('DeepSeekOnboardingDialog', () => {
     const h = harness()
     const appRoot = document.getElementById('root')!
     appRoot.inert = true
-    const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+    const view = render(<ProviderOnboardingDialog {...h.props} />)
     await screen.findByRole('dialog')
 
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -202,7 +273,7 @@ describe('DeepSeekOnboardingDialog', () => {
 
   it('requires a non-blank key before Save and continue is available', async () => {
     const h = harness()
-    render(<DeepSeekOnboardingDialog {...h.props} />)
+    render(<ProviderOnboardingDialog {...h.props} />)
     await screen.findByRole('dialog')
     const save = screen.getByRole<HTMLButtonElement>('button', { name: en.onboardingSave })
     expect(save.disabled).toBe(true)
@@ -217,7 +288,7 @@ describe('DeepSeekOnboardingDialog', () => {
       [{ setFailure: 'credential was rejected' }, 'credential was rejected'],
     ] as const) {
       const h = harness(options)
-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+      const view = render(<ProviderOnboardingDialog {...h.props} />)
       await screen.findByRole('dialog')
       fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'sk-live' } })
       fireEvent.click(screen.getByRole('button', { name: en.onboardingSave }))
@@ -232,7 +303,7 @@ describe('DeepSeekOnboardingDialog', () => {
 
   it('allows configure-later dismissal without opening settings', async () => {
     const h = harness()
-    render(<DeepSeekOnboardingDialog {...h.props} />)
+    render(<ProviderOnboardingDialog {...h.props} />)
     await screen.findByRole('dialog')
     fireEvent.click(screen.getByRole('button', { name: en.onboardingLater }))
     expect(h.complete).toHaveBeenCalledOnce()
@@ -241,7 +312,7 @@ describe('DeepSeekOnboardingDialog', () => {
     expect(h.mutate).not.toHaveBeenCalled()
   })
 
-  it('does not block the product when DeepSeek setup is unavailable', async () => {
+  it('does not block the product when provider setup is unavailable', async () => {
     for (const h of [
       harness({ describeFailure: 'credentials service is absent' }),
       harness({ credential: { writable: false } }),
@@ -251,7 +322,7 @@ describe('DeepSeekOnboardingDialog', () => {
       harness({ settingsNamespace: false }),
       harness({ apiKeyEnv: null }),
     ]) {
-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+      const view = render(<ProviderOnboardingDialog {...h.props} />)
       await act(async () => { await h.controller.load() })
       expect(screen.queryByRole('dialog')).toBeNull()
       await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
@@ -266,7 +337,7 @@ describe('DeepSeekOnboardingDialog', () => {
       harness({ providerSettingsNs: '' }),
       harness({ configured: () => true, credential: { source: 'env', writable: false } }),
     ]) {
-      const view = render(<DeepSeekOnboardingDialog {...h.props} />)
+      const view = render(<ProviderOnboardingDialog {...h.props} />)
       await act(async () => { await h.controller.load() })
       expect(screen.queryByRole('dialog')).toBeNull()
       await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
@@ -276,7 +347,7 @@ describe('DeepSeekOnboardingDialog', () => {
 
   it('closes when an external credential invalidation refreshes the shared join', async () => {
     const h = harness()
-    render(<DeepSeekOnboardingDialog {...h.props} />)
+    render(<ProviderOnboardingDialog {...h.props} />)
     await screen.findByRole('dialog')
     h.configure()
     await act(async () => { await h.controller.load() })
@@ -288,7 +359,7 @@ describe('DeepSeekOnboardingDialog', () => {
 it('offers account choice before reusing the existing API key editor', async () => {
   const h = harness()
   h.props.renderSlot = (_name, owner: unknown) => <button onClick={(owner as { useApiKey: () => void }).useApiKey}>Choose API key</button>
-  render(<DeepSeekOnboardingDialog {...h.props} />)
+  render(<ProviderOnboardingDialog {...h.props} />)
   await waitFor(() => { expect(screen.getByRole('button', { name: 'Choose API key' })).toBeTruthy() })
   fireEvent.click(screen.getByRole('button', { name: 'Choose API key' }))
   expect(screen.getByRole('dialog')).toBeTruthy()
@@ -299,17 +370,45 @@ it('explicit account-menu setup reuses the editor without another login choice',
   h.props.explicit = true
   const choice = vi.fn()
   h.props.renderSlot = (_name, _owner, options) => { choice(); return options?.fallback }
-  render(<DeepSeekOnboardingDialog {...h.props} />)
+  render(<ProviderOnboardingDialog {...h.props} />)
   await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
   expect(choice).not.toHaveBeenCalled()
   expect(h.complete).not.toHaveBeenCalled()
+})
+
+it('asks for the configured provider key at its pi-ai address and settles the default on that provider', async () => {
+  const h = anthropicHarness()
+  render(<ProviderOnboardingDialog {...h.props} />)
+  expect(await screen.findByRole('dialog', { name: en.onboardingTitle })).toBeTruthy()
+  expect(screen.getByText(en.onboardingDescription.replace('{provider}', 'Anthropic'))).toBeTruthy()
+  fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'sk-ant-example' } })
+  fireEvent.click(screen.getByRole('button', { name: en.onboardingSave }))
+  await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
+  expect(h.set).toHaveBeenCalledExactlyOnceWith('ANTHROPIC_API_KEY', 'sk-ant-example')
+  expect(h.mutate).not.toHaveBeenCalled()
+  expect(h.initializeDefaultModel).toHaveBeenCalledExactlyOnceWith('anthropic')
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('closes after a saved key even when the default model request is refused', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    const h = harness({ initializeFailure: 'provider has no available models' })
+    render(<ProviderOnboardingDialog {...h.props} />)
+    await screen.findByRole('dialog')
+    fireEvent.change(screen.getByLabelText(en.keyInput), { target: { value: 'sk-live' } })
+    fireEvent.click(screen.getByRole('button', { name: en.onboardingSave }))
+    await waitFor(() => { expect(h.complete).toHaveBeenCalledOnce() })
+    expect(h.initializeDefaultModel).toHaveBeenCalledExactlyOnceWith('deepseek-official')
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[ui-settings-models] default model unchanged', { reason: 'refused' })
+  } finally { warn.mockRestore() }
 })
 
 it('keeps explicit API key setup available when automatic onboarding is disabled', async () => {
   const h = harness()
   h.props.automatic = false
   h.props.explicit = true
-  render(<DeepSeekOnboardingDialog {...h.props} />)
+  render(<ProviderOnboardingDialog {...h.props} />)
   await waitFor(() => { expect(screen.getByRole('dialog')).toBeTruthy() })
   expect(h.complete).not.toHaveBeenCalled()
 })

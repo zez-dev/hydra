@@ -27,7 +27,7 @@ import { StateController } from './state/controller.ts'
 import { WebController } from './web/controller.ts'
 import { SessionFileReferences } from './file-references.ts'
 import { ApiSessionList } from './list.ts'
-import { buildModelCatalog, hasProviderApiKey } from './catalog.ts'
+import { buildModelCatalog } from './catalog.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
 import { SessionMediaReferences } from './media-references.ts'
 import { ArchivedSessionGate } from './archived-session-gate.ts'
@@ -320,14 +320,17 @@ export class SessionController extends TypertRemoteService {
   }
 
   /**
-   * Select the first available account model after login when no provider API key is configured.
-   * @returns after saving the first available model or retaining the existing default.
+   * Save a provider's first available model as the default while the saved default is not in the available catalog.
+   * Onboarding calls it after storing that provider's credential.
+   * @param provider - provider route whose first available model becomes the default.
+   * @returns after saving that model, or at once when the catalog lists the saved default.
    */
   @Remote
-  async initializeDefaultModel(): Promise<void> {
-    const provider = 'deepseek-account'
-    if (await hasProviderApiKey(this.ctx)) return
-    const catalog = await buildModelCatalog(this.ctx)
+  async initializeDefaultModel(provider: string): Promise<void> {
+    const current = this.ctx.agentDefaultModel.currentSelection()
+    const catalog = await buildModelCatalog(this.ctx, current)
+    if (catalog.groups.some(group => group.id === current.provider
+      && group.models.some(model => model.id === current.model))) return
     const model = catalog.groups.find(group => group.id === provider)?.models[0]
     if (model === undefined) throw new RemoteError('session/provider-models-unavailable',
       `provider "${provider}" has no available models`, { provider })

@@ -536,7 +536,13 @@ it('assembles the shipped Web transport, catalog, guidance, and defaults', async
   scaffold = await launchWebScaffold({ deepSeekMissingCredential: true })
   const ctx = scaffold.ctx
   expect(ctx.llm.listProviders().some(provider => provider.id === 'deepseek-messages')).toBe(false)
-  expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+  expect(ctx.agentDefaultModel.currentSelection()).toEqual({ provider: 'anthropic', model: 'claude-sonnet-5-5' })
+  // The shipped Claude route registers before its key exists and lists models only once the key is stored.
+  expect(ctx.llm.listProviders()).toContainEqual({ id: 'anthropic', name: 'Anthropic' })
+  expect(await ctx.llm.listModels('anthropic')).toEqual([])
+  await expect(ctx.llm.resolveModelInfo('anthropic', 'claude-sonnet-5-5')).resolves.toMatchObject({
+    name: 'Claude Sonnet 5.5', context: { contextWindow: 1_000_000 },
+  })
   const index = await fetch(`http://127.0.0.1:${String(ctx.webServer.port)}`, {
     headers: { 'accept-encoding': 'gzip' },
   })

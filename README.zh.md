@@ -4,7 +4,7 @@
 
 <a id="disclaimer"></a>
 
-> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
+> 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的 Web 与桌面应用自带 Claude：Anthropic 路由提供 Claude Opus 5.5、Sonnet 5.5 和 Haiku 5.5，新会话默认使用 Claude Sonnet 5.5；首次启动时输入 API 密钥即可使用，无需登录 DeepSeek 账号，桌面应用的欢迎页还可以为该密钥选择 Anthropic、DeepSeek、OpenAI 或其他提供商。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
 >
 > **免责声明**：Hydra 是独立的社区项目，与 DeepSeek、Anthropic、OpenAI 或任何其他模型提供方均无隶属、背书、赞助或支持关系；相关名称是其各自所有者的商标，仅用于说明 Hydra 所基于或配合使用的软件。Hydra 依 [MIT 许可证](LICENSE)按“原样”提供，不附带任何形式的担保；在法律允许的最大范围内，作者和贡献者不对因使用 Hydra 而产生的任何索赔、损害、数据丢失、安全事件或费用承担责任。Hydra 运行的 AI 智能体可以执行 shell 命令、修改或删除文件，并会把你的代码、提示和文件发送给你配置的模型提供方；你需要自行审查智能体的操作并备份重要数据，自行负责 API 密钥与提供方收取的费用，遵守提供方的服务条款，并对发送给提供方的数据及其适用的法律承担责任。模型输出可能有误；Hydra 生成的任何内容（包括研究与行情数据工具的结果）均不构成财务、法律、医疗或其他专业建议。完整内容见[英文 README 的免责声明](README.md#disclaimer)。
 

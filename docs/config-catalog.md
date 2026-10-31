@@ -672,6 +672,12 @@ export type OnboardingProcess = 'compact' | 'standard' | 'detailed'
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /**
+   * Provider route whose credential the API-key step asks for. The step prompts
+   * only while no provider can serve requests and this route is registered with
+   * a profile that names a credential reference holding no value.
+   */
+  onboardingProvider: string
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-settings-models -->

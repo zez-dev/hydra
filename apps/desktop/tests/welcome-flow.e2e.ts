@@ -1,6 +1,6 @@
 /** Built Desktop Host acceptance; run after the repository build, without provider credentials. */
 
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -83,7 +83,7 @@ async function mockPlatform() {
 }
 
 describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
-  it('persists explicit API keys and browser account login independently across Host restarts', async () => {
+  it('persists provider API keys and browser account login independently across Host restarts', async () => {
     vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
     const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-welcome-'))
     let host: DesktopHostProcess | undefined
@@ -124,12 +124,13 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       writeFileSync(join(paths.profile, 'cordis.patch.yml'), `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: deepseek-account\n  config:\n${process.platform === 'linux' ? '    desktopPlatform: darwin\n' : ''}    platformOrigin: ${platform.origin}\n    allowLoopbackHttp: true\n    requestHeaders:\n      Cookie: test_gate=synthetic\n`)
       let backend: DesktopWelcomeBackend
       let hostOrigin = ''
+      let cookie = ''
       const restart = async (): Promise<void> => {
         await host?.stop()
         host = new DesktopHostProcess(process.execPath, project, paths.profile)
         const { url } = await host.start()
         hostOrigin = new URL(url).origin
-        let cookie = ''
+        cookie = ''
         const send: typeof fetch = async (input, init) => {
           const headers = new Headers(init?.headers)
           if (cookie !== '') headers.set('cookie', cookie)
@@ -142,6 +143,17 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
         backend = await connectDesktopWelcome(url, send, () => Promise.resolve(cookie))
       }
       const status = async () => backend.read()
+      // The welcome no longer starts account sign-ins; the test drives the Host's account Remote directly.
+      const account = async (method: string, args: Record<string, unknown>): Promise<void> => {
+        const rpcId = randomUUID()
+        const response = await fetch(new URL(`/api/account/${method}`, hostOrigin), {
+          method: 'POST', headers: { 'content-type': 'application/json', cookie },
+          body: JSON.stringify({ type: 'client-request', rpcId, method: `account/${method}`, payload: { args } }),
+        })
+        const envelope = await response.json() as { result: { ok: boolean } }
+        if (!response.ok || !envelope.result.ok) throw new Error(`account/${method} failed`)
+      }
+      const profilePatch = (): string => readFileSync(join(paths.profile, 'cordis.patch.yml'), 'utf8')
       const fingerprint = (): string => createHash('sha256')
         .update(readFileSync(join(home, '.credentials.yaml'))).digest('hex')
       await restart()
@@ -153,11 +165,27 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: false, localePreference: 'zh' })
       expect(fingerprint()).toBe(before)
-      expect(await backend!.save('sk-local-onboarding-test')).toEqual({ ok: true })
+      // Hydra's composition lists Claude first; DeepSeek and OpenAI follow.
+      expect((await backend!.providers()).slice(0, 3)).toEqual([
+        { provider: 'anthropic', displayName: 'Anthropic' },
+        { provider: 'deepseek-official', displayName: 'DeepSeek' },
+        { provider: 'openai', displayName: 'openai' },
+      ])
+      expect(await backend!.save('deepseek-official', 'sk-local-onboarding-test')).toEqual({ ok: true })
       expect(await status()).toMatchObject({ hasApiKey: true, localePreference: 'zh' })
+      // The Claude default lists no models without its key, so the saved DeepSeek route supplies the default.
+      const defaultRow = /- id: agent-default-model\n(?:\s+name: .*\n)?\s+config:\n\s+provider: deepseek-official\n/u
+      expect(profilePatch()).toMatch(defaultRow)
+      expect(profilePatch()).toContain('    model: deepseek-flash\n')
+      expect(await backend!.save('openai', 'sk-openai-local-onboarding-test')).toEqual({ ok: true })
+      expect(profilePatch()).toMatch(/openai:\n\s+apiKeyEnv: OPENAI_API_KEY\n/u)
+      expect(await backend!.save('anthropic', 'sk-ant-local-onboarding-test')).toEqual({ ok: true })
+      const credentials = readFileSync(join(home, '.credentials.yaml'), 'utf8')
+      for (const ref of ['DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']) expect(credentials).toContain(`${ref}:`)
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: true })
-      await backend!.account.start(desktopClientMetadata('en'))
+      const signIn = () => account('startSignIn', { client: desktopClientMetadata('en'), callbackOrigin: hostOrigin, loginSource: 'desktop' })
+      await signIn()
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       expect(new URL(platform.callback()).origin).toBe(hostOrigin)
       platform.failExchange(true)
@@ -166,7 +194,7 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       expect(await backend!.account.state()).toMatchObject({ status: 'signed-out', attempt: { phase: 'failed' } })
       expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: false })
       platform.failExchange(false)
-      await backend!.account.start(desktopClientMetadata('en'))
+      await signIn()
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       const response = await fetch(platform.callback(), { redirect: 'manual' })
       expect(response.status).toBe(302)
@@ -175,15 +203,28 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: true })
       // A failed remote logout must not block local sign-out through the real Host composition.
-      await backend!.account.signOut(desktopClientMetadata('en'))
+      await account('signOut', { client: desktopClientMetadata('en') })
       expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: false })
-      await backend!.account.start(desktopClientMetadata('en'))
+      await signIn()
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       const waiting = await backend!.account.state()
       const late = platform.callback()
-      await backend!.account.cancel(waiting.attempt!.id)
+      await account('cancelSignIn', { attemptId: waiting.attempt!.id })
       expect((await fetch(late, { redirect: 'manual' })).status).not.toBe(302)
       expect(await status()).toMatchObject({ loggedIn: false })
+      // A Host composed without the account Remote still answers the welcome reads, and the
+      // watcher keeps its policy stream without reopening the refused account streams.
+      await host!.stop()
+      writeFileSync(join(paths.profile, 'cordis.patch.yml'), `${profilePatch()}- id: account-controller\n  disabled: true\n`)
+      await restart()
+      expect(await status()).toMatchObject({ loggedIn: false, hasApiKey: true, localePreference: 'zh' })
+      expect((await backend!.providers())[0]).toEqual({ provider: 'anthropic', displayName: 'Anthropic' })
+      await expect(backend!.account.state()).rejects.toThrow('Web request failed')
+      const streamFailed = vi.fn()
+      const stopWatch = backend!.account.watch(vi.fn(), streamFailed, vi.fn(), vi.fn())
+      await new Promise(resolve => setTimeout(resolve, 2500))
+      stopWatch()
+      expect(streamFailed).not.toHaveBeenCalled()
       // A handle left open after acknowledged teardown must not fail the update handoff.
       vi.stubEnv('NODE_OPTIONS', `--import=data:text/javascript,${encodeURIComponent(
         "process.on('message', message => { if (message?.type === 'shutdown') setInterval(() => {}, 1000) })")}`)

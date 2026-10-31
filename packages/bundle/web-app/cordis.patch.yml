@@ -24,6 +24,11 @@
 # deployment enabling content search overrides `openAt` to `first-search` in a
 # later patch layer, which defers the node:sqlite import and in-memory handle
 # to the first search so startup stays quiet.
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: never
+
 # ── upstream features Hydra's Web and desktop app ship without ─────────────
 
 # The /feedback command and the Session-log upload to DeepSeek's official API.
@@ -34,10 +39,30 @@
 - id: session-log-deepseek
   disabled: true
 
-- id: session-query-sqlite
+# ── Claude, the default model provider of Hydra's Web and desktop app ─────
+
+# The Anthropic route serves Claude Opus 5.5, Sonnet 5.5, and Haiku 5.5. Each
+# model takes its context window, output cap, and reasoning levels from the
+# installed pi-ai catalog. The key resolves per request through the
+# ANTHROPIC_API_KEY credential reference, which the Models page, the first-run
+# key step, and the desktop welcome store; until it holds a key the route
+# lists no models.
+- id: llm-pi-ai
   config:
-    path: ':memory:'
-    openAt: never
+    providers:
+      anthropic:
+        displayName: Anthropic
+        apiKeyEnv: ANTHROPIC_API_KEY
+        models:
+          - id: claude-opus-5-5
+          - id: claude-sonnet-5-5
+          - id: claude-haiku-5-5
+
+# New Agents use Claude Sonnet 5.5 until the user selects another model.
+- id: agent-default-model
+  config:
+    provider: anthropic
+    model: claude-sonnet-5-5
 
 # ── web-only host rows, the transport layer, and the browser roster ─────────
 
@@ -326,8 +351,12 @@
     - id: ui-settings-general
       name: '@deepseek-ai/dsh-client-ui-settings-general'
 
+    # The first-run key step asks for the Anthropic key, the route the default
+    # model uses.
     - id: ui-settings-models
       name: '@deepseek-ai/dsh-client-ui-settings-models'
+      config:
+        onboardingProvider: anthropic
 
     # Plugin management: the sidebar Plugins page installs, enables, disables,
     # and removes the profile's bundles through the `pluginManager` Remote.

@@ -23,19 +23,14 @@ it('accepts a no-response login failure without discarding the account projectio
   expect(accountView(state)).toEqual(state)
 })
 
-it('uses account Remote commands without returning additional wire fields', async () => {
+it('reads account state without returning additional wire fields', async () => {
   const requests: unknown[] = []
   const backend = desktopAccountBackend('http://127.0.0.1:1234', (request) => {
     requests.push(request)
-    return Promise.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null, token: 'private' })
+    return Promise.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'credential-stored', attempt: null, token: 'private' })
   }, () => Promise.resolve(''))
-  const client = { version: '1.2.3', locale: 'en', timezoneOffsetSeconds: 28_800 }
-  expect(await backend.start(client)).toEqual({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })
-  expect(await backend.signOut(client)).toMatchObject({ status: 'signed-out' })
-  expect(requests).toEqual([
-    { namespace: 'account', method: 'startSignIn', args: { client, callbackOrigin: 'http://127.0.0.1:1234', loginSource: 'desktop' } },
-    { namespace: 'account', method: 'signOut', args: { client } },
-  ])
+  expect(await backend.state()).toEqual({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'credential-stored', attempt: null })
+  expect(requests).toEqual([{ namespace: 'account', method: 'getState', args: {} }])
 })
 
 it('does not replay an expiry reason from an account snapshot', () => {
@@ -90,4 +85,82 @@ it('receives live expiry separately from account snapshots', async () => {
   socket.send(JSON.stringify({ type: 'item', streamId: streams.get('account/watchExpiry'), value: 'session-expired' }))
   await vi.waitFor(() => { expect(expired).toHaveBeenCalledOnce() })
   stop()
+})
+
+/** A loopback Gateway stand-in that records each socket's opened streams. */
+async function streamHost() {
+  const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+  await once(server, 'listening')
+  onTestFinished(async () => {
+    for (const client of server.clients) client.terminate()
+    await new Promise<void>((resolve, reject) => { server.close((error) => { if (error) reject(error); else resolve() }) })
+  })
+  const address = server.address()
+  if (typeof address === 'string' || address === null) throw new Error('missing server address')
+  const connections: { socket: import('ws').WebSocket; streams: Map<string, string> }[] = []
+  server.on('connection', (socket) => {
+    const streams = new Map<string, string>()
+    connections.push({ socket, streams })
+    socket.on('message', (data) => {
+      if (!Buffer.isBuffer(data)) throw new Error('expected a Buffer WebSocket frame')
+      const frame = JSON.parse(data.toString('utf8')) as { endpoint: string; streamId: string }
+      streams.set(frame.endpoint, frame.streamId)
+    })
+  })
+  return { origin: `http://127.0.0.1:${String(address.port)}`, connections }
+}
+
+it('keeps the policy stream and stops reopening account streams a Host does not serve', async () => {
+  const host = await streamHost()
+  const listener = vi.fn()
+  const failed = vi.fn()
+  const onAnalyticsEnabledChanged = vi.fn()
+  const backend = desktopAccountBackend(host.origin, () => Promise.reject(new Error('unused')), () => Promise.resolve(''))
+  const stop = backend.watch(listener, failed, vi.fn(), onAnalyticsEnabledChanged)
+  onTestFinished(stop)
+  await vi.waitFor(() => { expect(host.connections[0]?.streams.size).toBe(3) })
+  const first = host.connections[0]!
+  for (const endpoint of ['account/watchExpiry', 'account/watch']) {
+    first.socket.send(JSON.stringify({ type: 'error', streamId: first.streams.get(endpoint),
+      error: { code: 'gateway/invocation-unavailable', message: 'no active Remote method exports this endpoint', details: {} } }))
+  }
+  first.socket.send(JSON.stringify({ type: 'item', streamId: first.streams.get('productAnalytics/watchPolicy'), value: true }))
+  await vi.waitFor(() => { expect(onAnalyticsEnabledChanged).toHaveBeenLastCalledWith(true) })
+  expect(failed).not.toHaveBeenCalled()
+  expect(host.connections).toHaveLength(1)
+  // A transport failure reconnects with the policy stream alone.
+  first.socket.terminate()
+  await vi.waitFor(() => { expect(host.connections[1]?.streams.size).toBe(1) }, { timeout: 5000 })
+  expect([...host.connections[1]!.streams.keys()]).toEqual(['productAnalytics/watchPolicy'])
+  expect(failed).toHaveBeenCalledOnce()
+  expect(listener).not.toHaveBeenCalled()
+})
+
+it('closes without reconnecting when nothing but the absent account streams was requested', async () => {
+  const host = await streamHost()
+  const failed = vi.fn()
+  const backend = desktopAccountBackend(host.origin, () => Promise.reject(new Error('unused')), () => Promise.resolve(''))
+  const stop = backend.watch(vi.fn(), failed, vi.fn())
+  onTestFinished(stop)
+  await vi.waitFor(() => { expect(host.connections[0]?.streams.size).toBe(2) })
+  const first = host.connections[0]!
+  const closed = once(first.socket, 'close')
+  first.socket.send(JSON.stringify({ type: 'error', streamId: first.streams.get('account/watch'),
+    error: { code: 'gateway/service-unavailable', message: 'active Service "account" is unavailable', details: {} } }))
+  await closed
+  await new Promise(resolve => setTimeout(resolve, 1200))
+  expect(host.connections).toHaveLength(1)
+  expect(failed).not.toHaveBeenCalled()
+})
+
+it('reconnects after an account stream failure the Host may recover from', async () => {
+  const host = await streamHost()
+  const backend = desktopAccountBackend(host.origin, () => Promise.reject(new Error('unused')), () => Promise.resolve(''))
+  const stop = backend.watch(vi.fn(), vi.fn(), vi.fn(), vi.fn())
+  onTestFinished(stop)
+  await vi.waitFor(() => { expect(host.connections[0]?.streams.size).toBe(3) })
+  const first = host.connections[0]!
+  first.socket.send(JSON.stringify({ type: 'error', streamId: first.streams.get('account/watch'),
+    error: { code: 'gateway/internal', message: 'account store failed', details: {} } }))
+  await vi.waitFor(() => { expect(host.connections[1]?.streams.size).toBe(3) }, { timeout: 5000 })
 })

@@ -1,1 +1,1 @@
-You have signed out of your account, please log in again.
+Your DeepSeek account sign-in has expired. Add an API key to continue.

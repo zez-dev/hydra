@@ -14,6 +14,7 @@ function operations(discoverModels: ModelsOperations['discoverModels']): ModelsO
     storeCredential: vi.fn(),
     removeCredential: vi.fn(),
     writeSettings: vi.fn(),
+    initializeDefaultModel: vi.fn(),
   }
 }
 

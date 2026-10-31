@@ -3307,10 +3307,10 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the normalized selection installed for the Session, without waiting for default persistence.',
       },
       {
-        signature: '@Remote async initializeDefaultModel(): Promise<void>',
-        description: 'Select the first available account model after login when no provider API key is configured.',
-        parameters: [],
-        returns: 'after saving the first available model or retaining the existing default.',
+        signature: '@Remote async initializeDefaultModel(provider: string): Promise<void>',
+        description: 'Save a provider\'s first available model as the default while the saved default is not in the available catalog. Onboarding calls it after storing that provider\'s credential.',
+        parameters: [{ name: 'provider', description: 'provider route whose first available model becomes the default.' }],
+        returns: 'after saving that model, or at once when the catalog lists the saved default.',
       },
       {
         signature: '@Remote(\'modelCatalog\') modelCatalog(): Promise<ModelCatalog>',
