@@ -197,7 +197,7 @@ describe('Python file sandbox', () => {
     expect(result.sandbox).toEqual({ mode: 'read-only', denied, enforcement: 'partial' })
   })
 
-  it.skipIf(!sandboxUsable)('boots under confinement with stdin EOF, fd-3 bindings, resource limits and a scrubbed environment', async () => {
+  it.skipIf(!sandboxUsable)('boots under confinement with stdin EOF, fd-3/fd-4 bindings, resource limits and a scrubbed environment', async () => {
     const { runtime } = await setup('read-only', { cpuSeconds: 7 })
     vi.stubEnv('DSH_PYTHON_TEST_SECRET', 'must-not-inherit')
     onTestFinished(() => { vi.unstubAllEnvs() })
@@ -245,9 +245,9 @@ describe('Python file sandbox', () => {
     { program: 'import os\nos._exit(152)', kind: 'worker-exit' },
   ])('distinguishes CPU exhaustion from a numeric exit behind a signal-mapping launcher: $kind', async ({ program, kind }) => {
     const { ctx, run } = await setup('read-only', { cpuSeconds: 1, maxWallMs: 30_000 })
-    // Linux bwrap converts a child's signal into a numeric exit; preserve fd 3
-    // and exercise that launcher behavior independently of the host platform.
-    const launcher = 'import subprocess,sys\nchild = subprocess.Popen(sys.argv[1:], pass_fds=(3,))\ncode = child.wait()\nsys.exit(128 - code if code < 0 else code)'
+    // Linux bwrap converts a child's signal into a numeric exit; preserve fds 3
+    // and 4 and exercise that launcher behavior independently of the host platform.
+    const launcher = 'import subprocess,sys\nchild = subprocess.Popen(sys.argv[1:], pass_fds=(3, 4))\ncode = child.wait()\nsys.exit(128 - code if code < 0 else code)'
     vi.spyOn(ctx.sandbox, 'confine').mockImplementation(async argv => confinement([
       argv[0]!, '-I', '-c', launcher, ...argv,
     ]))

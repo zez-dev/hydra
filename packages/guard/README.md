@@ -22,7 +22,7 @@ The `guard/` group keeps the agent loop productive by watching for two common fa
 <a id="packages"></a>
 ## Packages
 
-Two small plugins cover the two patterns; each README below explains when to keep, tune, or remove it.
+Each README below explains when to keep, tune, or remove its plugin.
 
 | Package | What it provides |
 |---|---|
@@ -31,6 +31,7 @@ Two small plugins cover the two patterns; each README below explains when to kee
 | [`spend-guard/`](spend-guard/README.md) | Pauses the goal or stops the turn when a session or daily token budget is crossed, with `/spend` totals |
 | [`timeout-policy/`](timeout-policy/README.md) | Times out tool calls that declare a limit, so the model gets a clear error instead of waiting forever |
 | [`command-gate/`](command-gate/README.md) | Classifies shell argv and refuses commands that destroy what no checkpoint can restore, with `/commands-gate` history |
+| [`evidence-guard/`](evidence-guard/README.md) | Adds an evidence standard to every system prompt and reviews a turn's partial reads, unchecked changes, and claims before it ends; ships disabled |
 
 -----
 

@@ -1110,7 +1110,7 @@ describe('optional model-free tool-result pruning', () => {
     expect(compact.calls).toHaveLength(0)
     expect(session.surface.nodes.at(-1)).toBe(unread)
     const messages = JSON.stringify(session.deriveMessages())
-    expect(messages).toContain('characters cut from the middle to save context')
+    expect(messages).toContain('characters cut from the middle later to save context')
     expect(messages).not.toContain('before you read them')
     expect(messages).toContain('U'.repeat(600))
   })
@@ -1130,7 +1130,7 @@ describe('optional model-free tool-result pruning', () => {
 
     expect(await compactIfNeeded(compact, session)).not.toBeNull()
     expect(compact.calls).toHaveLength(2)
-    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle to save context')
+    expect(summarizedText(compact.calls[0]!.input)).toContain('characters cut from the middle later to save context')
     expect(summarizedText(compact.calls[0]!.input)).not.toContain('result 1 '.repeat(300))
     // The last turn's result has no answer after it, and the summaries made room for it whole.
     const messages = JSON.stringify(session.deriveMessages())

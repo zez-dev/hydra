@@ -26,7 +26,7 @@ export interface ReadToolCaps {
   limit: number
   /** Maximum characters returned for a single line. */
   maxLineLength: number
-  /** Maximum bytes returned for selected file lines. */
+  /** Maximum bytes returned for selected file lines when no routed window is known. */
   maxBytes: number
   /** Files at or above this size stream; smaller files read whole into memory. */
   streamMinSize: number
@@ -34,7 +34,7 @@ export interface ReadToolCaps {
   windowShare?: ReadWindowShare
 }
 
-/** The `readContextFraction`, `readBytesPerToken`, and `readContextReserveTokens` config. */
+/** The `readContextFraction`, `readBytesPerToken`, `readContextReserveTokens`, and `readContextMaxBytes` config. */
 export interface ReadWindowShare {
   /** Fraction of the routed context window left after `reserveTokens` that one complete result may fill. */
   fraction: number
@@ -42,20 +42,33 @@ export interface ReadWindowShare {
   bytesPerToken: number
   /** Tokens of the routed window kept for the rest of the request before `fraction` applies. */
   reserveTokens: number
+  /** Maximum bytes returned for selected file lines when the routed window is known, in place of `ReadToolCaps.maxBytes`. */
+  maxBytes: number
+}
+
+/** The byte caps one call reads under when its routed window is known. */
+interface WindowCaps {
+  /** Whole bytes the complete result may fill, envelope and footer included. */
+  capBytes: number
+  /** Maximum bytes for the selected lines. */
+  maxBytes: number
 }
 
 /**
- * Resolve the byte cap a window share sets for one call, from the context window of the calling
- * session's latest routed request. A window no larger than the reserve gives a cap of 0.
+ * Resolve the byte caps a window share sets for one call, from the context window of the calling
+ * session's latest routed request. A window no larger than the reserve gives a result cap of 0.
  * @param share - the configured share.
  * @param contextWindow - the routed window in tokens; absent without an agent, before the first
  * request, or on a route that advertises none.
- * @returns whole bytes the complete result may fill, or `undefined` when no window is known.
+ * @returns the result and selected-line caps, or `undefined` when no window is known.
  */
-function resolveWindowCap(share: ReadWindowShare, contextWindow: number | undefined): number | undefined {
+function resolveWindowCaps(share: ReadWindowShare, contextWindow: number | undefined): WindowCaps | undefined {
   return contextWindow === undefined
     ? undefined
-    : Math.floor(Math.max(0, contextWindow - share.reserveTokens) * share.fraction * share.bytesPerToken)
+    : {
+      capBytes: Math.floor(Math.max(0, contextWindow - share.reserveTokens) * share.fraction * share.bytesPerToken),
+      maxBytes: share.maxBytes,
+    }
 }
 
 /** Validated `read` arguments after defaulting. */
@@ -180,18 +193,18 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
         ? await ctx.fs.streamText(target, exec.signal)
         : [await ctx.fs.readText(target, exec.signal)]
       const path = ctx.fs.processPath(target)
-      const windowCapBytes = caps.windowShare === undefined
+      const windowCaps = caps.windowShare === undefined
         ? undefined
-        : resolveWindowCap(caps.windowShare, exec.agent?.session.requestContext()?.contextWindow)
+        : resolveWindowCaps(caps.windowShare, exec.agent?.session.requestContext()?.contextWindow)
       const window = await buildWindow(
         chunks,
         {
           offset: input.offset,
           limit: input.limit,
           maxLineLength: caps.maxLineLength,
-          maxBytes: caps.maxBytes,
-          ...windowCapBytes === undefined ? {} : {
-            maxNumberedBytes: Math.max(0, windowCapBytes - windowCapReserveBytes(path, input.offset, windowCapBytes)),
+          maxBytes: windowCaps === undefined ? caps.maxBytes : windowCaps.maxBytes,
+          ...windowCaps === undefined ? {} : {
+            maxNumberedBytes: Math.max(0, windowCaps.capBytes - windowCapReserveBytes(path, input.offset, windowCaps.capBytes)),
           },
         },
         target.displayPath,
@@ -202,7 +215,7 @@ export function applyReadTool(ctx: Context, caps: ReadToolCaps): void {
         offset: input.offset,
         lines: window.lines,
         totalLines: window.totalLines,
-        ...windowCapBytes !== undefined && window.truncatedByNumberedBytes ? { windowCapBytes } : {},
+        ...windowCaps !== undefined && window.truncatedByNumberedBytes ? { windowCapBytes: windowCaps.capBytes } : {},
       }
       // Record the present observation (a no-op when no policy plugin listens). The
       // read already succeeded; an fs/observed listener is contractually a

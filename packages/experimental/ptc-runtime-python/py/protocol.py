@@ -1,8 +1,8 @@
 """Wire protocol vocabulary for the Python side of dsh-ptc-runtime-python.
 
-Mirrors ``src/protocol.ts``. Frames travel on fd 3 as JSON-lines (one JSON
-object per line). The host validates every inbound frame; this side trusts
-host replies.
+Mirrors ``src/protocol.ts``. Frames travel as JSON-lines (one JSON object per
+line): this side writes on fd 3 and reads the host's frames on fd 4. The host
+validates every inbound frame; this side trusts host replies.
 
 The wire uses the JSON key ``global`` (a Python keyword), so the frame
 ``TypedDict``s that carry it are declared with the functional syntax rather than
@@ -16,10 +16,12 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict, Union
 
-# The protocol fd from the child's perspective. Node passes
-# ``stdio: [pipe, pipe, pipe, pipe]`` so the fourth entry (fd 3) is the
-# framed-JSON channel; stdout/stderr stay clear for the program's own output.
-PROTOCOL_FD = 3
+# The protocol fds from the child's perspective. Node passes five ``pipe``
+# stdio entries: the child writes its frames on fd 3 and reads the host's on
+# fd 4, so a host write failing after this process exits cannot discard the
+# frames it already wrote. stdout/stderr stay clear for the program's output.
+CHILD_TO_HOST_FD = 3
+HOST_TO_CHILD_FD = 4
 
 
 class ErrorClass(TypedDict):
@@ -43,7 +45,7 @@ class Namespace(_NamespaceRequired, total=False):
 
 
 class BootMessage(TypedDict):
-    """Host → child, first frame on fd 3. Carries every cap and the namespaces."""
+    """Host → child, first frame on fd 4. Carries every cap and the namespaces."""
 
     type: Literal["boot"]
     cpuSeconds: int

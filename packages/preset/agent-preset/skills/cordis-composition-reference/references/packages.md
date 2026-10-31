@@ -295,6 +295,7 @@ Every package below exports a Cordis plugin that a bundle patch can name in a Lo
 |---|---|---|
 | `@deepseek-ai/dsh-auto-continue` | yes | Auto-continue guard plugin: steers a continuation when a turn stops at the output-token limit |
 | `@deepseek-ai/dsh-command-gate` | yes | Command-gate guard plugin: classifies shell argv and blocks destructive commands before they execute |
+| `@deepseek-ai/dsh-evidence-guard` | no | Evidence guard plugins: an evidence standard in every system prompt and an end-of-turn review of partial reads, unchecked changes, and unverified claims |
 | `@deepseek-ai/dsh-repeat-tool-reminder` | yes | Repeat-tool-call guard plugin: advisory reminders when an agent loops on identical tool calls |
 | `@deepseek-ai/dsh-spend-guard` | yes | Per-session and per-day token budgets for DeepSeek Harness: pause the goal or stop the turn when a budget is crossed, /spend totals, and optional notifications |
 | `@deepseek-ai/dsh-tool-call-timeout-policy` | no | Tool-call timeout policy: a tools/execute wrapper that arms a per-tool deadline on exec.signal and returns TOOL_TIMEOUT when it wins |

@@ -69,8 +69,9 @@ All keys are optional. The `read`, `readImage`, `write`, and `edit` switches def
 | `readContextFraction` | unset | Fraction, above 0 and at most 1, of the routed model's context window left after `readContextReserveTokens` that one complete `read` result may fill; set it with `readBytesPerToken` |
 | `readBytesPerToken` | unset | Bytes of `read` result assumed per token of the routed model, used to convert `readContextFraction` to bytes; set it with `readContextFraction` |
 | `readContextReserveTokens` | `0` | Tokens of the routed context window kept for the rest of the request before `readContextFraction` applies; set it only with the two share fields |
+| `readContextMaxBytes` | `readMaxBytes` | Byte cap on one `read` call's selected lines when the routed context window is known, in place of `readMaxBytes`; set it only with the two share fields |
 
-With both share fields set, a `read` whose calling session's latest request was routed with a known context window returns at most `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` bytes, envelope and footer included, and `readMaxBytes` still applies. The first requested line is returned even when it alone exceeds that cap, so every read makes progress; a window no larger than the reserve returns one line per read. A call without an agent, before the session's first request, or on a route that advertises no window uses `readMaxBytes` alone. Setting one share field without the other, a reserve without them, a fraction outside that range, a non-positive or infinite `readBytesPerToken`, or a negative or fractional reserve fails at load.
+With both share fields set, a `read` whose calling session's latest request was routed with a known context window returns at most `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` bytes, envelope and footer included, and its selected lines are capped by `readContextMaxBytes`, which defaults to `readMaxBytes`. The first requested line is returned even when it alone exceeds that cap, so every read makes progress; a window no larger than the reserve returns one line per read. A call without an agent, before the session's first request, or on a route that advertises no window uses `readMaxBytes` alone. Setting one share field without the other, a reserve or `readContextMaxBytes` without them, a fraction outside that range, a non-positive or infinite `readBytesPerToken`, a negative or fractional reserve, or a `readContextMaxBytes` that is not a positive integer fails at load.
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-tool-fs) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -197,7 +198,7 @@ A successful read is exactly `<path><resolvedPath></path>`, newline, `<type>file
 
 #### Token effect
 
-Read output is capped by `readLimit`, `readMaxLineLength`, and `readMaxBytes`, and with the share fields set, by the routed window's share, so one fresh result leaves room for the rest of the request on a small window; a capped read needs another call to continue. The retained call and result are resent until compaction.
+Read output is capped by `readLimit`, `readMaxLineLength`, and `readMaxBytes`, and with the share fields set, by the routed window's share, with `readContextMaxBytes` in place of `readMaxBytes` when the window is known, so one fresh result leaves room for the rest of the request on a small window; a capped read needs another call to continue, and every call resends the whole cached context, so on a large window a larger `readContextMaxBytes` reads a long file in fewer, larger results. The retained call and result are resent until compaction.
 
 #### KV Cache effect
 

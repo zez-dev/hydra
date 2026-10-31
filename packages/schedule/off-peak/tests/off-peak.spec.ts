@@ -189,25 +189,42 @@ async function settle(ms = 20): Promise<void> {
   await new Promise((resolve) => { setImmediate(resolve) })
 }
 
-/** Wait until the durable queue reaches an expected state. */
-async function waitForQueue(ctx: Context, predicate: (entries: offPeak.OffPeakEntry[]) => boolean): Promise<offPeak.OffPeakEntry[]> {
-  // A drained round runs a real turn through the loop, so the budget is
-  // generous and a miss throws: returning the last state would assert against
-  // stale data and read as an unrelated failure.
-  for (let attempt = 0; attempt < 2000; attempt++) {
-    if (predicate(ctx.offPeak.list())) return ctx.offPeak.list()
+/**
+ * Real time one wait may take. A step advances the fake clock by 10 ms and
+ * yields the event loop once, which can take far less real time than the
+ * filesystem writes the durable queue waits on, so a count of steps is no
+ * deadline. It stays below Vitest's 5 s default test timeout, so a miss
+ * reports the last state instead of a timeout.
+ */
+const WAIT_BUDGET_MS = 4_000
+
+/**
+ * Read until `done` accepts the value, advancing the fake clock between reads.
+ * A miss throws: returning the last state would assert against stale data and
+ * read as an unrelated failure.
+ * @param read - the state to observe.
+ * @param done - whether the observed value is the awaited one.
+ * @param miss - the failure message for the last observed value.
+ * @returns the accepted value.
+ */
+async function pollUntil<T>(read: () => T, done: (value: T) => boolean, miss: (value: T) => string): Promise<T> {
+  const deadline = performance.now() + WAIT_BUDGET_MS
+  for (;;) {
+    const value = read()
+    if (done(value)) return value
+    if (performance.now() > deadline) throw new Error(miss(value))
     await settle(10)
   }
-  throw new Error(`off-peak queue never satisfied the predicate; last state ${JSON.stringify(ctx.offPeak.list())}`)
+}
+
+/** Wait until the durable queue reaches an expected state. */
+async function waitForQueue(ctx: Context, predicate: (entries: offPeak.OffPeakEntry[]) => boolean): Promise<offPeak.OffPeakEntry[]> {
+  return pollUntil(() => ctx.offPeak.list(), predicate, entries => `off-peak queue never satisfied the predicate; last state ${JSON.stringify(entries)}`)
 }
 
 /** Wait until the model has received at least `count` requests. */
 async function waitForRequests(adapter: ScriptedAdapter, count: number): Promise<void> {
-  for (let attempt = 0; attempt < 2000; attempt++) {
-    if (adapter.requests.length >= count) return
-    await settle(10)
-  }
-  throw new Error(`the model received ${String(adapter.requests.length)} requests, expected ${String(count)}`)
+  await pollUntil(() => adapter.requests.length, received => received >= count, received => `the model received ${String(received)} requests, expected ${String(count)}`)
 }
 
 async function waitForGoal(
@@ -215,20 +232,12 @@ async function waitForGoal(
   agent: Agent,
   predicate: (goal: GoalView | undefined) => boolean,
 ): Promise<GoalView | undefined> {
-  for (let attempt = 0; attempt < 2000; attempt++) {
-    if (predicate(ctx.goals.get(agent))) return ctx.goals.get(agent)
-    await settle(10)
-  }
-  throw new Error(`goal never satisfied the predicate; last phase ${String(ctx.goals.get(agent)?.phase)}`)
+  return pollUntil(() => ctx.goals.get(agent), predicate, goal => `goal never satisfied the predicate; last phase ${String(goal?.phase)}`)
 }
 
 /** Wait until `check` holds, advancing the fake clock in small steps. */
 async function waitUntil(check: () => boolean, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 2000; attempt++) {
-    if (check()) return
-    await settle(10)
-  }
-  throw new Error(`never happened: ${what}`)
+  await pollUntil(check, held => held, () => `never happened: ${what}`)
 }
 
 /** How each of the session's turns ended, in order. */

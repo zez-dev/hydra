@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Revue des preuves",
+    "description": "Avant la fin d'un tour, demande au modèle de lire ce qu'il a sauté, de vérifier les fichiers modifiés et ses affirmations, puis de redonner sa réponse finale."
+  }
+}
