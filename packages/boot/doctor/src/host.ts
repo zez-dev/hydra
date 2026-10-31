@@ -50,8 +50,8 @@ export function nodeEnvironment(): DoctorEnvironment {
     platform: process.platform,
     arch: process.arch,
     nodeVersion: process.version,
-    // Every workspace package carries the release version, so this package's manifest names the harness release.
-    harnessVersion: String((createRequire(import.meta.url)('../package.json') as { version?: unknown }).version),
+    // Every workspace package carries Hydra's release version, so this package's manifest names it.
+    hydraVersion: String((createRequire(import.meta.url)('../package.json') as { version?: unknown }).version),
     env: process.env,
     exists: path => existsSync(path),
     writable: (path) => {

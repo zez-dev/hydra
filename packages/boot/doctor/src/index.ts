@@ -35,7 +35,8 @@ import type {
 
 export type * from './types.ts'
 export {
-  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError, FIXES, HYDRA_VERSION, renderReport,
+  checkGit, checkHome, checkNativeAddon, checkSandbox, checkVersion, checkWorkspace, classifyProbeError,
+  DEEPSEEK_HARNESS_VERSION, FIXES, renderReport,
   summarize, WORKSPACE_FOLDERS,
 } from './checks.ts'
 

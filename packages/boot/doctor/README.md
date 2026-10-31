@@ -34,7 +34,7 @@ The report has ten sections; `skills` appears only when `dsh-skill-lock` is moun
 
 | Section | Checks |
 |---|---|
-| `about` | Always first: the Hydra release (`HYDRA_VERSION`), the DeepSeek Harness release it is based on, the Node.js version, and the platform, so a pasted report identifies the build |
+| `about` | Always first: the Hydra release (the version every Hydra package manifest carries), the DeepSeek Harness release it is based on (`DEEPSEEK_HARNESS_VERSION`), the Node.js version, and the platform, so a pasted report identifies the build |
 | `credentials` | `DEEPSEEK_API_KEY` and the `apiKeyEnv` reference of each provider on every enabled `dsh-llm-pi-ai` Loader row resolve, through `ctx.credentials` when mounted and the process environment otherwise; with `--probe`, one live request. The key itself is never read into the report |
 | `tools` | `argumentCoercion: lenient` and `nullableParameters: flat` on the tools row, and `requireDescription: false` on the shell tools |
 | `sandbox` | On Linux, the bubblewrap probe and `kernel.apparmor_restrict_unprivileged_userns`, plus whether the Landlock runner binary is present |

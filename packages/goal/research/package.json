@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-research",
   "description": "Research goals with a discovery journal for DeepSeek Harness: /research creates a durable goal over a per-slug journal file, the journal tool records breakthroughs and experiments, and the journal is recalled into every request so nothing is lost between sessions",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },

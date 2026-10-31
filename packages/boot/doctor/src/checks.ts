@@ -54,8 +54,8 @@ export function firstLine(text: string): string {
   return text.replace(/\n.*/s, '')
 }
 
-/** Hydra's release version; it changes with each release tag. */
-export const HYDRA_VERSION = '0.1.0'
+/** The DeepSeek Harness release Hydra is based on; taking an upstream release sets it. */
+export const DEEPSEEK_HARNESS_VERSION = '0.2.2-alpha.2'
 
 /**
  * The version row, so a pasted report names the Hydra release, the DeepSeek
@@ -64,7 +64,7 @@ export const HYDRA_VERSION = '0.1.0'
  * @returns one `ok` row.
  */
 export function checkVersion(env: DoctorEnvironment): DoctorRow[] {
-  const detail = `Hydra ${HYDRA_VERSION} on DeepSeek Harness ${env.harnessVersion}, Node ${env.nodeVersion}, ${env.platform}-${env.arch}`
+  const detail = `Hydra ${env.hydraVersion} on DeepSeek Harness ${DEEPSEEK_HARNESS_VERSION}, Node ${env.nodeVersion}, ${env.platform}-${env.arch}`
   return [row('about', 'version', 'ok', detail)]
 }
 

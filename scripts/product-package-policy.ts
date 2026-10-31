@@ -39,6 +39,7 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/client/ui-message-feedback': { category: 'optional', reason: 'Message feedback, which Hydra\'s Web and desktop app ship disabled; a profile patch enables it.' },
   'packages/client/ui-settings-account': { category: 'optional', reason: 'DeepSeek account settings and menu, which Hydra\'s Web and desktop app ship disabled; a profile patch enables it.' },
   'packages/client/ui-settings-session-log': { category: 'optional', reason: 'Switch for the DeepSeek Session-log upload, which Hydra\'s Web and desktop app ship disabled.' },
+  'packages/guard/evidence-guard': { category: 'optional', reason: 'Accuracy guard plugins, which dsh-base ships disabled; a profile patch enables them.' },
   'packages/sdk/client': { category: 'sdk', reason: 'Published TypeScript embedding client runs in the consumer process.' },
   'packages/typert/generator': { category: 'build', reason: 'Build-time generation of type metadata.' },
   'packages/test-support/agent-loop-testkit': { category: 'test', reason: 'Published agent-loop test harness.' },

@@ -172,7 +172,7 @@ function quietHost(cwd: string): DoctorEnvironment {
     platform: 'darwin',
     arch: 'arm64',
     nodeVersion: 'v24.0.0',
-    harnessVersion: '0.1.6-alpha.2',
+    hydraVersion: '0.3.0',
     env: { DSH_HOME: cwd },
     exists: () => true,
     writable: () => true,

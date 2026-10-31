@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-goal-evaluator",
   "description": "Independent model evaluation of a model-declared goal completion: denies update_goal complete with reasons when the evidence does not show the objective achieved",
-  "version": "0.2.2-alpha.2",
+  "version": "0.3.0",
   "publishConfig": {
     "access": "public"
   },
