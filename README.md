@@ -67,8 +67,9 @@ Hydra's Web and desktop app ship these upstream features disabled, because they 
 | The DeepSeek account settings section and account menu | `ui-settings-account` |
 | Like/Dislike and `/feedback`, whose submission also released a Session-log slice to DeepSeek's telemetry collector | `message-feedback`, `command-feedback`, `ui-message-feedback` |
 | Session-log upload with requests to the official DeepSeek API, and its Settings switch | `session-log-deepseek`, `ui-settings-session-log` |
+| Desktop usage analytics, which upstream sends to DeepSeek's telemetry collector with no user-facing control | none: `product-analytics` stays loaded with `enabled: false` |
 
-DeepSeek API keys still work through `llm-deepseek`. The CLI and SDK profiles keep these rows, and there the upload goes only with requests to DeepSeek's official API. A profile patch row with the row's `id` and `disabled: false` turns a feature back on.
+DeepSeek API keys still work through `llm-deepseek`. The CLI and SDK profiles keep these rows, and there the upload goes only with requests to DeepSeek's official API. A profile patch row with the row's `id` and `disabled: false` turns a feature back on; for analytics, the patch row restates the `product-analytics` row's `config` with `enabled: true`.
 
 ## Developer preview
 

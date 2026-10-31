@@ -1,5 +1,5 @@
 import OTel from '@deepseek-ai/dsh-otel'
-/** Desktop-only collector policy and bounded shutdown against an unresponsive receiver. */
+/** Desktop-only collector policy, off by default, and bounded shutdown against an unresponsive receiver. */
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +12,7 @@ import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
 
 afterEach(() => { vi.unstubAllEnvs() })
 
-it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop launch: %s', async (profile) => {
+it.each(['desktop', 'web'])('limits collection, which starts off, and its shutdown to the Desktop launch: %s', async (profile) => {
   const received = Promise.withResolvers<undefined>()
   const server = createServer((req) => { req.resume(); req.once('end', () => { received.resolve(undefined) }) })
   server.listen(0, '127.0.0.1')
@@ -55,9 +55,12 @@ it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop l
   const telemetryFiber = entry.fiber
   const lifetime = new AbortController()
   onTestFinished(() => { lifetime.abort() })
+  const emit = vi.spyOn(ctx.productTelemetry, 'emit')
   const policy = analytics.watchPolicy(lifetime.signal)[Symbol.asyncIterator]()
-  expect(await policy.next()).toEqual({ value: true, done: false })
-  for (const enabled of [false, true]) {
+  expect(await policy.next()).toEqual({ value: false, done: false })
+  await analytics.report({ eventName: 'desktop_app_launch', timestamp: 1, attributes: {} })
+  expect(identity).not.toHaveBeenCalled()
+  for (const enabled of [true, false, true]) {
     const changed = policy.next()
     await ctx.loader.root.update(entries.map(row => row.id === 'product-analytics'
       ? { ...row, config: { ...row.config as Record<string, unknown>, enabled } } : row))
@@ -70,7 +73,6 @@ it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop l
       expect(identity).not.toHaveBeenCalled()
     }
   }
-  const emit = vi.spyOn(ctx.productTelemetry, 'emit')
   await analytics.report({ eventName: 'desktop_app_launch', timestamp: 1, attributes: {} })
   expect(emit).toHaveBeenCalledOnce()
   const attributes = emit.mock.calls[0]?.[0].attributes
