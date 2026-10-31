@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Evidence standard",
+    "description": "Ask every model to read files in full, back each claim with the file and line or the command output it came from, and say when something is not verified."
+  }
+}

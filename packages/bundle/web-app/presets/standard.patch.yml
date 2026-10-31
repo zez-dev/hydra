@@ -35,6 +35,7 @@
               readContextFraction: 0.5
               readBytesPerToken: 1.7
               readContextReserveTokens: 15000
+              readContextMaxBytes: 1048576
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
             config:

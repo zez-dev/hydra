@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Exigence de preuves",
+    "description": "Demande à chaque modèle de lire les fichiers en entier, d'étayer chaque affirmation par le fichier et la ligne ou la sortie de commande d'où elle vient, et de signaler ce qui n'est pas vérifié."
+  }
+}

@@ -122,13 +122,15 @@ describe('tool-result pruning configuration', () => {
   })
 
   it('leaves room for the longest marker, which names an unread span', () => {
+    expect(codePointLength(pruneMarker(Number.MAX_SAFE_INTEGER, true))).toBeLessThan(LONGEST)
     expect(resolveConfig({ thresholdChars: 7 + LONGEST, headChars: 4, tailChars: 3 }).thresholdChars).toBe(7 + LONGEST)
     expect(() => resolveConfig({ thresholdChars: 6 + LONGEST, headChars: 4, tailChars: 3 }))
       .toThrow(/headChars \+ marker \+ tailChars/)
   })
 
-  it('names the removed amount and, for a span the model has not read, how to see it', () => {
-    expect(pruneMarker(25, true)).toBe('\n\n[... 25 characters cut from the middle to save context; you read them in full earlier ...]\n\n')
+  it('names the removed amount, that a read span was complete when read, and how to see an unread span', () => {
+    expect(pruneMarker(25, true)).toBe('\n\n[... 25 characters cut from the middle later to save context; '
+      + 'the result was complete when you read it ...]\n\n')
     expect(pruneMarker(25, false)).toBe('\n\n[... 25 characters cut from the middle before you read them; '
       + 'repeat the call with a narrower range to see them ...]\n\n')
   })

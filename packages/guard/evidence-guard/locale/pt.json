@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Padrão de evidências",
+    "description": "Pede a cada modelo que leia os arquivos por completo, apoie cada afirmação no arquivo e na linha ou na saída do comando de origem e diga quando algo não foi verificado."
+  }
+}

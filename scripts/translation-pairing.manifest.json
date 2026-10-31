@@ -26,6 +26,7 @@
     "packages/goal/research/README.md",
     "packages/guard/auto-continue/README.md",
     "packages/guard/command-gate/README.md",
+    "packages/guard/evidence-guard/README.md",
     "packages/guard/spend-guard/README.md",
     "packages/learning/README.md",
     "packages/learning/learning/README.md",

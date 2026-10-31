@@ -1,0 +1,63 @@
+{
+  "name": "@deepseek-ai/dsh-evidence-guard",
+  "description": "Evidence guard plugins: an evidence standard in every system prompt and an end-of-turn review of partial reads, unchecked changes, and unverified claims",
+  "version": "0.2.2-alpha.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/guard/evidence-guard"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./review": {
+      "types": "./lib/types/review.d.ts",
+      "default": "./lib/review.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./review/locale/*.json": "./locale/review/*.json"
+  },
+  "files": [
+    "locale/*.json",
+    "locale/review/*.json",
+    "lib/index.js",
+    "lib/review.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:~"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/dsh-agent": "workspace:*",
+    "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/dsh-system-prompt": "workspace:*",
+    "@deepseek-ai/dsh-tool-executor-ptc": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:~",
+    "@deepseek-ai/cordis-plugin-include": "workspace:~",
+    "@deepseek-ai/cordis-plugin-loader": "workspace:~",
+    "@deepseek-ai/dsh-agent": "workspace:*",
+    "@deepseek-ai/dsh-agent-loop": "workspace:*",
+    "@deepseek-ai/dsh-agent-loop-testkit": "workspace:*",
+    "@deepseek-ai/dsh-llm": "workspace:*",
+    "@deepseek-ai/dsh-session": "workspace:*",
+    "@deepseek-ai/dsh-system-prompt": "workspace:*",
+    "@deepseek-ai/dsh-tool-executor-ptc": "workspace:*",
+    "@deepseek-ai/dsh-tools": "workspace:*"
+  }
+}

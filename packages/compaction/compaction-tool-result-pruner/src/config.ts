@@ -5,15 +5,17 @@ import type { ResolvedConfig, ToolResultPruneConfig } from './types.ts'
 
 /**
  * The marker substituted for a removed middle span. It names the amount
- * removed and says whether the model read the span in full before the cut;
- * for a result no model request has carried, it says how to see the span.
+ * removed; for a result a model request already carried, it says the cut came
+ * after that request and the result it read was complete, and for one no
+ * request has carried, it says how to see the span. The unread marker is the
+ * longer of the two, which the budget check in {@link resolveConfig} relies on.
  * @param removedChars - Unicode code points removed.
  * @param read - whether a model request already carried the original result.
  * @returns the marker text between blank lines.
  */
 export function pruneMarker(removedChars: number, read: boolean): string {
   return read
-    ? `\n\n[... ${removedChars} characters cut from the middle to save context; you read them in full earlier ...]\n\n`
+    ? `\n\n[... ${removedChars} characters cut from the middle later to save context; the result was complete when you read it ...]\n\n`
     : `\n\n[... ${removedChars} characters cut from the middle before you read them; `
       + 'repeat the call with a narrower range to see them ...]\n\n'
 }

@@ -113,7 +113,7 @@ Read these pages when the package-level contract is not enough; they move from t
 
 #### What the model sees
 
-Once a compaction trigger qualifies, future requests see the retained head, a marker, and the retained tail in place of the removed text. For a result the model has read, the marker is `\n\n[... N characters cut from the middle to save context; you read them in full earlier ...]\n\n`; for one it has not read, it is `\n\n[... N characters cut from the middle before you read them; repeat the call with a narrower range to see them ...]\n\n`, where `N` is the number of code points cut. Rich blocks keep their order. The model does not see a second copy of the original.
+Once a compaction trigger qualifies, future requests see the retained head, a marker, and the retained tail in place of the removed text. For a result the model has read, the marker is `\n\n[... N characters cut from the middle later to save context; the result was complete when you read it ...]\n\n`; for one it has not read, it is `\n\n[... N characters cut from the middle before you read them; repeat the call with a narrower range to see them ...]\n\n`, where `N` is the number of code points cut. Rich blocks keep their order. The model does not see a second copy of the original.
 
 #### Token effect
 

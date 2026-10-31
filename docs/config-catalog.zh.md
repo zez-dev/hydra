@@ -4524,7 +4524,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-system-prompt`
 
-- `source`: [`packages/core/system-prompt/src/index.ts:263`](../packages/core/system-prompt/src/index.ts)
+- `source`: [`packages/core/system-prompt/src/index.ts:264`](../packages/core/system-prompt/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config: the deployment-authored fragment of the system prompt (see {@link Config.personaPrefix} for its contract). */
@@ -4802,6 +4802,12 @@ export interface Config {
    * before `readContextFraction` applies; set it only with the share fields. Defaults to 0.
    */
   readContextReserveTokens?: number
+  /**
+   * Maximum bytes returned for the selected lines of one `read` call whose routed context window
+   * is known, in place of `readMaxBytes`; a call with no known window keeps `readMaxBytes`. Set it
+   * only with the share fields. Defaults to `readMaxBytes`.
+   */
+  readContextMaxBytes?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-fs -->
@@ -5772,6 +5778,7 @@ export interface Config {
 | `@deepseek-ai/dsh-cua` | — | [`packages/experimental/cua/src/index.ts`](../packages/experimental/cua/src/index.ts) |
 | `@deepseek-ai/dsh-deepseek-llm-api-extensions` | — | [`packages/llm/deepseek-llm-api-extensions/src/index.ts`](../packages/llm/deepseek-llm-api-extensions/src/index.ts) |
 | `@deepseek-ai/dsh-deliverable-file-references` | `systemPrompt` | [`packages/deliverables/deliverable-file-references/src/index.ts`](../packages/deliverables/deliverable-file-references/src/index.ts) |
+| `@deepseek-ai/dsh-evidence-guard` | `systemPrompt` | [`packages/guard/evidence-guard/src/index.ts`](../packages/guard/evidence-guard/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-auto-review` | `approval` · `llm` · `permissionPresets` · `sessions` · `tools` · `workingDirectory` | [`packages/experimental/auto-review/src/index.ts`](../packages/experimental/auto-review/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-client-ui-agent-team` | — | [`packages/experimental/client-ui-agent-team/src/index.ts`](../packages/experimental/client-ui-agent-team/src/index.ts) |
 | `@deepseek-ai/dsh-experimental-client-ui-claude-code-mods` | — | [`packages/experimental/client-ui-claude-code-mods/src/index.ts`](../packages/experimental/client-ui-claude-code-mods/src/index.ts) |

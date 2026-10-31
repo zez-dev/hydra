@@ -69,8 +69,9 @@ kind: "package-reference"
 | `readContextFraction` | 未设置 | 路由模型上下文窗口扣除 `readContextReserveTokens` 后，一次完整 `read` 结果可占用的比例，大于 0 且至多为 1；须与 `readBytesPerToken` 一起设置 |
 | `readBytesPerToken` | 未设置 | 按路由模型每个 token 假定的 `read` 结果字节数，用于把 `readContextFraction` 换算为字节；须与 `readContextFraction` 一起设置 |
 | `readContextReserveTokens` | `0` | 在 `readContextFraction` 生效前，为请求其余部分保留的路由上下文窗口 token 数；只能与两个份额字段一起设置 |
+| `readContextMaxBytes` | `readMaxBytes` | 路由上下文窗口已知时，一次 `read` 调用所选行的字节上限，取代 `readMaxBytes`；只能与两个份额字段一起设置 |
 
-同时设置两个份额字段后，如果调用会话最近一次请求的路由带有已知上下文窗口，`read` 最多返回 `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` 字节（含信封与 footer），`readMaxBytes` 仍然生效。请求的第一行即使单独超过该上限也会返回，因此每次读取都有进展；窗口不大于保留量时，每次读取返回一行。没有 agent 的调用、会话首次请求之前的调用，或路由未声明窗口时，只使用 `readMaxBytes`。只设置其中一个份额字段、未设置份额字段却设置保留量、比例超出该范围、`readBytesPerToken` 非正数或无穷大，或保留量为负数或小数时，加载失败。
+同时设置两个份额字段后，如果调用会话最近一次请求的路由带有已知上下文窗口，`read` 最多返回 `floor(max(0, contextWindow − readContextReserveTokens) × readContextFraction × readBytesPerToken)` 字节（含信封与 footer），所选行的字节上限为 `readContextMaxBytes`，默认等于 `readMaxBytes`。请求的第一行即使单独超过该上限也会返回，因此每次读取都有进展；窗口不大于保留量时，每次读取返回一行。没有 agent 的调用、会话首次请求之前的调用，或路由未声明窗口时，只使用 `readMaxBytes`。只设置其中一个份额字段、未设置份额字段却设置保留量或 `readContextMaxBytes`、比例超出该范围、`readBytesPerToken` 非正数或无穷大、保留量为负数或小数，或 `readContextMaxBytes` 不是正整数时，加载失败。
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-fs)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -197,7 +198,7 @@ Read a file before editing it (the default fs-observation-policy requires it), u
 
 #### Token 影响
 
-读取输出受 `readLimit`、`readMaxLineLength` 与 `readMaxBytes` 限制；设置份额字段后还受路由窗口份额限制，因此在小窗口上一个新结果会为请求的其余部分留出空间；被截断的读取需要再调用一次才能继续。保留的调用与结果会反复发送，直到上下文压缩（compaction）。
+读取输出受 `readLimit`、`readMaxLineLength` 与 `readMaxBytes` 限制；设置份额字段后还受路由窗口份额限制，窗口已知时以 `readContextMaxBytes` 取代 `readMaxBytes`，因此在小窗口上一个新结果会为请求的其余部分留出空间；被截断的读取需要再调用一次才能继续，而每次调用都会重发整个已缓存的上下文，因此在大窗口上，较大的 `readContextMaxBytes` 能以更少、更大的结果读完长文件。保留的调用与结果会反复发送，直到上下文压缩（compaction）。
 
 #### KV Cache 影响
 
