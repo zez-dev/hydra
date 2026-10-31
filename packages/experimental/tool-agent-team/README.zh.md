@@ -61,11 +61,11 @@ kind: "package-reference"
 - **查看与等待**——`list_agents` 返回各成员的 `target` 与可用状态；`wait_agent` 等待下一次团队变化；`interrupt_agent` 停止 teammate 的当前轮次（仅限 Lead）。
 - **管理任务板**——`team_task_create`、`team_task_list`、`team_task_get` 与 `team_task_update` 添加、浏览、读取与更新共享任务。
 
-创建和列表结果使用 `target` 标识成员，不包含成员 Session ID。可将该值用于消息和中断调用，或任务工具的 `owner` 参数；任务的 `ownerName` 使用相同值。`inactive` 表示没有轮次在执行，包括已加载和需要恢复的成员；它不表示任务完成或结果。`provisioning` 与 `failed` 描述成员创建状态。任何成员都可以给任何其他成员发消息并使用任务板；只有 Lead 可以创建与中断 teammate。任务更新保留领域的 owner 与 revision 校验，因此过期的编辑会被拒绝，而不是覆盖更新的成果。
+创建和列表结果使用 `target` 标识成员，不包含成员 Session ID。可将该值用于消息和中断调用，或任务工具的 `owner` 参数；任务的 `ownerName` 使用相同值。`inactive` 表示没有轮次在执行，包括已加载和需要恢复的成员；它不表示任务完成或结果。`provisioning` 与 `failed` 描述成员创建状态。`waiting` 只在 Team [轮流工作](../agent-team/README.zh.md#taking-turns)时出现：该 teammate 有消息，轮到它时才开始工作。任何成员都可以给任何其他成员发消息并使用任务板；只有 Lead 可以创建与中断 teammate。任务更新保留领域的 owner 与 revision 校验，因此过期的编辑会被拒绝，而不是覆盖更新的成果。
 
 ### 成功与失败的表现
 
-`send_message` 在收件箱接收消息后返回 `{ "sent": true }`，不暴露消息 ID。成功不表示接收方已处理消息，也不保证同步刷新到存储；发送失败会作为工具错误报告。当没有其他成员 running 或 provisioning 时，`wait_agent` 会立即返回 `noProgress`，提示调用方先唤醒 teammate；否则它会等待下一次变化，调用方随后重新读取状态。基于过期 revision 的任务编辑会被拒绝，而不是覆盖更新的成果。
+`send_message` 在收件箱接收消息后返回 `{ "sent": true }`，不暴露消息 ID。成功不表示接收方已处理消息，也不保证同步刷新到存储；发送失败会作为工具错误报告。当没有其他成员 running、provisioning 或 waiting 时，`wait_agent` 会立即返回 `noProgress`，提示调用方先唤醒 teammate；否则它会等待下一次变化，调用方随后重新读取状态。Team 轮流工作时，正在工作的 teammate 调用 `wait_agent` 会把轮次交给下一个等待中的 teammate，并在轮次回到它之后返回。基于过期 revision 的任务编辑会被拒绝，而不是覆盖更新的成果。
 
 -----
 
@@ -91,11 +91,11 @@ kind: "package-reference"
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 插件入口：配置、固定策略文本与九个 scoped 工具注册 |
+| [`src/index.ts`](src/index.ts) | 插件入口：配置、策略文本与九个 scoped 工具注册 |
 
 ### 策略与工具
 
-member scope 上的一个 `team:policy` 段落说明共享的协作规则；固定文本与九个工具注册都声明在 [`src/index.ts`](src/index.ts)。九个工具 schema 注册在发布时被识别为 Team member 的 scope 中。与旧全局 continuable-subagent 控件同名的 scoped 注册只会为团队成员覆盖这些全局控件。
+member scope 上的一个 `team:policy` 段落说明共享的协作规则；文本与九个工具注册都声明在 [`src/index.ts`](src/index.ts)。服务的 `takeTurns` 设置在每个 member scope 中选择一次策略以及 `list_agents` 和 `wait_agent` 的描述；只有轮流工作的 Team 会看到轮流文本。九个工具 schema 注册在发布时被识别为 Team member 的 scope 中。与旧全局 continuable-subagent 控件同名的 scoped 注册只会为团队成员覆盖这些全局控件。
 
 ### 按作用域注册与拆除
 
@@ -124,11 +124,17 @@ member scope 上的一个 `team:policy` 段落说明共享的协作规则；固�
 
 #### 模型看到什么
 
-共享系统 policy 覆盖 Team 可用性、共享 cwd 安全、任务协调、Steer 投递、inbox 接收和 Lead 等待责任。Lead 与 teammate 使用相同的九个 schema；执行时落实 Lead-only 操作。必需的 runtime context 声明 `You are the Team Lead named "lead".`，或 `You are teammate "<name>".` 与 `Your Team Lead is named "lead".`，并提供 roster 和消息操作说明。身份来自当前 Team membership，关闭可选 context 时仍保留，压缩移除快照后会恢复。从 teammate 创建的普通 fork 会收到当前 Lead 身份。
+共享系统 policy 覆盖 Team 可用性、共享 cwd 安全、任务协调、Steer 投递、inbox 接收和 Lead 等待责任。Lead 与 teammate 使用相同的九个 schema；执行时落实 Lead-only 操作。必需的 runtime context 声明 `You are the Team Lead named "lead".`，或 `You are teammate "<name>".` 与 `Your Team Lead is named "lead".`，并提供 roster 和消息操作说明。身份来自当前 Team membership，关闭可选 context 时仍保留，压缩移除快照后会恢复。从 teammate 创建的普通 fork 会收到当前 Lead 身份。Team 轮流工作时，策略在调用 `wait_agent` 前需检查的状态中列出 `waiting`，并以下方的轮流段落结尾；其最后一句只在注册了 `interrupt_agent` 时出现。`list_agents` 增加 `waiting means the teammate has a message and waits for its turn to work.`，`wait_agent` 增加 `A working teammate hands over to the next waiting teammate during the wait and returns once it may work again.`
+
+##### Team 轮流工作时的轮流段落
+
+```markdown
+Teammates take turns: only one teammate works at a time, and the Team Lead is not part of the rotation. A teammate that receives a message while another teammate works is waiting; waiting teammates start in the order they began waiting. The working teammate hands over when it finishes its turn or calls wait_agent, and that wait_agent returns once it may work again. To hand work to another teammate, send it a message, then finish your turn or call wait_agent. Every waiting teammate waits while the working teammate runs commands, so keep them short. The Lead can use interrupt_agent to end the working teammate's turn; a waiting teammate keeps its place.
+```
 
 #### Token 影响
 
-每次 Team member 请求都有固定策略与 schema 成本。身份是完整 runtime-context 快照的一部分。保留的快照未变化时不追加消息；context 变化或被移除时，loop 追加包含身份的完整快照。工具调用会增加紧凑 JSON roster、task、wait 或 receipt 结果。Peer 内容由 Team 领域保留在 target 历史中。
+每次 Team member 请求都有固定策略与 schema 成本；轮流工作会在这一固定成本上增加轮流段落和两句描述。身份是完整 runtime-context 快照的一部分。保留的快照未变化时不追加消息；context 变化或被移除时，loop 追加包含身份的完整快照。工具调用会增加紧凑 JSON roster、task、wait 或 receipt 结果。Peer 内容由 Team 领域保留在 target 历史中。
 
 #### KV Cache 影响
 

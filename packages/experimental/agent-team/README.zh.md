@@ -44,7 +44,7 @@ kind: "package-reference"
 - name: '@deepseek-ai/dsh-experimental-tool-agent-team'
 ```
 
-工具安装后，模型会按请求完成其余工作——例如先「创建一个名为 reviewer 的 teammate 检查 diff」，再「把变更摘要发给 reviewer」。所有限制都是可选的，并在启动时校验：
+工具安装后，模型会按请求完成其余工作——例如先「创建一个名为 reviewer 的 teammate 检查 diff」，再「把变更摘要发给 reviewer」。所有设置都是可选的，并在启动时校验：
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
@@ -52,6 +52,7 @@ kind: "package-reference"
 | `maxTasks` | `256` | 任务板上最多的活动任务数 |
 | `maxMessageBytes` | `65,536` | 单条发送消息的最大尺寸 |
 | `disposalTimeoutMs` | `5,000` | 关闭清理允许的时间 |
+| `takeTurns` | `false` | 一次只让一个 teammate 工作（[轮流工作](#taking-turns)）；否则 teammate 并行运行 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-experimental-agent-team)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -76,6 +77,16 @@ Steer 让 running target 在最近的步骤边界接收消息，并启动或冷�
 任务有 owner：成员 claim 任务开始工作，完成后标记完成、释放回板或重新打开；Lead 可以把任务分配给任意成员。每次变更都是 compare-and-set：基于过期副本的更新会被拒绝，因此两个成员不会悄悄覆盖彼此的成果。
 
 当两个 in-progress 任务计划触及重叠路径时，文件提示会产生警告——它们绝不阻止任何操作。已删除任务保留在历史中，但从活动列表中消失。
+
+### 轮流工作
+
+<a id="taking-turns"></a>
+
+设置 `takeTurns: true` 后，同一时间只有一个 teammate 工作。另一个 teammate 正在工作时收到消息（包括首个任务）的 teammate 处于 `waiting`：消息照常被其 inbox 接收，轮到它时它才开始工作。等待中的 teammate 按开始等待的先后顺序依次轮到。
+
+正在工作的 teammate 会一直持有轮次，直到它进入空闲。它等待下一次团队变化期间，下一个等待中的 teammate 开始工作，轮次回到它之后它的等待才返回。因此 teammate 通过发送消息、再结束本轮次或进入等待来移交工作，对方的回复会把轮次交回。Lead 不参与轮流，始终可以继续工作；roster 之外的 Agent（包括 teammate 自己的 subagent）从不等待轮次。
+
+roster 将排队中的 teammate 报告为 `waiting`，将轮次持有者报告为 `running`。中断等待中的 teammate 会让它保留原位，并报告 `previousStatus: 'waiting'`；中断正在工作的 teammate 会结束其轮次，并把轮次交给下一个 teammate。
 
 ### 等待与中断
 
@@ -119,6 +130,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 | [`src/projection.ts`](src/projection.ts) | 解码并校验 Team 事件、发布 `agentTeam` 客户端视图的严格回放投影 |
 | [`src/task-view.ts`](src/task-view.ts) | 任务板与客户端视图共用的纯任务派生：就绪状态、owner 名称与写入范围重叠 |
 | [`src/activity.ts`](src/activity.ts) | 一次性变更等待者与 dispose（资源释放）时的等待解除 |
+| [`src/turns.ts`](src/turns.ts) | Team 轮流工作时的轮次顺序，以及把 teammate 留在轮次之外的 hold 与步骤等待 |
 | [`src/lifecycle.ts`](src/lifecycle.ts) | 共享准入截止与有界结算 |
 
 ### Team 身份与 roster
@@ -138,6 +150,12 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 ### 等待与中断
 
 `waitForChange()` 等待注册之后发生的下一条 roster、task、消息接收或实时状态边，时长从 10 秒到 1 小时，并且只报告是否超时；运行时 dispose 会释放当前等待。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 报告。`interrupt()` 仅限 Lead，委托 continuable-subagent 的 interrupt 路径，以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
+
+### 轮流工作
+
+`TurnQueue` 为每个 Team 保存一个进程内轮次：当前授予以及一个先进先出的等待 teammate 列表。`TeamTurnGate` 负责执行这一顺序。输入进入空闲 teammate 的 inbox 时，它会占用空闲的轮次，或启动一个等待轮次的 Agent maintenance hold；输入保持在持久 inbox 中待处理，Agent loop 会锁存其唤醒，直到 hold 结束。没有轮次就开始的 teammate 步骤会在前置的 `agent/pre-step` 监听器中等待，之后才进行其他步骤工作。这种情况出现在宿主以 keep-inbox 方式中断并结束 hold 之后，或输入到达时其他 maintenance 正占用该 Agent；该步骤已 claim 的输入在等待期间不在持久 inbox 中。轮次在以下时刻移交：持有者的 `agent/status` 空闲边、持有者离开注册表、`waitForChange()` 让出轮次，以及某个授予对应的 Agent 未使用该授予就再次空闲。
+
+任何 Team 操作都不会在持有轮次时等待轮次，因此轮流不会死锁（[决策](../../../.agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.zh.md)）：发送在 inbox 接收时返回，创建在初始提示已在持久 inbox 中待处理时返回，`waitForChange()` 先让出轮次再等待，而 Lead 从不等待轮次。dispose 会移除这些监听器并停止 teammate，停止操作会以清空 inbox 的方式取消它们的 hold；之后以 `TEAM_DISPOSED` 拒绝剩余的轮次等待。
 
 ### 持久性模型
 
@@ -163,6 +181,7 @@ Mailbox 投影与 checkpoint 准入保留本地声明的校验器之外获准内
 - [Agent Teams 子系统](../../../docs/subsystems/agent-team.zh.md)——持久 Team 类型与 `ctx.agentTeams` 服务 API。
 - [tool-agent-team 包](../tool-agent-team/README.zh.md)——让模型创建 teammate、向其发送消息并进行协调的工具。
 - [Agent Teams Agent Note](../../../.agents/notes/implemented/feature/2026-08-05-agent-teams.zh.md)——roster、mailbox、任务与共享 checkout 决策。
+- [轮流工作 Agent Note](../../../.agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.zh.md)——轮流在何处挡住 teammate、Lead 为何不参与，以及为何不会死锁。
 - [实验包参考](../AGENTS.md)——位置、公开发布与依赖隔离。
 
 -----
@@ -181,7 +200,7 @@ Mailbox 投影与 checkpoint 准入保留本地声明的校验器之外获准内
 
 #### 模型看到什么
 
-每条 peer 消息都是以发送者名称为前缀的用户角色消息，后接原始内容块。roster、task 和历史 mailbox 记录仍仅存在于日志。
+每条 peer 消息都是以发送者名称为前缀的用户角色消息，后接原始内容块。roster、task 和历史 mailbox 记录仍仅存在于日志。Team 轮流工作时，等待中的 teammate 会在轮到它时按到达顺序收到已接收的消息。
 
 #### Token 影响
 
@@ -205,6 +224,10 @@ Peer 消息追加在 target 可复用历史前缀之后。冷恢复会先复用�
 - **扁平且不可变的 roster**——只有 Lead 可以创建直接 teammate；不支持嵌套 Team、重命名、删除或名字复用。
 - **不会自动释放 owner**——成员不活动、interrupt、进程退出与工作失败都不会释放任务 owner。
 - **无发送重试保证**——Team 不保留新尝试，也不对其去重；不支持多个进程同时操作一个 Team。从未到达目标的历史排队消息不会被投递。
+- **进程内轮次顺序**——轮次队列不持久。重启后，等待中的 teammate 已接收的消息仍在其 inbox 中待处理，只有它下次收到消息时才会执行。
+- **正在工作的 teammate 占住轮流**——长时间的命令、缓慢的模型请求以及等待人类回应的提示，都会让所有等待中的 teammate 一直等待；Lead 可以中断正在工作的 teammate。
+- **被挡住步骤已 claim 的输入**——没有轮次就开始的步骤已经 claim 了输入，因此在轮到它之前取消该轮次或进程退出，都会丢失这些输入。只有不经 hold 就开始的步骤会进入这种状态。
+- **浏览器不显示等待状态**——Web 面板根据 Session 状态推导 teammate 活动，因此把等待中的 teammate 显示为 inactive。
 
 <a id="dev-note"></a>
 ### 开发备注

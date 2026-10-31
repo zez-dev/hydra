@@ -6,7 +6,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { steerHostSubagentPrompt } from '@deepseek-ai/dsh-subagent/internal'
-import { TeamActivity } from './activity.ts'
+import { assertWaitTimeout, TeamActivity } from './activity.ts'
 import { errorMessage, TeamError } from './error.ts'
 import { TeamJournal } from './journal.ts'
 import { TeamRuntimeLifecycle } from './lifecycle.ts'
@@ -14,6 +14,7 @@ import { teamProjectionDefinition } from './projection.ts'
 import { resolveActiveMember, TeamRoster } from './roster.ts'
 import type { TeamMembership } from './roster.ts'
 import { TeamTaskBoard } from './task-board.ts'
+import { TeamTurnGate, TurnQueue } from './turns.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   Config,
@@ -22,6 +23,7 @@ import type {
   SendTeamMessageResult,
   SpawnTeammateRequest,
   SpawnTeammateResult,
+  TeamInterruptResult,
   TeamMemberView,
   TeamTaskView,
   TeamWaitResult,
@@ -43,6 +45,7 @@ const DEFAULT_MAX_MEMBERS = 16
 const DEFAULT_MAX_TASKS = 256
 const DEFAULT_MAX_MESSAGE_BYTES = 65_536
 const DEFAULT_DISPOSAL_TIMEOUT_MS = 5_000
+const DEFAULT_TAKE_TURNS = false
 
 /** Validate one positive safe-integer deployment limit. */
 function positiveLimit(name: string, value: number): number {
@@ -61,6 +64,7 @@ export class TeamService extends Service {
     maxTasks: z.number().step(1).min(1).default(DEFAULT_MAX_TASKS),
     maxMessageBytes: z.number().step(1).min(1).default(DEFAULT_MAX_MESSAGE_BYTES),
     disposalTimeoutMs: z.number().step(1).min(1).default(DEFAULT_DISPOSAL_TIMEOUT_MS),
+    takeTurns: z.boolean().default(DEFAULT_TAKE_TURNS),
   })
 
   /** Validated deployment limits used by every Team operation. */
@@ -68,6 +72,9 @@ export class TeamService extends Service {
 
   private readonly activity: TeamActivity
   private readonly lifecycle: TeamRuntimeLifecycle
+  /** Teammate turn order, present only when the Team takes turns. */
+  private readonly turns: TurnQueue | undefined
+  private turnGate: TeamTurnGate | undefined
   private journal!: TeamJournal
   private roster!: TeamRoster
   private tasks!: TeamTaskBoard
@@ -82,19 +89,25 @@ export class TeamService extends Service {
         'disposalTimeoutMs',
         config.disposalTimeoutMs ?? DEFAULT_DISPOSAL_TIMEOUT_MS,
       ),
+      takeTurns: config.takeTurns ?? DEFAULT_TAKE_TURNS,
     }
 
     this.activity = new TeamActivity()
     this.lifecycle = new TeamRuntimeLifecycle(this.config.disposalTimeoutMs)
+    this.turns = this.config.takeTurns ? new TurnQueue() : undefined
   }
 
   protected async [Service.init](): Promise<void> {
     const ctx = this.ctx
     const teamProjectionHandle = await ctx.sessionProjections.register(teamProjectionDefinition)
     this.journal = new TeamJournal(ctx, teamProjectionHandle, (root) => { this.activity.notify(TeamId(root.id)) })
-    this.roster = new TeamRoster(ctx, this.journal, this.lifecycle, this.config.maxMembers)
+    this.roster = new TeamRoster(ctx, this.journal, this.lifecycle, this.config.maxMembers, this.turns)
     this.tasks = new TeamTaskBoard(this.journal, this.config.maxTasks)
     ctx.effect(() => () => this.disposeRuntime(), 'agentTeams.runtimeLifecycle()')
+    // Registered after the runtime effect, so disposal removes the gate's listeners before teardown closes the queue.
+    if (this.turns !== undefined) {
+      this.turnGate = new TeamTurnGate(ctx, this.turns, agent => this.roster.teamOfTeammate(agent))
+    }
 
     ctx.on('agent/created', ({ agent }) => { this.scheduleRecovery(agent) })
     ctx.on('agent/status', ({ agent }) => {
@@ -102,6 +115,11 @@ export class TeamService extends Service {
       if (membership !== undefined) this.activity.notify(membership.id)
     })
     for (const agent of ctx.agents.list()) this.scheduleRecovery(agent)
+  }
+
+  /** Whether teammates take turns: one teammate works at a time while the Lead keeps working. */
+  get takeTurns(): boolean {
+    return this.config.takeTurns
   }
 
   /**
@@ -186,24 +204,30 @@ export class TeamService extends Service {
   }
 
   /**
-   * Wait for the next Team-domain or member-status change.
+   * Wait for the next Team-domain or member-status change. A teammate that has
+   * the turn gives it to the next waiting teammate for the wait and returns
+   * only after the turn comes back.
    * @param caller - exact live Team member waiting for activity.
    * @param timeoutMs - bounded wait duration from ten seconds through one hour.
-   * @param signal - caller cancellation for the wait only.
+   * @param signal - caller cancellation for the wait and for the renewed turn wait.
    * @returns one observed change or a timeout result.
    */
   async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult> {
     const membership = this.roster.membership(caller)
-    return await this.activity.wait(membership.id, timeoutMs, signal)
+    // Validated before the turn passes, so an invalid wait cannot hand the turn away.
+    assertWaitTimeout(timeoutMs)
+    const wait = (): Promise<TeamWaitResult> => this.activity.wait(membership.id, timeoutMs, signal)
+    return await (this.turnGate?.yieldDuring(membership.id, caller, signal, wait) ?? wait())
   }
 
   /**
-   * Interrupt one live teammate turn without clearing its pending inbox.
+   * Interrupt one live teammate turn without clearing its pending inbox. A
+   * teammate waiting for the turn has no turn to interrupt and keeps its place.
    * @param caller - exact live Lead Agent.
    * @param targetName - durable teammate name.
    * @returns the target status sampled before cancellation.
    */
-  interrupt(caller: Agent, targetName: string): { previousStatus: 'running' | 'inactive' } {
+  interrupt(caller: Agent, targetName: string): TeamInterruptResult {
     return this.roster.interrupt(caller, targetName)
   }
 
@@ -268,6 +292,8 @@ export class TeamService extends Service {
         failures.push(error)
       }
     }
+    // Stopping teammates first cancels their holds with cleared inboxes; closing earlier would wake them.
+    this.turns?.close()
     if (failures.length > 0) throw new AggregateError(failures, 'Agent Teams runtime disposal failed')
   }
 }

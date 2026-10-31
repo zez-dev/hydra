@@ -30,19 +30,34 @@ export const Config: z<Config> = z.object({
   forkProvider: z.string().default('fork'),
 })
 
+/** Member statuses from which another member can still produce a change, in model-facing words. */
+function activeStatuses(takeTurns: boolean): string {
+  return takeTurns ? 'running, provisioning, or waiting' : 'running or provisioning'
+}
+
+/** Model-facing rotation guidance, present only when teammates take turns. */
+function turnPolicy(interrupt: boolean): string {
+  return `Teammates take turns: only one teammate works at a time, and the Team Lead is not part of the rotation. A teammate that receives a message while another teammate works is waiting; waiting teammates start in the order they began waiting. The working teammate hands over when it finishes its turn or calls wait_agent, and that wait_agent returns once it may work again. To hand work to another teammate, send it a message, then finish your turn or call wait_agent. Every waiting teammate waits while the working teammate runs commands, so keep them short.${interrupt ? ' The Lead can use interrupt_agent to end the working teammate\'s turn; a waiting teammate keeps its place.' : ''}`
+}
+
 /** Model-facing collaboration guidance shared by Lead and teammates. */
-function teamPolicy(interrupt: boolean): string {
+function teamPolicy(interrupt: boolean, takeTurns: boolean): string {
   return `Agent Teams is available in this session
 
 The Team Lead and all teammates share the same working directory and filesystem. Edits are immediately visible to every member. Split write work into disjoint scopes, record expected write scopes on shared tasks, and use task dependencies when work must be ordered. Write-scope overlap is advisory, not a lock.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message${interrupt ? ' and interrupt_agent' : ''}, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message${interrupt ? ' and interrupt_agent' : ''}, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is ${activeStatuses(takeTurns)}; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.${takeTurns ? `\n\n${turnPolicy(interrupt)}` : ''}`
 }
 
-const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
-const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
+/** `waiting` occurs only when teammates take turns; a waiting teammate starts once the turn passes to it. */
+const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'waiting', 'provisioning'])
+
+/** Model-only wait result when no other member can produce a change. */
+function noActivePeerMessage(takeTurns: boolean): string {
+  return `No other Team member is ${activeStatuses(takeTurns)}. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.`
+}
 
 /**
  * One model-facing roster row. The Lead pseudo-row omits the
@@ -55,7 +70,7 @@ const MEMBER_VIEW_SCHEMA = {
   properties: {
     target: { type: 'string', required: true },
     role: { type: 'string', required: true, enum: ['lead', 'teammate'] },
-    status: { type: 'string', required: true, enum: ['running', 'inactive', 'provisioning', 'failed'] },
+    status: { type: 'string', required: true, enum: ['running', 'inactive', 'waiting', 'provisioning', 'failed'] },
     description: { type: 'string' },
     provider: { type: 'string' },
     context: { type: 'string', enum: ['fresh', 'fork'] },
@@ -127,7 +142,7 @@ const INTERRUPT_VALUE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    previousStatus: { type: 'string', required: true, enum: ['running', 'inactive'] },
+    previousStatus: { type: 'string', required: true, enum: ['running', 'inactive', 'waiting'] },
   },
 } as const
 
@@ -167,13 +182,14 @@ function callingAgent(agent: Agent | undefined, toolName: string): Agent {
 /** Register the complete Team tool set in one exact Agent scope. */
 function install(agent: Agent, ctx: Context, config: Required<Config>): () => void {
   const scoped = agent.ctx
+  const { takeTurns } = ctx.agentTeams
   const disposers: Array<() => unknown> = []
   const register = (disposer: () => unknown): void => { disposers.push(disposer) }
   try {
     register(scoped.systemPrompt.section({
       name: 'team:policy',
       order: scoped.systemPrompt.getSectionOrder('TEAM_POLICY'),
-      text: teamPolicy(config.interrupt),
+      text: teamPolicy(config.interrupt, takeTurns),
     }))
     register(scoped.systemPrompt.context({
       name: 'team:identity',
@@ -238,7 +254,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
 
     register(scoped.tools.register(defineTool({
       name: 'list_agents',
-      description: 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.',
+      description: `List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result.${takeTurns ? ' waiting means the teammate has a message and waits for its turn to work.' : ''} provisioning and failed describe member creation.`,
       parameters: {},
       output: jsonOutput(MEMBER_LIST_VALUE_SCHEMA),
       execute(_args, exec) {
@@ -248,7 +264,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
 
     register(scoped.tools.register(defineTool({
       name: 'wait_agent',
-      description: 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.',
+      description: `Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is ${activeStatuses(takeTurns)}.${takeTurns ? ' A working teammate hands over to the next waiting teammate during the wait and returns once it may work again.' : ''} Re-list after wakeup or timeout instead of polling.`,
       parameters: {
         timeout_ms: {
           type: 'integer',
@@ -273,7 +289,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
             timedOut: false,
             noProgress: {
               reason: 'no-active-peer' as const,
-              message: NO_ACTIVE_PEER_MESSAGE,
+              message: noActivePeerMessage(takeTurns),
             },
           }
         }

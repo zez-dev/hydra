@@ -416,13 +416,13 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>',
-        description: 'Wait for the next Team-domain or member-status change.',
-        parameters: [{ name: 'caller', description: 'exact live Team member waiting for activity.' }, { name: 'timeoutMs', description: 'bounded wait duration from ten seconds through one hour.' }, { name: 'signal', description: 'caller cancellation for the wait only.' }],
+        description: 'Wait for the next Team-domain or member-status change. A teammate that has the turn gives it to the next waiting teammate for the wait and returns only after the turn comes back.',
+        parameters: [{ name: 'caller', description: 'exact live Team member waiting for activity.' }, { name: 'timeoutMs', description: 'bounded wait duration from ten seconds through one hour.' }, { name: 'signal', description: 'caller cancellation for the wait and for the renewed turn wait.' }],
         returns: 'one observed change or a timeout result.',
       },
       {
-        signature: 'interrupt(caller: Agent, targetName: string): { previousStatus: \'running\' | \'inactive\' }',
-        description: 'Interrupt one live teammate turn without clearing its pending inbox.',
+        signature: 'interrupt(caller: Agent, targetName: string): TeamInterruptResult',
+        description: 'Interrupt one live teammate turn without clearing its pending inbox. A teammate waiting for the turn has no turn to interrupt and keeps its place.',
         parameters: [{ name: 'caller', description: 'exact live Lead Agent.' }, { name: 'targetName', description: 'durable teammate name.' }],
         returns: 'the target status sampled before cancellation.',
       },
@@ -10532,12 +10532,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TeamId = Branded<\'TeamId\'>;',
   },
   {
+    name: 'TeamInterruptResult',
+    declaration: 'export interface TeamInterruptResult {\n    readonly previousStatus: \'running\' | \'inactive\' | \'waiting\';\n}',
+  },
+  {
     name: 'TeamMembership',
     declaration: 'export interface TeamMembership {\n    readonly root: Agent;\n    readonly id: TeamId;\n    readonly role: \'lead\' | \'teammate\';\n    readonly name: string;\n}',
   },
   {
     name: 'TeamMemberView',
-    declaration: 'export interface TeamMemberView {\n    readonly id: SessionId;\n    readonly name: string;\n    readonly role: \'lead\' | \'teammate\';\n    readonly status: \'running\' | \'inactive\' | \'provisioning\' | \'failed\';\n    readonly description?: string;\n    readonly provider?: string;\n    readonly context?: \'fresh\' | \'fork\';\n    readonly model?: string;\n    readonly diagnostics: string[];\n}',
+    declaration: 'export interface TeamMemberView {\n    readonly id: SessionId;\n    readonly name: string;\n    readonly role: \'lead\' | \'teammate\';\n    readonly status: \'running\' | \'inactive\' | \'waiting\' | \'provisioning\' | \'failed\';\n    readonly description?: string;\n    readonly provider?: string;\n    readonly context?: \'fresh\' | \'fork\';\n    readonly model?: string;\n    readonly diagnostics: string[];\n}',
   },
   {
     name: 'TeamTaskAction',

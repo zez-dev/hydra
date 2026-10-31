@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
-/** Account operations in the shipped client composition, in Desktop and in a plain browser. */
+/** Account operations in the Web client composition with this package's row enabled, in Desktop and in a plain browser. */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { ok } from '@deepseek-ai/dsh-remote-mock'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
-import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
+import { ClientRoster, createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
 import type {
   AccountBonusBatch, AccountBonusOrderId, AccountDetails, AccountUserId, AccountView, SignInAttemptId,
 } from '@deepseek-ai/dsh-deepseek-account/types'
@@ -22,8 +24,16 @@ import type { AccountPlatformHostInjected } from '../src/client/AccountPlatformH
 import { AccountQuotaNotice } from '../src/client/AccountQuotaNotice.tsx'
 import type { AccountQuotaNoticeInjected } from '../src/client/AccountQuotaNotice.tsx'
 
-const it = createClientTest({ roster: webApp })
-const withoutAccountAccess = createClientTest({ roster: webApp }, { access: action => action !== 'account/watch' })
+const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')) as {
+  name: string
+  dsh: { client: { inject: string[] } }
+}
+// Hydra's Web bundle disables this row, which a profile patch can enable; the specs add it to the Web roster.
+const roster = ClientRoster.of([...webApp.rows, {
+  name: manifest.name, inject: manifest.dsh.client.inject, immediately: false,
+}])
+const it = createClientTest({ roster })
+const withoutAccountAccess = createClientTest({ roster }, { access: action => action !== 'account/watch' })
 const SELF = '@deepseek-ai/dsh-client-ui-settings-account'
 const view: AccountView = {
   status: 'signed-out', attempt: null,

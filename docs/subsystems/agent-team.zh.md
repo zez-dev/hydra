@@ -21,7 +21,7 @@ interface TeamMemberSnapshot {
 }
 ```
 
-每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态单独派生，绝不会重写该记录。
+每个 member 都从 `provisioning` 开始，并且只到达一个终态 roster phase：`active` 或 `failed`。roster 的 `running`／`inactive` 状态（Team 轮流工作时还有 `waiting`）单独派生，绝不会重写该记录。
 
 ## 消息与历史 mailbox
 
@@ -38,7 +38,7 @@ interface TeamMessageSnapshot {
 }
 ```
 
-每条消息都会尝试 Steer 投递。running target 在最近的步骤边界收到消息，inactive target 在已加载时启动一个轮次，否则冷恢复。调用方不能选择其他模式，因此持久记录不存储调度方式。
+每条消息都会尝试 Steer 投递。running target 在最近的步骤边界收到消息，inactive target 在已加载时启动一个轮次，否则冷恢复；Team 轮流工作时，它会先等待轮到自己。调用方不能选择其他模式，因此持久记录不存储调度方式。
 
 历史 `team-message` source 保留旧消息 id 与发送者归属；客户端用它们展示消息标题和图标。
 
@@ -201,21 +201,24 @@ listTasks(caller: Agent): TeamTaskView[]
 async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTaskView>
 
 /**
- * Wait for the next Team-domain or member-status change.
+ * Wait for the next Team-domain or member-status change. A teammate that has
+ * the turn gives it to the next waiting teammate for the wait and returns
+ * only after the turn comes back.
  * @param caller - exact live Team member waiting for activity.
  * @param timeoutMs - bounded wait duration from ten seconds through one hour.
- * @param signal - caller cancellation for the wait only.
+ * @param signal - caller cancellation for the wait and for the renewed turn wait.
  * @returns one observed change or a timeout result.
  */
 async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>
 
 /**
- * Interrupt one live teammate turn without clearing its pending inbox.
+ * Interrupt one live teammate turn without clearing its pending inbox. A
+ * teammate waiting for the turn has no turn to interrupt and keeps its place.
  * @param caller - exact live Lead Agent.
  * @param targetName - durable teammate name.
  * @returns the target status sampled before cancellation.
  */
-interrupt(caller: Agent, targetName: string): { previousStatus: 'running' | 'inactive' }
+interrupt(caller: Agent, targetName: string): TeamInterruptResult
 
 /**
  * Resolve a caller without throwing, used by scoped-tool installation and observers.

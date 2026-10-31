@@ -1,0 +1,3 @@
+- insert:
+    - id: team-take-turns-notice-order
+      name: './notice-order.mjs'

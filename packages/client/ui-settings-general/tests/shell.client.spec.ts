@@ -5,9 +5,11 @@
  * projections read the product's real sections, its connection control is the
  * roster's Connection, and it survives a Loader rebuild of the declarer.
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, onTestFinished, vi } from 'vitest'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
+import { ClientRoster, createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/index.ts'
 import { inject } from '../src/client/index.ts'
 import type { SettingsRootInjected } from '../src/client/shell-contract.ts'
 import { SettingsRoot } from '../src/client/SettingsRoot.tsx'
@@ -17,6 +19,14 @@ const SELF = '@deepseek-ai/dsh-client-ui-settings-general'
 const SIDEBAR = '@deepseek-ai/dsh-client-ui-sidebar'
 const it = createClientTest({ roster: webApp })
 const withoutSettingsAccess = createClientTest({ roster: webApp }, { access: action => action !== 'settings/describe' })
+const account = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../ui-settings-account/package.json'), 'utf8')) as {
+  name: string
+  dsh: { client: { inject: string[] } }
+}
+// Hydra's Web bundle disables the account row, which a profile patch can enable; the Account test adds it.
+const withAccount = createClientTest({ roster: ClientRoster.of([...webApp.rows, {
+  name: account.name, inject: account.dsh.client.inject, immediately: false,
+}]) })
 /** The whole roster's first boot pays the cold module transform of every plugin package. */
 const COLD_BOOT_TIMEOUT_MS = 60_000
 
@@ -115,7 +125,7 @@ describe('ui-settings-general shell', () => {
     off()
   })
 
-  it('shows Account first only while signed in and removes it on sign-out', async ({ start }) => {
+  withAccount('shows Account first only while signed in and removes it on sign-out', async ({ start }) => {
     const c = await start()
     const { sections } = injectedOf(c).hooks
     await c.mock.streams.opened('account/watch', 1)

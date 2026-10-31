@@ -1047,10 +1047,10 @@ export interface Config {
 ## `@deepseek-ai/dsh-experimental-agent-team`
 
 - `inject`: `agents` · `sessions` · `sessionPersistence` · `sessionProjections` · `subagents`
-- `source`: [`packages/experimental/agent-team/src/types.ts:153`](../packages/experimental/agent-team/src/types.ts)
+- `source`: [`packages/experimental/agent-team/src/types.ts:156`](../packages/experimental/agent-team/src/types.ts)
 
 ```ts config-catalog
-/** Team-service deployment limits. */
+/** Team-service deployment limits and teammate scheduling. */
 export interface Config {
   /** Maximum immutable teammate names retained by one Team. */
   readonly maxMembers?: number
@@ -1060,6 +1060,13 @@ export interface Config {
   readonly maxMessageBytes?: number
   /** Maximum milliseconds for shared operation settlement and for each Team child drain. */
   readonly disposalTimeoutMs?: number
+  /**
+   * Run one teammate at a time. A teammate that receives input while another
+   * teammate has the turn waits, in arrival order, until the turn passes when
+   * the working teammate goes idle or waits for Team activity. The Lead is not
+   * part of the rotation. Defaults to false: teammates run in parallel.
+   */
+  readonly takeTurns?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-experimental-agent-team -->
