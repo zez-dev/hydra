@@ -133,8 +133,13 @@ describe('SendLaterAction visibility', () => {
     expect(tooltipText()).toBe(en['sendLater.action'])
   })
 
+  it('enables the trigger in a Session that has not started a turn', () => {
+    render(<SendLaterAction {...props({ session: { blank: true } })} />)
+    expect(trigger().disabled).toBe(false)
+    expect(tooltipText()).toBe(en['sendLater.action'])
+  })
+
   it.each([
-    ['a blank Session', { session: { blank: true } }, en['sendLater.blank']],
     ['a command', { draft: '/compact now' }, en['sendLater.command']],
     ['a claimed command', { phase: 'claimed', draft: '/goal ship it' }, en['sendLater.command']],
     ['attachments', { attachments: 1 }, en['sendLater.attachments']],

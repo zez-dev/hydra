@@ -259,7 +259,7 @@ describe('ApiSession creation', () => {
     tempDirs.push(parent)
     const file = join(parent, 'file')
     writeFileSync(file, 'not a directory')
-    await expect(agents.createSession({ cwd: join(file, 'child'), reusable: () => true }))
+    await expect(agents.createSession({ cwd: join(file, 'child'), reusable: () => Promise.resolve(true) }))
       .rejects.toThrow('failed to ensure project directory')
   })
 })
@@ -285,7 +285,7 @@ describe('ApiSession close', () => {
       await registration
       return { agent: live, dispose: () => { disposals += 1; return Promise.resolve() } }
     })
-    await expect(agents.createSession({ cwd, reusable: () => true })).resolves.toEqual({ agent: live })
+    await expect(agents.createSession({ cwd, reusable: () => Promise.resolve(true) })).resolves.toEqual({ agent: live })
     return {
       ctx,
       agents,

@@ -133,6 +133,7 @@
     "apps/web/tests/workspace-management.e2e.ts",
     "apps/web/tests/default-workspace.e2e.ts",
     "apps/web/tests/new-session-refused.e2e.ts",
+    "apps/web/tests/new-session-held-blank.e2e.ts",
     "apps/web/tests/workspace-recency.e2e.ts",
     "apps/web/tests/session-unarchive.e2e.ts",
     "apps/web/tests/session-archive-active.e2e.ts",

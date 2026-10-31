@@ -104,7 +104,9 @@ export class SessionCommandController {
 
   /**
    * Create one ordinary Session for a new conversation, reusing the named
-   * blank Session while it is an unarchived member of the requested Workspace.
+   * blank Session while it is an unarchived member of the requested Workspace
+   * and, when the request sets `skipActive`, while the Workspace registry's
+   * `sessionActivity` reports no work for it.
    * @param request - optional blank Session to reuse, location, and Agent preset.
    * @returns the created or reused Session identity and its preset when configured.
    */
@@ -128,8 +130,9 @@ export class SessionCommandController {
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         cwd,
         ...(request.agentPreset === undefined ? {} : { agentPreset: request.agentPreset }),
-        reusable: sessionId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
-          && (workspace === undefined || workspace.sessionIds.includes(sessionId)),
+        reusable: async sessionId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
+          && (workspace === undefined || workspace.sessionIds.includes(sessionId))
+          && (request.skipActive !== true || (await this.ctx.workspaceRegistry.sessionActivity(sessionId)).length === 0),
       })
     } catch (error) {
       this.rejectCreation(error)

@@ -110,14 +110,14 @@ describe('sendLaterRequest', () => {
 })
 
 describe('sendLaterBlock', () => {
-  const ready: SendLaterDraft = { draft: 'Hello', phase: 'plain', attachments: 0, references: 0, blank: false }
+  const ready: SendLaterDraft = { draft: 'Hello', phase: 'plain', attachments: 0, references: 0 }
 
   it('accepts a plain text draft', () => {
     expect(sendLaterBlock(ready)).toBeUndefined()
   })
 
   it('names the first reason a draft cannot be scheduled', () => {
-    expect(sendLaterBlock({ ...ready, blank: true, attachments: 1 })).toBe('blank')
+    expect(sendLaterBlock({ ...ready, phase: 'sending', attachments: 1 })).toBe('busy')
     for (const phase of ['adjudicating', 'submitting', 'sending'] as const) {
       expect(sendLaterBlock({ ...ready, phase })).toBe('busy')
     }

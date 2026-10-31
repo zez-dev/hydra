@@ -1182,6 +1182,27 @@ describe('registry-global session archive', () => {
     expect(result.registry.archivedSessionIds).toEqual(['known'])
   })
 
+  it('answers the activity question in listener order without writing or checking existence', async () => {
+    const dir = await makeDir('activity-question')
+    const result = await harness({ sessions: [header('held', dir, 100)] })
+    await expect(result.registry.sessionActivity(SessionId('held'))).resolves.toEqual([])
+
+    result.ctx.on('workspace/session-activity', async ({ sessionId }, next) => {
+      const rest = await next()
+      return sessionId === 'held' ? [{ kind: 'probe-items', items: [{ id: 'task-1', label: 'Call back' }] }, ...rest] : rest
+    })
+    result.ctx.on('workspace/session-activity', async (_request, next) => [{ kind: 'probe' }, ...(await next())])
+
+    await expect(result.registry.sessionActivity(SessionId('held'))).resolves.toEqual([
+      { kind: 'probe-items', items: [{ id: 'task-1', label: 'Call back' }] }, { kind: 'probe' },
+    ])
+    await expect(result.registry.sessionActivity(SessionId('ghost'))).resolves.toEqual([{ kind: 'probe' }])
+    expect(result.changes).toEqual([])
+
+    result.ctx.on('workspace/session-activity', () => Promise.reject(new Error('provider down')))
+    await expect(result.registry.sessionActivity(SessionId('held'))).rejects.toThrow('provider down')
+  })
+
   it('restores the archive set across restarts and defaults it for pre-field media', async () => {
     const dir = await makeDir('archive-restart')
     const pool = new MemoryMediaPool()

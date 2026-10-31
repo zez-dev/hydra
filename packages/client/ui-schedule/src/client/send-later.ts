@@ -155,9 +155,9 @@ export function sendLaterRequest(draft: string, timing: SendLaterTiming): Schedu
 }
 
 /** Why a draft with text cannot be scheduled. */
-export type SendLaterBlock = 'blank' | 'busy' | 'command' | 'attachments' | 'references'
+export type SendLaterBlock = 'busy' | 'command' | 'attachments' | 'references'
 
-/** Composer and Session facts that decide whether a draft can be scheduled. */
+/** Composer facts that decide whether a draft can be scheduled. */
 export interface SendLaterDraft {
   /** Clipboard-text projection of the draft. */
   readonly draft: string
@@ -167,8 +167,6 @@ export interface SendLaterDraft {
   readonly attachments: number
   /** Reference chips in the draft. */
   readonly references: number
-  /** Whether the Session has not started a turn. */
-  readonly blank: boolean
 }
 
 /**
@@ -176,13 +174,11 @@ export interface SendLaterDraft {
  *
  * A scheduled prompt is plain text. A command, an attachment, or a reference
  * chip has no faithful text form, so such a draft is refused rather than
- * scheduled as its clipboard text. A blank Session is refused because New
- * Session reuses it for the next conversation.
- * @param facts - composer and Session facts.
+ * scheduled as its clipboard text.
+ * @param facts - composer facts.
  * @returns the first reason the draft cannot be scheduled, or undefined when it can.
  */
 export function sendLaterBlock(facts: SendLaterDraft): SendLaterBlock | undefined {
-  if (facts.blank) return 'blank'
   if (facts.phase === 'adjudicating' || facts.phase === 'submitting' || facts.phase === 'sending') return 'busy'
   if (facts.phase === 'claimed' || facts.draft.trimStart().startsWith('/')) return 'command'
   if (facts.attachments > 0) return 'attachments'

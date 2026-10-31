@@ -154,8 +154,10 @@ interface SessionActivityKindMap {}
 
 ```ts type-equiv
 /**
- * One reason a session counts as active for archive admission. Families with
- * per-item identity list their items so a caller can name what must stop.
+ * One reason a session counts as active: archive admission refuses it, and a
+ * blank session is not reused for a new conversation while it has one.
+ * Families with per-item identity list their items so a caller can name what
+ * must stop.
  */
 interface SessionActivity {
   readonly kind: SessionActivityKind
@@ -164,11 +166,11 @@ interface SessionActivity {
 }
 ```
 
-`SessionActivityItem` 携带各族自己的 `id`（会话、任务或提醒 id）和可选的展示 `label`。`archiveSession(sessionId)` 在存在性检查之后只询问 waterfall 一次，对非空答案以 `WorkspaceActiveSessionError`（`sessionId`、`activity`）拒绝且不写入；控制器把它映射为 `workspace/session-active` 错误，其 details 携带同样的两个字段。`archiveSession(sessionId, { stopActivity: true })`——`ArchiveSessionOptions` 的这个字段由传输请求以 `stopActivity` 暴露——跳过检查、先写入归档、再派发 `workspace/session-stop`；提供方抛错只记日志，归档保留，被停止的工作从不等待收敛。已归档的 id 既不询问也不停止。随附的提供方、它们停止什么，以及让已归档会话不跑模型步的 `agent/pre-step` 门禁，记录在[注册表包](../../packages/workspace/workspace/README.zh.md#api-behavior)；决策记录见 [archive-stops-running-work Agent Note](../../.agents/notes/implemented/feature/2026-09-21-archive-stops-running-session-work.zh.md)。
+`SessionActivityItem` 携带各族自己的 `id`（会话、任务或提醒 id）和可选的展示 `label`。`archiveSession(sessionId)` 在存在性检查之后只询问 waterfall 一次，对非空答案以 `WorkspaceActiveSessionError`（`sessionId`、`activity`）拒绝且不写入；控制器把它映射为 `workspace/session-active` 错误，其 details 携带同样的两个字段。`archiveSession(sessionId, { stopActivity: true })`——`ArchiveSessionOptions` 的这个字段由传输请求以 `stopActivity` 暴露——跳过检查、先写入归档、再派发 `workspace/session-stop`；提供方抛错只记日志，归档保留，被停止的工作从不等待收敛。已归档的 id 既不询问也不停止。`sessionActivity(sessionId)` 询问同一个 waterfall，既不写入也不检查存在性；API Session Controller 处理设置了 `skipActive` 的 `session.create` 请求（新会话即如此）时询问它，只要有提供方报告空白会话有工作，就改为新建会话而不复用它。随附的提供方、它们停止什么，以及让已归档会话不跑模型步的 `agent/pre-step` 门禁，记录在[注册表包](../../packages/workspace/workspace/README.zh.md#api-behavior)；决策记录见 [archive-stops-running-work Agent Note](../../.agents/notes/implemented/feature/2026-09-21-archive-stops-running-session-work.zh.md)。
 
 ## 消费方
 
-[`dsh-workspace-controller`](../../packages/api/workspace-controller) 经 `ctx.workspaceRegistry` 向 GUI 客户端提供工作区 CRUD，[`dsh-session-controller`](../../packages/api/session-controller) 执行上文「先建会话再 attach」的流程。[dsh-agent-instructions](../../packages/context/agent-instructions) 尽管名字如此，却**不是**消费方：它在 agent 自己的 cwd 下发现 AGENTS.md 风格的指令文件，从不触碰 `ctx.workspaceRegistry`——两者共用的这个词指的是用户的工作目录，而非本注册表的实体。
+[`dsh-workspace-controller`](../../packages/api/workspace-controller) 经 `ctx.workspaceRegistry` 向 GUI 客户端提供工作区 CRUD，[`dsh-session-controller`](../../packages/api/session-controller) 执行上文「先建会话再 attach」的流程，并对设置了 `skipActive` 的请求在复用空白会话前询问 `sessionActivity`。[dsh-agent-instructions](../../packages/context/agent-instructions) 尽管名字如此，却**不是**消费方：它在 agent 自己的 cwd 下发现 AGENTS.md 风格的指令文件，从不触碰 `ctx.workspaceRegistry`——两者共用的这个词指的是用户的工作目录，而非本注册表的实体。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -549,6 +551,15 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
 archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>
 
 /**
+ * Ask the `workspace/session-activity` providers what still runs or waits
+ * for one session. Nothing is written, the session's existence is not
+ * checked, and a rejecting provider rejects the call.
+ * @param sessionId - The session asked about.
+ * @returns the reported activity in listener order; empty when no provider reports any.
+ */
+sessionActivity(sessionId: SessionId): Promise<readonly SessionActivity[]>
+
+/**
  * Unarchive one session durably by dropping it from the registry-global
  * archive set; the accounting slot was never touched, so the session
  * returns to its recorded position. Unarchiving runs no session-existence
@@ -601,16 +612,18 @@ Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/w
 
 #### `workspace/session-activity` — waterfall
 
-Ask the composed providers what still runs for a session before it is archived. A listener prepends its own SessionActivity entries to the result of `next()`; the registry's innermost callback returns an empty list, so a composition without providers archives freely. Any non-empty result refuses the archive without a write.
+Ask the composed providers what still runs or waits for a session. A listener prepends its own SessionActivity entries to the result of `next()`; the registry's innermost callback returns an empty list, so a composition without providers reports none. A non-empty result refuses an archive without a write, and keeps a blank session from being reused for a new conversation; both questions go through WorkspaceRegistry.sessionActivity.
 
 ```ts cordis-catalog
 /**
- * Ask the composed providers what still runs for a session before it is
- * archived. A listener prepends its own {@link SessionActivity} entries to
- * the result of `next()`; the registry's innermost callback returns an
- * empty list, so a composition without providers archives freely. Any
- * non-empty result refuses the archive without a write.
- * @param request - the session about to be archived.
+ * Ask the composed providers what still runs or waits for a session. A
+ * listener prepends its own {@link SessionActivity} entries to the result
+ * of `next()`; the registry's innermost callback returns an empty list, so
+ * a composition without providers reports none. A non-empty result refuses
+ * an archive without a write, and keeps a blank session from being reused
+ * for a new conversation; both questions go through
+ * {@link WorkspaceRegistry.sessionActivity}.
+ * @param request - the session asked about.
  * @param next - delegate to the remaining providers.
  * @mode waterfall
  */

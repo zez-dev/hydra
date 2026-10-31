@@ -5421,6 +5421,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'resolution after durability and, with `stopActivity`, after every stop request was issued.',
       },
       {
+        signature: 'sessionActivity(sessionId: SessionId): Promise<readonly SessionActivity[]>',
+        description: 'Ask the `workspace/session-activity` providers what still runs or waits for one session. Nothing is written, the session\'s existence is not checked, and a rejecting provider rejects the call.',
+        parameters: [{ name: 'sessionId', description: 'The session asked about.' }],
+        returns: 'the reported activity in listener order; empty when no provider reports any.',
+      },
+      {
         signature: 'unarchiveSession(sessionId: SessionId): Promise<void>',
         description: 'Unarchive one session durably by dropping it from the registry-global archive set; the accounting slot was never touched, so the session returns to its recorded position. Unarchiving runs no session-existence check because removing an id cannot introduce an unknown one, so an entry whose session is gone still resolves. An id that is not archived resolves without writing.',
         parameters: [{ name: 'sessionId', description: 'The session to unarchive.' }],
@@ -6169,9 +6175,9 @@ export const EVENT_API: readonly EventApiEntry[] = [
     name: 'workspace/session-activity',
     mode: 'waterfall',
     signature: '\'workspace/session-activity\'( request: SessionActivityRequest, next: () => Promise<readonly SessionActivity[]>, ): Promise<readonly SessionActivity[]>',
-    summary: 'Ask the composed providers what still runs for a session before it is archived.',
-    description: 'Ask the composed providers what still runs for a session before it is archived. A listener prepends its own SessionActivity entries to the result of `next()`; the registry\'s innermost callback returns an empty list, so a composition without providers archives freely. Any non-empty result refuses the archive without a write.',
-    parameters: [{ name: 'request', description: 'the session about to be archived.' }, { name: 'next', description: 'delegate to the remaining providers.' }],
+    summary: 'Ask the composed providers what still runs or waits for a session.',
+    description: 'Ask the composed providers what still runs or waits for a session. A listener prepends its own SessionActivity entries to the result of `next()`; the registry\'s innermost callback returns an empty list, so a composition without providers reports none. A non-empty result refuses an archive without a write, and keeps a blank session from being reused for a new conversation; both questions go through WorkspaceRegistry.sessionActivity.',
+    parameters: [{ name: 'request', description: 'the session asked about.' }, { name: 'next', description: 'delegate to the remaining providers.' }],
   },
   {
     name: 'workspace/session-stop',
@@ -9423,7 +9429,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionCreateRequest',
-    declaration: 'export interface SessionCreateRequest {\n    readonly workspaceId?: WorkspaceId;\n    readonly cwd?: string;\n    readonly sessionId?: SessionId;\n    readonly agentPreset?: string;\n}',
+    declaration: 'export interface SessionCreateRequest {\n    readonly workspaceId?: WorkspaceId;\n    readonly cwd?: string;\n    readonly sessionId?: SessionId;\n    readonly skipActive?: boolean;\n    readonly agentPreset?: string;\n}',
   },
   {
     name: 'SessionCreateValue',

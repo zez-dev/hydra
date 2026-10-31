@@ -692,7 +692,7 @@ describe('UiWorkspaceService', () => {
       workspaces: workspaceState([workspace('a', [sid('blank')]), workspace('b', [sid('archived')])], [sid('archived')]),
     })
     await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('blank'))
-    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank') })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true })
     b.sessions.create.mockClear()
     b.sessions.retain.mockClear()
     const created = Promise.withResolvers<SessionId>()
@@ -713,7 +713,7 @@ describe('UiWorkspaceService', () => {
     })
     b.uiWorkspace.startSession(wid('a'))
     await vi.waitFor(() => {
-      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank') })
+      expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true })
     })
     await vi.waitFor(() => { expect(b.sessions.retain).toHaveBeenCalledWith(sid('blank'), expect.anything()) })
   })
@@ -730,8 +730,8 @@ describe('UiWorkspaceService', () => {
     await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'standard' })).resolves.toBe(sid('plain'))
     await expect(b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })).resolves.toBe(sid('created-a'))
     expect(b.sessions.create.mock.calls).toEqual([
-      [{ workspaceId: wid('a'), sessionId: sid('creator') }],
-      [{ workspaceId: wid('a'), sessionId: sid('plain'), agentPreset: 'standard' }],
+      [{ workspaceId: wid('a'), sessionId: sid('creator'), skipActive: true }],
+      [{ workspaceId: wid('a'), sessionId: sid('plain'), skipActive: true, agentPreset: 'standard' }],
       [{ workspaceId: wid('a'), agentPreset: 'ptc' }],
     ])
   })
@@ -1128,7 +1128,9 @@ describe('UiWorkspaceService', () => {
     } else {
       await expect(b.uiWorkspace.connectWorkspace(wid('a'))).resolves.toBe(sid('created-a'))
     }
-    expect(b.sessions.create.mock.calls).toEqual([[{ workspaceId: wid('a'), sessionId: sid('held') }]])
+    expect(b.sessions.create.mock.calls).toEqual([[{
+      workspaceId: wid('a'), sessionId: sid('held'), ...(source === 'saved' ? {} : { skipActive: true }),
+    }]])
   })
 
   it('reloads the projections of a blank the Host declined so a stale blank row is corrected', async () => {
@@ -1254,7 +1256,7 @@ describe('UiWorkspaceService', () => {
     await vi.waitFor(() => {
       expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('blank'), { source: 'mainView' })
     })
-    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank'), agentPreset: 'ptc' })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true, agentPreset: 'ptc' })
   })
 
   it('coalesces only Workspace connections that request the same preset', async () => {
@@ -1268,8 +1270,8 @@ describe('UiWorkspaceService', () => {
     const creator = b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })
     const again = b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })
     expect(b.sessions.create.mock.calls).toEqual([
-      [{ workspaceId: wid('a'), sessionId: sid('blank') }],
-      [{ workspaceId: wid('a'), sessionId: sid('blank'), agentPreset: 'ptc' }],
+      [{ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true }],
+      [{ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true, agentPreset: 'ptc' }],
     ])
     acquired.resolve(sid('blank'))
     await expect(Promise.all([plain, creator, again])).resolves.toEqual([sid('blank'), sid('blank'), sid('blank')])
@@ -1286,9 +1288,9 @@ describe('UiWorkspaceService', () => {
     const creator = b.uiWorkspace.connectWorkspace(wid('a'), { agentPreset: 'ptc' })
     const latest = b.uiWorkspace.connectWorkspace(wid('a'))
     expect(b.sessions.create.mock.calls).toEqual([
-      [{ workspaceId: wid('a'), sessionId: sid('blank') }],
-      [{ workspaceId: wid('a'), sessionId: sid('blank'), agentPreset: 'ptc' }],
-      [{ workspaceId: wid('a'), sessionId: sid('blank') }],
+      [{ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true }],
+      [{ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true, agentPreset: 'ptc' }],
+      [{ workspaceId: wid('a'), sessionId: sid('blank'), skipActive: true }],
     ])
     earliest.resolve(sid('blank'))
     await expect(Promise.all([plain, creator, latest])).resolves.toEqual([sid('blank'), sid('blank'), sid('blank')])

@@ -272,6 +272,13 @@ export interface SessionCreateRequest {
   readonly cwd?: string
   /** Blank Session to reuse while it is reusable, or the identity of a new Session when none is stored under it. */
   readonly sessionId?: SessionId
+  /**
+   * Skip the named blank when the Workspace registry's `sessionActivity` reports work for it, such as an
+   * active scheduled task, and create another Session instead; New Session sets it because it reuses any
+   * blank for an unrelated conversation. Omitted, the named blank is reused whatever activity it holds, so
+   * repeated requests naming one identity return it.
+   */
+  readonly skipActive?: boolean
   /** Preset the Session runs, replacing a reused Session's recorded preset; the configured default when omitted. */
   readonly agentPreset?: string
 }

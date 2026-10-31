@@ -507,7 +507,8 @@ export class SessionManager {
    * Contract session.create; on success merge into summaries immediately (no
    * wait for the next refresh). A created session is blank by definition
    * (entity birth precedes the first message).
-   * @param opts - target workspace or working directory, an optional blank Session to reuse, and an optional Agent preset.
+   * @param opts - target workspace or working directory, an optional blank Session to reuse, whether the Host
+   *   skips that blank while it holds pending work, and an optional Agent preset.
    * @returns the create result, naming the Session the Host created or reused.
   */
   async create(
@@ -515,11 +516,13 @@ export class SessionManager {
       workspaceId?: WorkspaceId
       cwd?: string
       sessionId?: SessionId
+      skipActive?: boolean
       agentPreset?: string
     } = {},
   ): Promise<RemoteResult<{ sessionId: SessionId }>> {
     const shared = {
       ...(opts.sessionId === undefined ? {} : { sessionId: opts.sessionId }),
+      ...(opts.skipActive === undefined ? {} : { skipActive: opts.skipActive }),
       ...(opts.agentPreset === undefined ? {} : { agentPreset: opts.agentPreset }),
     }
     const payload = opts.workspaceId !== undefined

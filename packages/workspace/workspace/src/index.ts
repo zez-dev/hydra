@@ -94,7 +94,7 @@ export class WorkspaceOrderInvalidError extends Error {
 }
 
 
-/** The session an archive request is about to write into the archive set. */
+/** The session a `workspace/session-activity` question asks about. */
 export interface SessionActivityRequest {
   readonly sessionId: SessionId
 }
@@ -117,12 +117,14 @@ declare module '@deepseek-ai/cordis' {
 
   interface Events {
     /**
-     * Ask the composed providers what still runs for a session before it is
-     * archived. A listener prepends its own {@link SessionActivity} entries to
-     * the result of `next()`; the registry's innermost callback returns an
-     * empty list, so a composition without providers archives freely. Any
-     * non-empty result refuses the archive without a write.
-     * @param request - the session about to be archived.
+     * Ask the composed providers what still runs or waits for a session. A
+     * listener prepends its own {@link SessionActivity} entries to the result
+     * of `next()`; the registry's innermost callback returns an empty list, so
+     * a composition without providers reports none. A non-empty result refuses
+     * an archive without a write, and keeps a blank session from being reused
+     * for a new conversation; both questions go through
+     * {@link WorkspaceRegistry.sessionActivity}.
+     * @param request - the session asked about.
      * @param next - delegate to the remaining providers.
      * @mode waterfall
      */
@@ -371,9 +373,7 @@ export class WorkspaceRegistry extends Service {
         throw new WorkspaceUnknownSessionError(sessionId, 'archive')
       }
       if (options.stopActivity !== true) {
-        const activity = await this.ctx.waterfall(
-          'workspace/session-activity', { sessionId }, () => Promise.resolve([]),
-        )
+        const activity = await this.sessionActivity(sessionId)
         if (activity.length > 0) throw new WorkspaceActiveSessionError(sessionId, activity)
       }
       const state = this.requireState()
@@ -384,6 +384,17 @@ export class WorkspaceRegistry extends Service {
       })
       if (options.stopActivity === true) await this.stopSessionActivity(sessionId)
     })
+  }
+
+  /**
+   * Ask the `workspace/session-activity` providers what still runs or waits
+   * for one session. Nothing is written, the session's existence is not
+   * checked, and a rejecting provider rejects the call.
+   * @param sessionId - The session asked about.
+   * @returns the reported activity in listener order; empty when no provider reports any.
+   */
+  sessionActivity(sessionId: SessionId): Promise<readonly SessionActivity[]> {
+    return this.ctx.waterfall('workspace/session-activity', { sessionId }, () => Promise.resolve([]))
   }
 
   /**

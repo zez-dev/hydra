@@ -54,6 +54,10 @@ interface HarnessOptions {
   readonly resolving?: ReadonlyMap<string, Promise<void>>
   /** Workspace placement served to `workspaceId` requests. */
   readonly workspace?: { readonly members: readonly SessionId[]; readonly archived: readonly SessionId[] }
+  /** Sessions the Workspace registry's activity question reports pending work for. */
+  readonly active?: ReadonlySet<SessionId>
+  /** Failure the Workspace registry's activity question rejects with. */
+  readonly activityFailure?: Error
 }
 
 const WORKSPACE = 'workspace-1' as WorkspaceId
@@ -120,6 +124,9 @@ async function harness(options: HarnessOptions = {}) {
     get: (id: WorkspaceId) => id === WORKSPACE ? workspace : undefined,
     list: () => [workspace],
     archivedSessionIds: archived,
+    sessionActivity: (id: SessionId) => options.activityFailure === undefined
+      ? Promise.resolve(options.active?.has(id) === true ? [{ kind: 'schedule', items: [{ id: 'schedule-1', label: 'Call back' }] }] : [])
+      : Promise.reject(options.activityFailure),
   } as never)
 
   /** Enter the Session for setup, then announce creation as the Agent factory does. */
@@ -324,6 +331,29 @@ describe('session.create reuse of a live blank Session', () => {
 
     if (!created.ok) throw new Error(`create failed: ${created.error.message}`)
     expect(created.value.sessionId).not.toBe('racing')
+  })
+
+  it('reuses a blank Session that holds pending work when the request does not skip active Sessions', async () => {
+    const draft = SessionId('adopted-draft')
+    const { ctx, remote } = await harness({ presets: ['standard'], active: new Set([draft]) })
+    await remote.create({ sessionId: draft })
+
+    const reused = await remote.create({ sessionId: draft })
+
+    expect(reused).toMatchObject({ ok: true, value: { sessionId: 'adopted-draft' } })
+    expect(ctx.agents.list().map(agent => agent.id)).toEqual(['adopted-draft'])
+  })
+
+  it('reports a failed activity question instead of creating another Session', async () => {
+    const { ctx, remote } = await harness({ presets: ['standard'], activityFailure: new Error('task storage offline') })
+    await remote.create({ sessionId: SessionId('asked-draft') })
+
+    const response = await remote.create({ sessionId: SessionId('asked-draft'), skipActive: true })
+
+    if (response.ok) throw new Error('create succeeded although the activity question failed')
+    expect(response.error.code).toBe('gateway/internal')
+    expect(response.error.message).toContain('task storage offline')
+    expect(ctx.agents.list().map(agent => agent.id)).toEqual(['asked-draft'])
   })
 
   it('serializes concurrent reuse of one Session in request order', async () => {
@@ -613,6 +643,24 @@ describe('session.create reuse of a stored blank Session', () => {
     expect(ctx.sessions.get(draft)).toBeUndefined()
   })
 
+  it('creates a new Session instead of resuming a blank Session that holds pending work', async () => {
+    const draft = SessionId('held-draft')
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-session-preset-stored-')))
+    tempDirs.push(cwd)
+    const { ctx, remote, resumed } = await harness({
+      presets: ['standard'],
+      stored: new Map([[draft, { header: storedHeader(draft, cwd, { agentPreset: 'standard' }), events: [modelSelection(0)] }]]),
+      active: new Set([draft]),
+    })
+
+    const created = await remote.create({ sessionId: draft, cwd, skipActive: true })
+
+    if (!created.ok) throw new Error(`create failed: ${created.error.message}`)
+    expect(created.value.sessionId).not.toBe('held-draft')
+    expect(resumed).toEqual([])
+    expect(ctx.sessions.get(draft)).toBeUndefined()
+  })
+
   it('refuses a stored Session in another directory', async () => {
     const other = SessionId('stored-other')
     const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-session-preset-stored-')))
@@ -662,14 +710,17 @@ describe('session.create Workspace placement', () => {
   })
 
   it.each([
-    { name: 'outside the Workspace', members: [], archived: [] },
-    { name: 'archived', members: [SessionId('placed-draft')], archived: [SessionId('placed-draft')] },
-  ])('creates a new Session instead of reusing a blank Session $name', async ({ members, archived }) => {
+    { name: 'outside the Workspace', members: [], archived: [], active: [] },
+    { name: 'archived', members: [SessionId('placed-draft')], archived: [SessionId('placed-draft')], active: [] },
+    { name: 'holding pending work', members: [SessionId('placed-draft')], archived: [], active: [SessionId('placed-draft')] },
+  ])('creates a new Session instead of reusing a blank Session $name', async ({ members, archived, active }) => {
     const draft = SessionId('placed-draft')
-    const { remote, selections, presetOf } = await harness({ presets: ['standard', 'minimal'], workspace: { members, archived } })
+    const { remote, selections, presetOf } = await harness({
+      presets: ['standard', 'minimal'], workspace: { members, archived }, active: new Set(active),
+    })
     await remote.create({ sessionId: draft, agentPreset: 'minimal' })
 
-    const created = await remote.create({ sessionId: draft, workspaceId: WORKSPACE })
+    const created = await remote.create({ sessionId: draft, workspaceId: WORKSPACE, skipActive: true })
 
     if (!created.ok) throw new Error(`create failed: ${created.error.message}`)
     expect(created.value.sessionId).not.toBe('placed-draft')

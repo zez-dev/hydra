@@ -61,11 +61,11 @@ export interface ApiSessionCreateRequest {
   /** Preset the Session runs; the configured default when omitted. */
   readonly agentPreset?: string
   /**
-   * Placement rule the caller owns, such as Workspace membership and archive state.
+   * Placement rule the caller owns, such as Workspace membership, archive state, and pending work.
    * @param sessionId - existing Session named by the request.
-   * @returns whether that Session may be reused.
+   * @returns whether that Session may be reused; a rejection fails the creation.
    */
-  readonly reusable: (sessionId: SessionId) => boolean
+  readonly reusable: (sessionId: SessionId) => Promise<boolean>
 }
 
 /** The Session one creation request created or reused. */
@@ -247,6 +247,7 @@ export class ApiSessionAgentController {
    * @throws ApiSessionSubagentOwnership when subagent routing owns the named Session.
    * @throws RemoteError `agent-preset/not-found` or `agent-preset/invalid` for the requested or default preset.
    * @throws ApiSessionPresetConflict when no roster is composed and the request names a preset for a reused Session.
+   * @throws the placement rule's rejection, before any Session is created or changed.
    */
   async createSession(request: ApiSessionCreateRequest): Promise<ApiSessionCreated> {
     const named = request.sessionId
@@ -372,7 +373,7 @@ export class ApiSessionAgentController {
       if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
       return this.createAgent(sessionId, request.cwd, await this.composeAgent(request.agentPreset))
     }
-    let reusable: boolean
+    let started: boolean
     {
       using observed = observation
       if (hasApiSessionSubagentOwner(this.ctx, { header: observed.header }, undefined)) {
@@ -381,8 +382,9 @@ export class ApiSessionAgentController {
       if (observed.header.cwd !== request.cwd) {
         throw new ApiSessionCwdConflict(sessionId, request.cwd, observed.header.cwd)
       }
-      reusable = request.reusable(sessionId) && !observed.events.some(event => event.type === 'turn/start')
+      started = observed.events.some(event => event.type === 'turn/start')
     }
+    const reusable = !started && await request.reusable(sessionId)
     const composition = await this.composeAgent(request.agentPreset)
     if (!reusable) return this.createMinted(request.cwd, composition)
     this.assertPresetApplicable(sessionId, request.agentPreset)
@@ -408,7 +410,8 @@ export class ApiSessionAgentController {
     request: ApiSessionCreateRequest,
     composition: ApiSessionComposition,
   ): Promise<Agent | undefined> {
-    if (!request.reusable(live.id) || !this.isBlank(live.session)) return undefined
+    // A reuse without a preset switch returns the live Session unchecked, so blankness is read after the placement rule settles.
+    if (!await request.reusable(live.id) || !this.isBlank(live.session)) return undefined
     this.assertPresetApplicable(live.id, request.agentPreset)
     const current = this.presetForSession(live.session)
     const presets = this.ctx.get('agentPresets')

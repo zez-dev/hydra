@@ -49,7 +49,7 @@ Host 仅在配置的工作时间片耗尽时，于完整条目之间让出事件
 
 Client 列表行和驻留 Session 使用当前 `sessionListMetadata` 投影纠正过期的空白会话提示；最近活动时间取摘要时间戳与投影中最后一次用户提示词时间的较晚值。当 SessionManager 在列表行到达前创建实例时，会使用已保留的该 Session 元数据对账空白状态。因此，即使旧列表响应仍将已有对话标为空白，新会话操作也不会复用已经打开过的对话。
 
-`session.create` 返回一个用于新对话的 Session，响应指明实际使用的 Session。请求指明的 `sessionId` 在满足以下条件时被复用：仍为空白（尚未开始任何轮次）、属于请求的目录、是请求的工作区中未归档的成员，且未被其他写者占用；活动 Session 原地复用，持久化 Session 被恢复并持续持有其写锁。被复用的 Session 运行请求的 `agentPreset`，请求未指明时运行配置的默认 preset：不解析它记录的 preset，变更在 Agent 发布前记录为 `agent-preset/selected`。指明的 Session 若已开始、不满足工作区归属，或被其他写者占用，则保持不变，改为新建 Session。没有对应已存储 Session 的 `sessionId` 成为新 Session 的标识。指明其他目录中的 Session 返回 `session/conflict`，指明由 subagent 路由拥有的 Session 返回 `session/agent-busy`；这两项检查先于 preset 解析。指明同一标识的创建请求按到达顺序执行，preset 解析也包含在内，每个响应报告其自身请求完成时该 Session 运行的 preset。`session.list` 根据缓存元数据列出持久化空白会话，不打开冷日志正文。
+`session.create` 返回一个用于新对话的 Session，响应指明实际使用的 Session。请求指明的 `sessionId` 在满足以下条件时被复用：仍为空白（尚未开始任何轮次）、属于请求的目录、是请求的工作区中未归档的成员，且未被其他写者占用；活动 Session 原地复用，持久化 Session 被恢复并持续持有其写锁。被复用的 Session 运行请求的 `agentPreset`，请求未指明时运行配置的默认 preset：不解析它记录的 preset，变更在 Agent 发布前记录为 `agent-preset/selected`。指明的 Session 若已开始、不满足工作区归属，或被其他写者占用，则保持不变，改为新建 Session。设置了 `skipActive` 的请求（新会话即如此）还会跳过工作区注册表的 `sessionActivity` 报告有工作的指明空白 Session，例如活动定时任务，活动询问被拒绝时该请求以 `gateway/internal` 失败；未设置 `skipActive` 时，指明同一空白标识的重复请求无论它持有什么工作都会返回它。没有对应已存储 Session 的 `sessionId` 成为新 Session 的标识。指明其他目录中的 Session 返回 `session/conflict`，指明由 subagent 路由拥有的 Session 返回 `session/agent-busy`；这两项检查先于 preset 解析。指明同一标识的创建请求按到达顺序执行，preset 解析也包含在内，每个响应报告其自身请求完成时该 Session 运行的 preset。`session.list` 根据缓存元数据列出持久化空白会话，不打开冷日志正文。
 
 Client 列表刷新保留未变化的行对象，并在顺序和值均相同时复用条目数组。每行的 `retainedBy` 包含正数的本地引用来源计数，Host 元数据刷新不能覆盖它们。缓存成员检查使用每次刷新构建的 ID 集合，因此对账成本随当前列表和保留缓存的规模线性增长。 Host 摘要更新会替换运行状态与 Agent 可用性；本地 create/fork 响应只补充已有行缺失的元数据。普通 Session 被移除后，仅在目录仍有子项时保留其投影 store。
 
@@ -135,6 +135,7 @@ Blockquote 作为普通 prompt 文本传递，不携带 quote 元数据。本地
 - 受理/运行的展示记忆只存在于客户端内存，页面重载后即丢失。
 - 该记忆不在 tab 之间共享：同一会话可能在一个 tab 中已转正，在另一个 tab 中仍显示为 `New Session`。
 - `session.delete` 从不中断运行中的轮次，也无法关闭并非由它打开的 Agent，因此这两种情况仍会被拒绝（例外是其 live 父会话仍持有的空闲 subagent 子会话：subagent 服务会先释放它；该服务缺席时，拒绝信息会指明需要关闭的父会话）；Web UI 不提供单独的关闭操作，因此运行中的 Session 只有在其轮次结算后才能删除。spill 文件与附件文件不会被删除，因为这些包没有提供按会话删除的接口；SQLite 搜索索引只会在下次观察到该会话时将其移除。保留下来的 fork 仍可读取已删除父会话写入的 spill 文件，因此删除时若按会话清理 spill，必须保留 fork 引用的文件。
+- 设置了 `skipActive` 的请求在复用指明的 Session 之前询问 `sessionActivity`，而该回答与复用并非原子的一步：在回答之后、该 Session 被恢复或返回之前绑定到它的任务，会投递进复用它的那段对话。
 
 
 <a id="dev-note"></a>

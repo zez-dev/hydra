@@ -134,6 +134,7 @@
     "tests/model-menu-observer.e2e.ts",
     "tests/default-workspace.e2e.ts",
     "tests/new-session-refused.e2e.ts",
+    "tests/new-session-held-blank.e2e.ts",
     "tests/github-ready-review.e2e.ts",
     "tests/streaming-fence-highlight.e2e.ts",
     "tests/declared-reasoning.e2e.ts",

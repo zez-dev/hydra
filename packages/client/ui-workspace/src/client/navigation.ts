@@ -95,8 +95,9 @@ export interface UiWorkspace {
   /**
    * Resolve the Session for a new conversation in a Workspace: navigation names the first reusable
    * blank member — listed in the Workspace, not archived, and listing no preset or the requested one —
-   * and the Host reuses it under the requested preset or its default, creating another Session when it
-   * reuses none. Concurrent calls for the same Workspace and preset share one attempt.
+   * with `skipActive`, and the Host reuses it under the requested preset or its default unless it holds
+   * pending work, such as an active scheduled task, creating another Session when it reuses none.
+   * Concurrent calls for the same Workspace and preset share one attempt.
    * @param workspaceId - target Workspace.
    * @param options - choices for the created or reused Session.
    * @returns a Session already addressable through the Session Controller.
@@ -273,19 +274,21 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     })
     return this.createNamed({
       workspaceId: workspace.workspaceId,
-      ...(blank === undefined ? {} : { sessionId: blank }),
+      ...(blank === undefined ? {} : { sessionId: blank, skipActive: true }),
       ...(options.agentPreset === undefined ? {} : { agentPreset: options.agentPreset }),
     })
   }
 
   /**
-   * Create through the Host. A named blank the Host declined may still read as
-   * blank from stale cached list metadata, which hides it from the Session tree;
-   * its projections are reloaded so the row reflects its log.
+   * Create through the Host. A named blank the Host declined because it started
+   * may still read as blank from stale cached list metadata, which hides it from
+   * the Session tree; its projections are reloaded so the row reflects its log.
+   * A blank declined for its pending work is still blank and stays hidden.
    */
   private async createNamed(request: {
     readonly workspaceId: WorkspaceId
     readonly sessionId?: SessionId
+    readonly skipActive?: true
     readonly agentPreset?: string
   }): Promise<SessionId> {
     const sessionId = await this.createWithinDeadline(request)
@@ -330,7 +333,9 @@ class UiWorkspaceService extends Service implements UiWorkspace {
    * the Host default once that preset no longer activates. Listed values are
    * cached hints that can lag the log after an unclean Host exit, so the
    * Session's projections are reloaded before the preset is read; a Session
-   * that still awaits a format migration reloads only those cached hints.
+   * that still awaits a format migration reloads only those cached hints. The
+   * request does not set `skipActive`, so a saved blank that holds pending work
+   * is reopened rather than replaced.
    */
   private async restoreBlank(workspaceId: WorkspaceId, sessionId: SessionId): Promise<SessionId> {
     await this.sessions.refreshProjections(sessionId)

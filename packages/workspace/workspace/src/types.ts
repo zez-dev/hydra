@@ -50,8 +50,10 @@ export interface SessionActivityItem {
 }
 
 /**
- * One reason a session counts as active for archive admission. Families with
- * per-item identity list their items so a caller can name what must stop.
+ * One reason a session counts as active: archive admission refuses it, and a
+ * blank session is not reused for a new conversation while it has one.
+ * Families with per-item identity list their items so a caller can name what
+ * must stop.
  */
 export interface SessionActivity {
   readonly kind: SessionActivityKind

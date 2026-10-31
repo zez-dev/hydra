@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-10-31-blank-reuse-skips-pending-work.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-10-31-blank-reuse-skips-pending-work.md
+/agent-note-blank-session-reuse-skips-pending-work:
+  en: f3e3baff0f400fc3
+  zh: 9f7d4dec7f4e5785
+/agent-note-blank-session-reuse-skips-pending-work/problem:
+  en: 53c24f27443d7577
+  zh: cac26be6ea87ddb8
+/agent-note-blank-session-reuse-skips-pending-work/decision:
+  en: d46b39796b4259e7
+  zh: 2fa9844f4bea5ec7
+/agent-note-blank-session-reuse-skips-pending-work/alternatives-considered:
+  en: d64a9151db799af6
+  zh: 746056a76dc76ff9
+/agent-note-blank-session-reuse-skips-pending-work/consequences:
+  en: d3d9a61c6459ecf0
+  zh: 9cf1b5cd95791a94
+/agent-note-blank-session-reuse-skips-pending-work/verification:
+  en: 3be8ba999c9717b3
+  zh: 93046fa988b36ed7

@@ -1195,13 +1195,15 @@ describe('remaining branches', () => {
     expect(await manager.create()).toMatchObject({ ok: false })
   })
 
-  it('create forwards the requested Agent preset and catalogs the identity the Host returns', async ({ mock, remote }) => {
+  it('create forwards the skip choice and Agent preset and catalogs the identity the Host returns', async ({ mock, remote }) => {
     remote.session.create.mockResolvedValue(ok({ sessionId: S2, agentPreset: 'minimal' }))
     const manager = makeManager(mock, remote)
 
-    const result = await manager.create({ workspaceId: 'w1' as never, sessionId: S1, agentPreset: 'minimal' })
+    const result = await manager.create({ workspaceId: 'w1' as never, sessionId: S1, skipActive: true, agentPreset: 'minimal' })
 
-    expect(remote.session.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'w1', sessionId: S1, agentPreset: 'minimal' })
+    expect(remote.session.create).toHaveBeenCalledExactlyOnceWith({
+      workspaceId: 'w1', sessionId: S1, skipActive: true, agentPreset: 'minimal',
+    })
     expect(result).toMatchObject({ ok: true, value: { sessionId: S2 } })
     expect(manager.getListSnapshot().items.map(item => item.sessionId)).toEqual([S2])
   })

@@ -65,18 +65,30 @@ describe.skipIf(MODE === 'record')('web e2e: Send later', () => {
     const input = page.locator('[data-composer-input]').first()
     const sendLater = page.getByRole('button', { name: 'Send later', exact: true })
 
-    // New Session reuses a Session that has not started a turn, so its draft is not scheduled there.
+    // A new chat schedules its draft as well, and New Session then opens another Session instead of reusing it.
+    const [workspace] = scaffold.ctx.workspaceRegistry.list()
+    await expect.poll(() => workspace?.sessionIds.length).toBe(1)
+    const blankId = workspace!.sessionIds[0]!
     await input.fill(DRAFT)
-    await sendLater.waitFor()
-    expect(await sendLater.isDisabled()).toBe(true)
-    await input.fill('')
-    await sendLater.waitFor({ state: 'detached' })
+    await expect.poll(() => sendLater.isEnabled()).toBe(true)
+    await sendLater.click()
+    await page.getByRole('menu').getByRole('menuitem', { name: /^In 5 hours/ }).click()
+    const scheduled = page.getByRole('alert').filter({ hasText: 'Message scheduled for' })
+    await scheduled.waitFor()
+    expect(await scaffold.ctx.schedule.list({ sessionId: blankId })).toEqual([expect.objectContaining({
+      kind: 'after', title: DRAFT, prompt: DRAFT, afterSeconds: 18_000,
+    })])
+    await page.getByRole('button', { name: 'New session', exact: true }).last().click()
+    await expect.poll(() => workspace!.sessionIds.length).toBe(2)
+    await scheduled.waitFor({ state: 'detached' })
     const prompts = fixtureUserPrompts(await readFile(fixture, 'utf8'))
     expect(prompts).toHaveLength(1)
     const settled = scaffold.whenTurnSettled()
     await input.fill(prompts[0]!)
     await input.press('Enter')
     const sessionId = await settled
+    expect(sessionId).not.toBe(blankId)
+    expect(await scaffold.ctx.schedule.list({ sessionId: blankId })).toHaveLength(1)
 
     await input.fill(DRAFT)
     await expect.poll(() => sendLater.isEnabled()).toBe(true)

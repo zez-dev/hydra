@@ -54,7 +54,6 @@ export type SendLaterActionProps =
 
 /** Tooltip copy of each reason a draft cannot be scheduled; a busy composer shows no reason. */
 const BLOCK_COPY: Readonly<Record<Exclude<SendLaterBlock, 'busy'>, TaskManagerKey>> = {
-  blank: 'sendLater.blank',
   command: 'sendLater.command',
   attachments: 'sendLater.attachments',
   references: 'sendLater.references',
@@ -88,14 +87,13 @@ export function SendLaterAction(props: SendLaterActionProps): ReactNode {
 }
 
 function SendLaterControl({
-  useInput, useSession, inputActions, createTask, openTaskDetail, t,
+  useInput, inputActions, createTask, openTaskDetail, t,
 }: SendLaterActionProps): ReactNode {
   const draft = useInput(state => state.draft)
   const phase = useInput(state => state.phase)
   const attachments = useInput(state => state.attachmentIds.length)
   const references = useInput(state => state.occurrences.length)
-  const blank = useSession(snapshot => snapshot.blank)
-  const block = sendLaterBlock({ draft, phase, attachments, references, blank })
+  const block = sendLaterBlock({ draft, phase, attachments, references })
   const [menuOpen, setMenuOpen] = useState(false)
   const [clock, setClock] = useState(() => ({ now: Date.now(), zone: deviceZone() }))
   const [custom, setCustom] = useState<LocalDateTime | null>(null)

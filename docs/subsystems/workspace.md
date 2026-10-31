@@ -154,8 +154,10 @@ interface SessionActivityKindMap {}
 
 ```ts type-equiv
 /**
- * One reason a session counts as active for archive admission. Families with
- * per-item identity list their items so a caller can name what must stop.
+ * One reason a session counts as active: archive admission refuses it, and a
+ * blank session is not reused for a new conversation while it has one.
+ * Families with per-item identity list their items so a caller can name what
+ * must stop.
  */
 interface SessionActivity {
   readonly kind: SessionActivityKind
@@ -164,11 +166,11 @@ interface SessionActivity {
 }
 ```
 
-`SessionActivityItem` carries the family-specific `id` (a session, job, or schedule id) and an optional display `label`. `archiveSession(sessionId)` asks the waterfall once, after the existence check, and rejects a non-empty answer with `WorkspaceActiveSessionError` (`sessionId`, `activity`) without writing; the controller maps it to the `workspace/session-active` error, whose details carry the same two fields. `archiveSession(sessionId, { stopActivity: true })` — the `ArchiveSessionOptions` field the transport request exposes as `stopActivity` — skips the check, writes the archive, then dispatches `workspace/session-stop`; a rejecting provider is logged and the archive stays, and the stopped work is never awaited to settlement. An already archived id neither asks nor stops. The shipped providers, what they stop, and the `agent/pre-step` gate that keeps an archived Session from running a model step are documented with the [registry package](../../packages/workspace/workspace/README.md#api-behavior); the decision record is the [archive-stops-running-work Agent Note](../../.agents/notes/implemented/feature/2026-09-21-archive-stops-running-session-work.md).
+`SessionActivityItem` carries the family-specific `id` (a session, job, or schedule id) and an optional display `label`. `archiveSession(sessionId)` asks the waterfall once, after the existence check, and rejects a non-empty answer with `WorkspaceActiveSessionError` (`sessionId`, `activity`) without writing; the controller maps it to the `workspace/session-active` error, whose details carry the same two fields. `archiveSession(sessionId, { stopActivity: true })` — the `ArchiveSessionOptions` field the transport request exposes as `stopActivity` — skips the check, writes the archive, then dispatches `workspace/session-stop`; a rejecting provider is logged and the archive stays, and the stopped work is never awaited to settlement. An already archived id neither asks nor stops. `sessionActivity(sessionId)` asks the same waterfall without writing or checking existence; the API Session Controller asks it for a `session.create` request that sets `skipActive`, as New Session does, and creates another Session instead of reusing a blank that any provider reports work for. The shipped providers, what they stop, and the `agent/pre-step` gate that keeps an archived Session from running a model step are documented with the [registry package](../../packages/workspace/workspace/README.md#api-behavior); the decision record is the [archive-stops-running-work Agent Note](../../.agents/notes/implemented/feature/2026-09-21-archive-stops-running-session-work.md).
 
 ## Consumers
 
-[`dsh-workspace-controller`](../../packages/api/workspace-controller) serves workspace CRUD to GUI clients over `ctx.workspaceRegistry`, and [`dsh-session-controller`](../../packages/api/session-controller) performs the create-session-then-attach flow above. [dsh-agent-instructions](../../packages/context/agent-instructions) is **not** a consumer despite the name: it discovers AGENTS.md-style instruction files under an agent's own cwd and never touches `ctx.workspaceRegistry` — the shared word refers to the user's working directory, not to this registry's entities.
+[`dsh-workspace-controller`](../../packages/api/workspace-controller) serves workspace CRUD to GUI clients over `ctx.workspaceRegistry`, and [`dsh-session-controller`](../../packages/api/session-controller) performs the create-session-then-attach flow above and, for a request that sets `skipActive`, asks `sessionActivity` before it reuses a blank Session. [dsh-agent-instructions](../../packages/context/agent-instructions) is **not** a consumer despite the name: it discovers AGENTS.md-style instruction files under an agent's own cwd and never touches `ctx.workspaceRegistry` — the shared word refers to the user's working directory, not to this registry's entities.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -549,6 +551,15 @@ insertBefore(id: WorkspaceId, beforeId?: WorkspaceId): Promise<readonly Workspac
 archiveSession(sessionId: SessionId, options: ArchiveSessionOptions = {}): Promise<void>
 
 /**
+ * Ask the `workspace/session-activity` providers what still runs or waits
+ * for one session. Nothing is written, the session's existence is not
+ * checked, and a rejecting provider rejects the call.
+ * @param sessionId - The session asked about.
+ * @returns the reported activity in listener order; empty when no provider reports any.
+ */
+sessionActivity(sessionId: SessionId): Promise<readonly SessionActivity[]>
+
+/**
  * Unarchive one session durably by dropping it from the registry-global
  * archive set; the accounting slot was never touched, so the session
  * returns to its recorded position. Unarchiving runs no session-existence
@@ -601,16 +612,18 @@ Source: [`packages/workspace/workspace/src/index.ts`](../../packages/workspace/w
 
 #### `workspace/session-activity` — waterfall
 
-Ask the composed providers what still runs for a session before it is archived. A listener prepends its own SessionActivity entries to the result of `next()`; the registry's innermost callback returns an empty list, so a composition without providers archives freely. Any non-empty result refuses the archive without a write.
+Ask the composed providers what still runs or waits for a session. A listener prepends its own SessionActivity entries to the result of `next()`; the registry's innermost callback returns an empty list, so a composition without providers reports none. A non-empty result refuses an archive without a write, and keeps a blank session from being reused for a new conversation; both questions go through WorkspaceRegistry.sessionActivity.
 
 ```ts cordis-catalog
 /**
- * Ask the composed providers what still runs for a session before it is
- * archived. A listener prepends its own {@link SessionActivity} entries to
- * the result of `next()`; the registry's innermost callback returns an
- * empty list, so a composition without providers archives freely. Any
- * non-empty result refuses the archive without a write.
- * @param request - the session about to be archived.
+ * Ask the composed providers what still runs or waits for a session. A
+ * listener prepends its own {@link SessionActivity} entries to the result
+ * of `next()`; the registry's innermost callback returns an empty list, so
+ * a composition without providers reports none. A non-empty result refuses
+ * an archive without a write, and keeps a blank session from being reused
+ * for a new conversation; both questions go through
+ * {@link WorkspaceRegistry.sessionActivity}.
+ * @param request - the session asked about.
  * @param next - delegate to the remaining providers.
  * @mode waterfall
  */
