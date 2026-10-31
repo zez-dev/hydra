@@ -114,7 +114,7 @@ export const WELCOME_NOTICE_SETTINGS_NAMESPACE = 'ui-settings-general'
 /** The installed bundle carrying the scaffold's deployment defaults; the plugin manager lists it beside fixture bundles. */
 export const SCAFFOLD_DEFAULTS_BUNDLE = 'dsh-web-scaffold-defaults'
 export const WELCOME_NOTICE_ACK_FIELD = 'welcomeNoticeVersion'
-export const WELCOME_NOTICE_VERSION = '2026-09-28.1'
+export const WELCOME_NOTICE_VERSION = '2026-10-31.1'
 export const WELCOME_NOTICE_COPY = {
   zh: {
     title: '预览版说明',

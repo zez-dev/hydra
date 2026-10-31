@@ -121,7 +121,8 @@ The Web UI starts at `http://127.0.0.1:3080` and opens in your browser. The prin
 
 - `--port 4000` picks another port, and `--no-open` skips opening a browser, for example on a server or over SSH: `node ~/hydra/apps/cli/lib/bin.js web --port 4000 --no-open`.
 - To run one task without the Web UI: `node ~/hydra/apps/cli/lib/bin.js --profile headless "fix the failing test"`.
-- Inside the repository, `pnpm dsh web` runs the same app from source.
+- Inside the repository, `pnpm hydra web` runs the same app from source.
+- The command is `hydra`, and `dsh` is the same command under its earlier name. To type `hydra web` instead of the full path, add `alias hydra='node ~/hydra/apps/cli/lib/bin.js'` to your shell profile.
 
 Hydra keeps its settings, sessions, and keys in `~/.dsh`. To use another folder, export `DSH_HOME=/some/dir` before starting; a `.env` file cannot set it.
 
@@ -203,7 +204,7 @@ Use the model id exactly as the server lists it (`ollama list`, or LM Studio's m
 
 ## Mac app
 
-There is no Hydra Mac app (`.dmg`) yet. On a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. These macOS steps follow upstream but have not been tested on a Mac yet, so please report how they work for you. The desktop app under `apps/desktop` is upstream's: packaging it needs an Apple Developer ID, and its update checks go to DeepSeek's servers, so Hydra does not ship it.
+There is no released Hydra Mac app (`.dmg`) yet. The [desktop app](apps/desktop/README.md) builds locally as an unsigned DMG with `pnpm --filter @deepseek-ai/dsh-desktop run package:mac:arm64:unsigned`; macOS asks you to approve it under **System Settings → Privacy & Security** the first time you open it. Its **Manage hydra Command…** menu installs the `hydra` command, and Hydra's desktop builds never check DeepSeek's update servers. Otherwise, on a Mac, run Hydra from source with the steps above: install the Xcode Command Line Tools first, and skip the Linux sandbox step. These macOS steps follow upstream but have not been tested on a Mac yet, so please report how they work for you.
 
 ## Updating
 

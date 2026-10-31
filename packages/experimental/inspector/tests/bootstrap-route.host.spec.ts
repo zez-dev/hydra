@@ -151,7 +151,7 @@ describe('experimental Inspector Host bootstrap route', () => {
     expect(registerUpgrade).not.toHaveBeenCalled()
     expect(injected()).toBeUndefined()
     expect(context!.get('inspector')).toBeUndefined()
-    expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/^dsh inspector:/u))
+    expect(log).not.toHaveBeenCalledWith(expect.stringMatching(/^hydra inspector:/u))
     expect(open).not.toHaveBeenCalled()
 
     await fiber.dispose()

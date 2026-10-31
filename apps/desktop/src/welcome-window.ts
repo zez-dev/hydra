@@ -3,7 +3,8 @@ import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
+import { HYDRA_DISCLAIMER_URL } from './disclaimer.ts'
 import type { DesktopLocale } from './locale.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
 
@@ -114,7 +115,11 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     return operations.copySignInLink(id as SignInAttemptId)
   })
   window.once('closed', disposeHandlers)
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    // The disclaimer link is the only page the welcome renderer may show, and it opens in the default browser.
+    if (url === HYDRA_DISCLAIMER_URL) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
   window.webContents.on('will-navigate', (event) => { event.preventDefault() })
   try {
     await window.loadFile(join(app.getAppPath(), 'renderer', 'welcome.html'))

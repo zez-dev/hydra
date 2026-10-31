@@ -8,6 +8,7 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { WelcomeNoticeState, WelcomeNoticeStore } from './welcome-store.ts'
 import type { en } from './locales.ts'
 import { OnboardingModal } from './OnboardingModal.tsx'
+import { HYDRA_DISCLAIMER_URL } from '../onboarding-copy.ts'
 import css from './WelcomeNotice.module.css'
 
 /** Registration-side dependencies of {@link WelcomeNotice}. */
@@ -60,6 +61,10 @@ export function WelcomeNotice(props: WelcomeNoticeProps): ReactNode {
     <OnboardingModal title={t('welcomeTitle')} focusTitle>
       <div className={css.copy}>
         {paragraphs.map(paragraph => <p key={paragraph}>{paragraph}</p>)}
+        <p className={css.disclaimer}>
+          {t('welcomeDisclaimer')}{' '}
+          <a href={HYDRA_DISCLAIMER_URL} target="_blank" rel="noreferrer">{t('welcomeDisclaimerLink')}</a>
+        </p>
       </div>
       {state.error === null ? null : <p className={css.error} role="alert">{t('welcomeError')}</p>}
       <div className={css.actions}>

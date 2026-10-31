@@ -41,6 +41,8 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
       ...heading === 'key-title' ? [document.querySelector('#key-description')!.textContent, `${input.placeholder} [password]`] : [],
       ...[...document.querySelectorAll('button')].filter(item => item.closest('[hidden]') === null)
         .map(item => `${item.textContent || item.getAttribute('aria-label')}${item.disabled ? ' [disabled]' : ''}`),
+      ...[...document.querySelectorAll('#disclaimer')].filter(item => item.closest('[hidden]') === null)
+        .map(item => `${item.textContent ?? ''} [${item.querySelector('a')!.getAttribute('href') ?? ''}]`),
       '',
     ].join('\n')
   }
@@ -52,6 +54,8 @@ describe('desktop welcome presentation', () => {
     const view = mount(language)
     expect(view.document.documentElement.lang).toBe(language)
     expect(view.document.querySelector('img')!.getAttribute('src')).toBe('assets/welcome-brand.svg')
+    // The disclaimer link opens through the window-open handler, which hands only this URL to the default browser.
+    expect(view.document.querySelector('#disclaimer a')!.getAttribute('target')).toBe('_blank')
     await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}.expected.txt`)
     fireEvent.click(view.button('#api-key'))
     expect(view.document.activeElement).toBe(view.input)

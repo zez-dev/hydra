@@ -6,6 +6,7 @@ import { needsWelcome, WELCOME_IPC } from '../src/welcome-api.ts'
 const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
   root: '/desktop-app',
+  openExternal: vi.fn<(url: string) => Promise<void>>(async () => {}),
   handlers: new Map<string, (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>>(),
 }))
 vi.mock('electron', () => ({
@@ -18,6 +19,7 @@ vi.mock('electron', () => ({
     },
     removeHandler: (name: string) => electron.handlers.delete(name),
   },
+  shell: { openExternal: (url: string) => electron.openExternal(url) },
 }))
 
 const { openWelcomeWindow, welcomeWindowOptions } = await import('../src/welcome-window.ts')
@@ -26,7 +28,7 @@ function createWindow() {
   return {
     webContents: {
       mainFrame: {},
-      setWindowOpenHandler: vi.fn<(handler: () => { action: string }) => void>(),
+      setWindowOpenHandler: vi.fn<(handler: (details: { url: string }) => { action: string }) => void>(),
       on: vi.fn<(name: string, handler: (event: { preventDefault(): void }) => void) => void>(),
     },
     loadFile: vi.fn<(path: string) => Promise<undefined>>().mockResolvedValue(undefined),
@@ -37,7 +39,7 @@ function createWindow() {
   }
 }
 
-beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
+beforeEach(() => { electron.create.mockReset(); electron.openExternal.mockClear(); electron.handlers.clear() })
 
 const operations = {
   analyticsEnabled: async () => true,
@@ -83,7 +85,12 @@ describe('desktop welcome window', () => {
     const opening = openWelcomeWindow(resolveDesktopLocale('en'), operations)
     expect(window.show).not.toHaveBeenCalled()
     expect(window.loadFile).toHaveBeenCalledWith(join(electron.root, 'renderer', 'welcome.html'))
-    expect(window.webContents.setWindowOpenHandler.mock.calls[0]![0]()).toEqual({ action: 'deny' })
+    const openWindow = window.webContents.setWindowOpenHandler.mock.calls[0]![0]
+    expect(openWindow({ url: 'https://example.com/' })).toEqual({ action: 'deny' })
+    expect(electron.openExternal).not.toHaveBeenCalled()
+    // Only the disclaimer link leaves the welcome window, through the default browser.
+    expect(openWindow({ url: 'https://github.com/zez-dev/hydra#disclaimer' })).toEqual({ action: 'deny' })
+    expect(electron.openExternal).toHaveBeenCalledExactlyOnceWith('https://github.com/zez-dev/hydra#disclaimer')
     const event = { preventDefault: vi.fn() }
     window.webContents.on.mock.calls[0]![1](event)
     expect(event.preventDefault).toHaveBeenCalledOnce()

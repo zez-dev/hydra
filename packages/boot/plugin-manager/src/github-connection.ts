@@ -52,7 +52,7 @@ export async function checkGithubConnection(
       timeout: options.timeoutMs, cancelSignal: options.signal, killDescendants: true, killSignal: 'SIGKILL',
     })
     if (!result.failed) return undefined
-    if (result.timedOut) await log.write(`dsh: connection to ${spec.host} timed out after ${String(options.timeoutMs)}ms\n`)
+    if (result.timedOut) await log.write(`hydra: connection to ${spec.host} timed out after ${String(options.timeoutMs)}ms\n`)
     if ((await log.stat()).size === 0) await log.write(result.shortMessage ?? 'GitHub connection check failed')
     const { size } = await log.stat()
     const bytes = Buffer.alloc(Math.min(size, options.outputBytes))

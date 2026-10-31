@@ -344,7 +344,7 @@ export function installLogSink(ctx: HostContext, require: (specifier: string) =>
 }
 
 /** Diagnostic prefix the launcher passes to app-boot; the Worker boots the same profile code. */
-const BIN_NAME = 'dsh'
+const BIN_NAME = 'hydra'
 
 /** The app-boot members the Worker boots the tree with, as the image's own app-boot exports them. */
 interface AppBootFace {

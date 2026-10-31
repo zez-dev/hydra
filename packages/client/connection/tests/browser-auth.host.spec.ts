@@ -103,7 +103,7 @@ describe('API credentials', () => {
     expect(res.state).toEqual({
       status: 401,
       headers: { 'cache-control': 'no-store', 'content-type': 'text/plain; charset=utf-8' },
-      body: 'dsh web authentication required; reopen the URL printed by dsh web.\n',
+      body: 'hydra web authentication required; reopen the URL printed by hydra web.\n',
     })
     expect(publish).not.toHaveBeenCalled()
   })
@@ -283,7 +283,7 @@ describe('BrowserAuth', () => {
       })
       expect(denied.state.body).toBe(candidate.method === 'HEAD'
         ? undefined
-        : 'dsh web authentication required; reopen the URL printed by dsh web.\n')
+        : 'hydra web authentication required; reopen the URL printed by hydra web.\n')
     }
   })
 

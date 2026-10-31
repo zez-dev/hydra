@@ -19,7 +19,7 @@ const WEB_GUIDANCE = 'When the user refers to "this page", "this GUI", or "this 
   + '`pnpm run dev:web` is also running from this same checkout to rebuild their bundles; verify that watcher before promising automatic updates. '
   + 'Every other change — the apps/web shell and plain packages — requires rebuilding the affected Web artifacts and verifying this existing URL after a page refresh. '
   + 'Starting another server does not update this GUI. '
-  + 'The apps/web Vite entry builds the shell but is not a standalone application because only dsh web injects window.__DSH_BOOT__. '
+  + 'The apps/web Vite entry builds the shell but is not a standalone application because only hydra web injects window.__DSH_BOOT__. '
   + 'Do not start a replacement server unless the user asks; if one is needed, use a managed background job and verify its exact URL.'
 const WEB_PROMPT = `You are interacting with the user through the Hydra Web GUI whose URL the runtime context names. ${WEB_GUIDANCE}`
 

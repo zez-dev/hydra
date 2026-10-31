@@ -58,6 +58,7 @@ const harness = await vi.hoisted(async () => {
   let embeddedPolicy: unknown
   let closeWindowsOnQuit = false
   let updateState: DesktopUpdateState = { phase: 'idle' }
+  let updatesAvailable = true
   let platformDisposeDeferred: ReturnType<typeof deferred> | undefined
   // The native Platform view owns persistent browser storage; Desktop startup tests replace it so
   // each quit can control when that cleanup settles.
@@ -232,6 +233,8 @@ const harness = await vi.hoisted(async () => {
     publishAccount(state: AccountView) { accountListener?.(state) },
     ipcOn: vi.fn<(channel: string, listener: (event: { sender: unknown; senderFrame: unknown }, ...args: unknown[]) => void) => void>(),
     get updateState() { return updateState },
+    get updatesAvailable() { return updatesAvailable },
+    set updatesAvailable(value: boolean) { updatesAvailable = value },
     set updateState(value: DesktopUpdateState) { updateState = value },
     get prepareUpdate() { return prepareUpdate! },
     set prepareUpdate(value: () => Promise<boolean>) { prepareUpdate = value },
@@ -273,6 +276,7 @@ const harness = await vi.hoisted(async () => {
       prepareUpdate = undefined
       publishUpdate = undefined
       updateState = { phase: 'idle' }
+      updatesAvailable = true
       updateCheck.mockReset().mockImplementation(async () => updateState)
       loginShell.mockReset().mockImplementation(base => readLoginShell(base))
       updateDownload.mockReset().mockImplementation(async () => updateState)
@@ -371,6 +375,7 @@ vi.mock('../src/update-coordinator.ts', () => ({ DesktopUpdateCoordinator: class
     harness.publishUpdate = publish
   }
   get state() { return harness.updateState }
+  get available() { return harness.updatesAvailable }
   readonly check = harness.updateCheck
   readonly download = harness.updateDownload
   readonly install = harness.updateInstall
@@ -585,10 +590,18 @@ describe('desktop main startup', () => {
     ;(about!.click as () => void)()
     await vi.advanceTimersByTimeAsync(0)
     const zh = locale === 'zh-CN'
+    const disclaimer = zh ? 'Hydra 是独立的社区项目，与 DeepSeek 及任何模型提供方均无隶属或背书关系，按“原样”提供，不附带任何担保。'
+      : 'Hydra is an independent community project. It is not affiliated with or endorsed by DeepSeek or any model provider, and it is provided as is, without warranty.'
     expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: 'info', title: zh ? '关于 DeepSeek Harness' : 'About DeepSeek Harness', message: 'DeepSeek Harness',
-      detail: zh ? '版本 V1.0.0' : 'Version V1.0.0', buttons: [zh ? '确定' : 'OK'], cancelId: 0,
+      type: 'info', title: zh ? '关于 Hydra' : 'About Hydra', message: 'Hydra',
+      detail: `${zh ? '版本 V1.0.0' : 'Version V1.0.0'}\n\n${disclaimer}`,
+      buttons: [zh ? '确定' : 'OK', zh ? '阅读免责声明' : 'Read the disclaimer'], cancelId: 0,
     }))
+    expect(harness.openExternal).not.toHaveBeenCalled()
+    harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 1 })
+    ;(about!.click as () => void)()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.openExternal).toHaveBeenCalledWith('https://github.com/zez-dev/hydra#disclaimer')
     // A dialog that cannot open is logged, not surfaced as an unhandled rejection.
     harness.dialog.showMessageBox.mockRejectedValueOnce(new Error('overlay unavailable'))
     ;(about!.click as () => void)()
@@ -1030,7 +1043,7 @@ describe('desktop main startup', () => {
     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
     const application = handler(event, 'application', 48, 34)
     expect(harness.menu.buildFromTemplate.mock.lastCall![0].map(item => item.label ?? item.type)).toEqual([
-      '关于 DeepSeek Harness', 'separator', '检查更新…', '管理 dsh 命令…', 'separator', '退出',
+      '关于 Hydra', 'separator', '检查更新…', '管理 hydra 命令…', 'separator', '退出',
     ])
     expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
     expect(harness.popup.mock.lastCall![0].callback).toBeTypeOf('function')
@@ -1635,6 +1648,20 @@ describe('desktop main startup', () => {
       expect(harness.updateCheck).toHaveBeenCalledTimes(4)
       expect(vi.getTimerCount()).toBe(0)
     } finally { host.exited.resolve(); await harness.quitCompleted.promise }
+  })
+
+  it('offers no update command and checks no feed when the build has no packaged update source', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'darwin' })
+    harness.updatesAvailable = false
+    const host = await readyForUpdate()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(applicationMenuItems().map(item => item.label)).not.toContain('Check for Updates…')
+    harness.windows[0]!.emit('focus')
+    harness.powerMonitor.emit('resume')
+    await vi.advanceTimersByTimeAsync(3_600_000)
+    expect(harness.updateCheck).not.toHaveBeenCalled()
+    harness.app.quit()
+    try { await host.stopping.promise } finally { host.exited.resolve(); await harness.quitCompleted.promise }
   })
 
   it('blocks subsequent product operations without stopping the Host and clears only on a fresh no-force policy', async () => {
@@ -2359,7 +2386,7 @@ describe('desktop main startup', () => {
       level: 'error', message: 'client-modules: bundle script plugins/??a/client.js&rev=1 failed to load',
       sourceId: 'dsh-app://app/assets/entry.js', lineNumber: 12,
     })
-    host.onFailure!(new Error('dsh desktop host exited with 1: fatal uncaught exception: ENOENT'))
+    host.onFailure!(new Error('hydra desktop host exited with 1: fatal uncaught exception: ENOENT'))
     await host.stopping.promise
     expect(writeCrashReport).toHaveBeenCalledOnce()
     const [directory, report] = vi.mocked(writeCrashReport).mock.calls[0]!
@@ -2422,7 +2449,7 @@ describe('desktop main startup', () => {
         expect(quitCompleted).toBe(false)
         await vi.advanceTimersByTimeAsync(1)
         expect(workerExited).toBe(false)
-        expect(console.error).toHaveBeenCalledWith('dsh desktop: operation report Worker has not exited; continuing shutdown')
+        expect(console.error).toHaveBeenCalledWith('hydra desktop: operation report Worker has not exited; continuing shutdown')
       } else {
         finishReport()
         await vi.advanceTimersByTimeAsync(0)
@@ -2465,7 +2492,7 @@ describe('desktop main startup', () => {
     else finishReport({ appended: false, timedOut: false, cancelled: true })
     await harness.quitCompleted.promise
     if (stuck) {
-      expect(console.error).toHaveBeenCalledWith('dsh desktop: operation report Worker has not exited; continuing shutdown')
+      expect(console.error).toHaveBeenCalledWith('hydra desktop: operation report Worker has not exited; continuing shutdown')
       finishReport({ appended: false, timedOut: false, cancelled: true })
     }
     expect(harness.app.relaunch).toHaveBeenCalledTimes(response === 0 ? 0 : 1)

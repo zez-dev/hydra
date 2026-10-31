@@ -120,11 +120,11 @@ function succeeded(outcome: RunOutcome): boolean {
  */
 function endNotice(reason: TurnReason): string {
   switch (reason.kind) {
-    case 'error': return `dsh: ${reason.error.code}: ${reason.error.message}\n`
-    case 'aborted': return `dsh: aborted: ${cancelText(reason.reason)}\n`
-    case 'max-tokens': return 'dsh: max-tokens: the answer stopped at the output limit\n'
+    case 'error': return `hydra: ${reason.error.code}: ${reason.error.message}\n`
+    case 'aborted': return `hydra: aborted: ${cancelText(reason.reason)}\n`
+    case 'max-tokens': return 'hydra: max-tokens: the answer stopped at the output limit\n'
     // Other kinds, including ones plugins add to the merge-extensible map, are named as recorded.
-    default: return `dsh: turn ended: ${reason.kind}\n`
+    default: return `hydra: turn ended: ${reason.kind}\n`
   }
 }
 
@@ -281,7 +281,7 @@ function streamReasoning(
       case 'reasoning-delta':
         if (chunk.text === '') return
         if (!open) {
-          stderr.write('dsh: reasoning:\n')
+          stderr.write('hydra: reasoning:\n')
           open = true
         }
         stderr.write(chunk.text)
@@ -443,7 +443,7 @@ async function resolveAgent(
 function fail(io: HeadlessIo, error: unknown, json: boolean): void {
   const message = error instanceof Error ? error.message : String(error)
   if (json) io.stdout.write(`${boundJsonLine({ type: 'error', message })}\n`)
-  io.stderr.write(`dsh: ${message}\n`)
+  io.stderr.write(`hydra: ${message}\n`)
   io.exit(1)
 }
 
@@ -494,7 +494,7 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
     ? await internals.readStdin()
     : config.task
   if (task.trim() === '') {
-    throw new Error('a task is required, for example: dsh --profile headless "run the tests"')
+    throw new Error('a task is required, for example: hydra --profile headless "run the tests"')
   }
 
   const selection = defaultModel.currentSelection()
@@ -593,10 +593,10 @@ async function run(ctx: Context, config: Config, io: HeadlessIo): Promise<void> 
         .filter(part => part !== undefined && part !== '').join('\n')
     if (projection === undefined) io.stdout.write(text + '\n')
     else projection.finish(text, outcome.reason)
-    if (result?.kind === 'error') io.stderr.write(`dsh: /${commandName(task)}: ${result.text}\n`)
+    if (result?.kind === 'error') io.stderr.write(`hydra: /${commandName(task)}: ${result.text}\n`)
     else if (outcome.reason !== undefined && !succeeded(outcome)) io.stderr.write(endNotice(outcome.reason))
     if (heldGoal !== undefined) {
-      io.stderr.write(`dsh: goal "${heldGoal}" is still active; this headless run answered one task, so the goal's next round did not start\n`)
+      io.stderr.write(`hydra: goal "${heldGoal}" is still active; this headless run answered one task, so the goal's next round did not start\n`)
     }
     const commandOnly = command !== undefined && outcome.reason === undefined
     io.exit(result?.kind === 'error' ? 1 : commandOnly || succeeded(outcome) ? 0 : 1)

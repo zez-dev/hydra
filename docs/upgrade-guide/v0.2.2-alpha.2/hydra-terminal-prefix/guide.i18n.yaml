@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.2-alpha.2/hydra-terminal-prefix/guide.md
+/:
+  en: 6deb284e5f259445
+  zh: 31d98f3de1915aa7
+/terminal-output-names-hydra-instead-of-dsh:
+  en: 16081852be568fa7
+  zh: 258e022445d5c434
+/terminal-output-names-hydra-instead-of-dsh/change:
+  en: 7391b9981e0f7113
+  zh: 5fc573bc0725ca7e
+/terminal-output-names-hydra-instead-of-dsh/migration:
+  en: 710216916d1c30d1
+  zh: cfdc7c36beccc7fa

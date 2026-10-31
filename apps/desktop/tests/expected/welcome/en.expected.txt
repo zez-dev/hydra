@@ -1,6 +1,7 @@
-DeepSeek Harness
-DeepSeek Harness
-Welcome to DeepSeek Harness
+Hydra
+Hydra
+Welcome to Hydra
 Build potential. Explore intelligence.
 Sign in
 Add API Key
+Hydra is an independent community project. It is not affiliated with or endorsed by DeepSeek or any model provider, and it is provided as is, without warranty. Read the disclaimer [https://github.com/zez-dev/hydra#disclaimer]

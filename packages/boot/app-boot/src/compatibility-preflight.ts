@@ -72,7 +72,7 @@ function manifestOf(ctx: Context, name: string, parentURL: string): object | und
  * @throws For malformed compatibility permissions or a profile composition without a resolution base.
  */
 export function prepareProfileEntries(
-  ctx: Context, entries: readonly EntryOptions[], parentURL: string | undefined, binName = 'dsh',
+  ctx: Context, entries: readonly EntryOptions[], parentURL: string | undefined, binName = 'hydra',
 ): EntryOptions[] {
   // Admission runs before the composed tree mounts, so no plugin-owned logger exporter exists yet;
   // composition-stage diagnostics go to stderr like the profile launcher's skipped-bundle report.
@@ -178,7 +178,7 @@ function preflight(
  * @returns One prepared insertion patch for profiles, or the original patches for non-profile callers.
  */
 export function prepareProfilePatches(
-  ctx: Context, patches: PatchOptions[], parentURL: string, binName = 'dsh',
+  ctx: Context, patches: PatchOptions[], parentURL: string, binName = 'hydra',
 ): PatchOptions[] {
   if (ctx.get('profileContext') === undefined) return patches
   const entries = applyEntryPatches([], patches, patchWarning(ctx))

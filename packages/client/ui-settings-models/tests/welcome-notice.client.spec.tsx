@@ -20,7 +20,7 @@ import { decodeWelcomeSection, WelcomeNoticeStore } from '../src/client/welcome-
 import type { WelcomeSection } from '../src/client/welcome-store.ts'
 import { en, zh } from '../src/client/locales.ts'
 import {
-  WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_SETTINGS_NAMESPACE,
+  HYDRA_DISCLAIMER_URL, WELCOME_NOTICE_ACK_FIELD, WELCOME_NOTICE_SETTINGS_NAMESPACE,
   WELCOME_NOTICE_VERSION,
 } from '../src/onboarding-copy.ts'
 
@@ -112,6 +112,11 @@ describe('WelcomeNotice', () => {
     })
     expect(en.welcomeBody).toBe(WELCOME_NOTICE_COPY.en.body)
     expect(zh.welcomeBody).toBe(WELCOME_NOTICE_COPY.zh.body)
+    expect([en.welcomeDisclaimer, en.welcomeDisclaimerLink]).toEqual([
+      'Hydra is an independent community project. It is not affiliated with or endorsed by DeepSeek or any model provider, and it is provided as is, without warranty.',
+      'Read the disclaimer',
+    ])
+    expect(HYDRA_DISCLAIMER_URL).toBe('https://github.com/zez-dev/hydra#disclaimer')
   })
 
   it('renders one blocking modal action and focuses the title', async () => {
@@ -120,7 +125,10 @@ describe('WelcomeNotice', () => {
     for (const paragraph of WELCOME_NOTICE_COPY.zh.body.split('\n\n')) {
       expect(screen.getByText(paragraph, { exact: true })).toBeTruthy()
     }
-    expect(dialog.querySelectorAll('p')).toHaveLength(2)
+    expect(dialog.querySelectorAll('p')).toHaveLength(3)
+    expect(dialog.querySelectorAll('p')[2]!.textContent).toBe(`${zh.welcomeDisclaimer} ${zh.welcomeDisclaimerLink}`)
+    const disclaimer = screen.getByRole('link', { name: zh.welcomeDisclaimerLink })
+    expect([disclaimer.getAttribute('href'), disclaimer.getAttribute('target')]).toEqual([HYDRA_DISCLAIMER_URL, '_blank'])
     expect(dialog.querySelectorAll('button')).toHaveLength(1)
     expect(screen.getByRole('button', { name: WELCOME_NOTICE_COPY.zh.continueLabel })).toBeTruthy()
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: WELCOME_NOTICE_COPY.zh.title }))
@@ -132,8 +140,8 @@ describe('WelcomeNotice', () => {
     expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
-  it('requires a fresh acknowledgement after the 0.1 notice', async () => {
-    const h = mount('2026-08-13.1')
+  it.each(['2026-08-13.1', '2026-09-28.1'])('requires a fresh acknowledgement after the earlier notice %s', async (acknowledged) => {
+    const h = mount(acknowledged)
     await screen.findByRole('dialog')
     fireEvent.click(screen.getByRole('button', { name: WELCOME_NOTICE_COPY.zh.continueLabel }))
     await act(async () => { await Promise.resolve() })

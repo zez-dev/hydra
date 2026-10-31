@@ -218,7 +218,7 @@ describe('compatibility warning', () => {
       + 'Running it may cause crashes or data loss. '
       + 'Update the plugin or install a plugin version compatible with this dsh runtime. '
       + 'To accept this risk explicitly, grant the exact-version exemption for @example/plugin@2.0.0 on dsh 0.1.7-alpha.1 '
-      + 'with `dsh plugin allow-version` or the plugin manager, then retry the installation or restart dsh. '
+      + 'with `hydra plugin allow-version` or the plugin manager, then retry the installation or restart Hydra. '
       + `Exact-version exemption: ${exempted ? 'active' : 'not active'}.`,
     )
   })

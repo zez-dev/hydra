@@ -37,7 +37,7 @@ function filesOf(bundle: BundleInfo, preferred: readonly string[], options: Bund
   if (bundle.availability !== 'missing') {
     let dir: string
     try {
-      dir = resolveBundleDir('dsh', bundle.name, options.profile.installAnchor, options.profile.dir)
+      dir = resolveBundleDir('hydra', bundle.name, options.profile.installAnchor, options.profile.dir)
     } catch (error) {
       throw new RemoteError('plugin-manager/unknown-bundle', (error as Error).message, { name: bundle.name }, { cause: error })
     }

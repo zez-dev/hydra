@@ -73,8 +73,8 @@ export function anchorPathSpec(argument: string, cwd: string): string {
  * @returns Resolved metadata, or undefined for packages without bundle metadata.
  */
 export function bundleManifest(name: string, dir: string, anchor: string): ProfileManifest | undefined {
-  const packageDir = resolveBundleDir('dsh', name, anchor, dir)
-  const manifest = readProfileManifest('dsh', packageDir)
+  const packageDir = resolveBundleDir('hydra', name, anchor, dir)
+  const manifest = readProfileManifest('hydra', packageDir)
   return manifest.dsh?.bundle?.patch === undefined ? undefined : manifest
 }
 
@@ -88,7 +88,7 @@ export async function saveManifest(dir: string, manifest: ProfileManifest): Prom
 
 /** Reconcile bundle selection, returning platform denials without saving any selection changes. */
 async function reconcile(before: ProfileManifest, dir: string, anchor: string, options: PackageOperationOptions): Promise<string[]> {
-  const after = readProfileManifest('dsh', dir)
+  const after = readProfileManifest('hydra', dir)
   const dependencies = Object.keys(after.dependencies ?? {})
   const beforeDeps = new Set(Object.keys(before.dependencies ?? {}))
   const previous = after.dsh?.profile?.bundles ?? []
@@ -101,7 +101,7 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
     if (beforeDeps.has(name)) continue
     const metadata = bundleManifest(name, dir, anchor)
     if (metadata?.dsh?.bundle === undefined) {
-      options.onOutput?.(`dsh: warning: ${name} declares no dsh.bundle — installed as a plain dependency, not a profile layer\n`, 'stderr')
+      options.onOutput?.(`hydra: warning: ${name} declares no dsh.bundle — installed as a plain dependency, not a profile layer\n`, 'stderr')
       continue
     }
     try { assertBundlePlatform(metadata.dsh.bundle.platforms, process.platform) } catch (error) {
@@ -109,7 +109,7 @@ async function reconcile(before: ProfileManifest, dir: string, anchor: string, o
       unsupported.push(`${name}: ${error.message}`)
       continue
     }
-    for (const file of bundlePatchPaths(resolveBundleDir('dsh', name, anchor, dir), metadata.dsh.bundle)) loadOverlayPatches('dsh', file)
+    for (const file of bundlePatchPaths(resolveBundleDir('hydra', name, anchor, dir), metadata.dsh.bundle)) loadOverlayPatches('hydra', file)
     if (!bundles.includes(name)) {
       bundles.push(name)
     }
@@ -237,11 +237,11 @@ async function activeRecordedRun(dir: string): Promise<string | undefined> {
     void error
   }
   if (tree === undefined) {
-    return `dsh: ${path} does not name a package run; delete it once no earlier package operation is still running in this profile\n`
+    return `hydra: ${path} does not name a package run; delete it once no earlier package operation is still running in this profile\n`
   }
   await awaitTreeGone(tree)
   if (treeAlive(tree)) {
-    return `dsh: process ${String(tree.pid)}, started by an earlier package operation whose own process ended, is still running in this profile; `
+    return `hydra: process ${String(tree.pid)}, started by an earlier package operation whose own process ended, is still running in this profile; `
       + `wait for it or stop it, then retry. If process ${String(tree.pid)} is not that package run, delete ${path}.\n`
   }
   await rm(path, { force: true })
@@ -258,7 +258,7 @@ function directDependencies(manifest: ProfileManifest): Record<string, string> {
 function bundleComponentManifests(manifest: ProfileManifest, dir: string, anchor: string): ProfileManifest[] {
   const bundle = manifest.dsh?.bundle
   if (bundle === undefined) return []
-  const patches = bundlePatchPaths(dir, bundle).flatMap(file => loadOverlayPatches('dsh', file))
+  const patches = bundlePatchPaths(dir, bundle).flatMap(file => loadOverlayPatches('hydra', file))
   const names = new Set<string>()
   const visit = (rows: EntryOptions[]) => {
     for (const row of rows) {
@@ -271,12 +271,12 @@ function bundleComponentManifests(manifest: ProfileManifest, dir: string, anchor
   visit(composeEntries([patches.filter(patch => patch.insert !== undefined)]))
   return [...names].flatMap((name) => {
     let packageDir: string
-    try { packageDir = resolveBundleDir('dsh', name, anchor, dir) } catch (error) {
+    try { packageDir = resolveBundleDir('hydra', name, anchor, dir) } catch (error) {
       // Resolution errors for uninstalled or dynamic rows remain subject to the startup loader's checks.
       void error
       return []
     }
-    return [readProfileManifest('dsh', packageDir)]
+    return [readProfileManifest('hydra', packageDir)]
   })
 }
 
@@ -311,7 +311,7 @@ export async function runProfilePnpm(
     const bytes = Buffer.from(active)
     return { exitCode: 1, output: bytes.subarray(Math.max(0, bytes.length - options.outputBytes)).toString('utf8'), truncated: bytes.length > options.outputBytes, logPath }
   }
-  const before = readProfileManifest('dsh', dir)
+  const before = readProfileManifest('hydra', dir)
   const savedFiles = ['package.json', 'pnpm-lock.yaml'].map(name => ({ path: join(dir, name), text: optionalFile(join(dir, name)) }))
   const beforeDependencies = directDependencies(before)
   const installedBefore = new Map(Object.keys(beforeDependencies).map(name => [name, optionalFile(join(dir, 'node_modules', name, 'package.json'))]))
@@ -334,7 +334,7 @@ export async function runProfilePnpm(
   /** Packages a compatibility check refused; callers render them for their own surface. */
   const incompatible: IncompatiblePlugin[] = []
   const rejected = async (warnings: readonly string[], restoration: string): Promise<PackageResult> => {
-    const diagnostic = `\ndsh: installation rejected: ${warnings.join('\n')}\ndsh: ${restoration}.\n`
+    const diagnostic = `\nhydra: installation rejected: ${warnings.join('\n')}\nhydra: ${restoration}.\n`
     await log.write(diagnostic)
     options.onOutput?.(diagnostic, 'stderr')
     append(Buffer.from(diagnostic))
@@ -449,7 +449,7 @@ export async function runProfilePnpm(
       cut = true
       child.stdout?.destroy()
       child.stderr?.destroy()
-      const notice = 'dsh: pnpm output was cut short after its process exited\n'
+      const notice = 'hydra: pnpm output was cut short after its process exited\n'
       await log.write(notice)
       // A failure from before the cut is the run's own and replaces the notice a
       // caller would otherwise read; a rejection the cut itself causes is its end.
@@ -462,7 +462,7 @@ export async function runProfilePnpm(
     const result = completion.value
     exitCode = result.exitCode ?? (result.code === 'ENOENT' ? 127 : 1)
     if (control.stalled) {
-      const notice = `dsh: pnpm printed nothing for ${String(options.idleTimeoutMs)}ms and was terminated\n`
+      const notice = `hydra: pnpm printed nothing for ${String(options.idleTimeoutMs)}ms and was terminated\n`
       await log.write(notice)
       options.onOutput?.(notice, 'stderr')
       append(Buffer.from(notice))
@@ -475,7 +475,7 @@ export async function runProfilePnpm(
     }
     // A terminated run's exit status says nothing about what it wrote, so it never reconciles the selection.
     if (exitCode === 0 && !control.stalled) {
-      const after = readProfileManifest('dsh', dir)
+      const after = readProfileManifest('hydra', dir)
       const warnings: string[] = []
       for (const [name, spec] of Object.entries(directDependencies(after))) {
         const packageDir = join(dir, 'node_modules', name)
@@ -486,7 +486,7 @@ export async function runProfilePnpm(
         const found: string[] = []
         const issues: IncompatiblePlugin[] = []
         try {
-          const manifest = readProfileManifest('dsh', packageDir)
+          const manifest = readProfileManifest('hydra', packageDir)
           for (const candidate of [manifest, ...bundleComponentManifests(manifest, packageDir, context.installAnchor)]) {
             const issue = evaluatePluginCompatibility(candidate, readProfileVersionExemptions(dir))
             if (issue !== undefined && !issue.exempted) {
@@ -503,7 +503,7 @@ export async function runProfilePnpm(
           incompatible.push(...issues)
         }
         else {
-          const notice = `\ndsh: warning: ${found.join('\n')}\ndsh: it stays installed but profile startup denies it until you grant an exemption for those exact versions.\n`
+          const notice = `\nhydra: warning: ${found.join('\n')}\nhydra: it stays installed but profile startup denies it until you grant an exemption for those exact versions.\n`
           await log.write(notice)
           options.onOutput?.(notice, 'stderr')
         }
@@ -525,8 +525,8 @@ export async function runProfilePnpm(
         exitCode = 1
         const restoration = repaired.exitCode === 0
           ? 'restored package.json, pnpm-lock.yaml, and node_modules'
-          : "restored package.json and pnpm-lock.yaml, but node_modules could not be reinstalled; run 'dsh plugin install'"
-        const diagnostic = `\ndsh: installation rejected: ${warnings.join('\n')}\ndsh: ${restoration}.\n`
+          : "restored package.json and pnpm-lock.yaml, but node_modules could not be reinstalled; run 'hydra plugin install'"
+        const diagnostic = `\nhydra: installation rejected: ${warnings.join('\n')}\nhydra: ${restoration}.\n`
         await log.write(diagnostic)
         options.onOutput?.(diagnostic, 'stderr')
         append(Buffer.from(diagnostic))
@@ -534,7 +534,7 @@ export async function runProfilePnpm(
         const unsupported = await reconcile(before, dir, context.installAnchor, options)
         if (unsupported.length > 0) {
           exitCode = 1
-          const diagnostic = `\ndsh: bundle activation rejected: ${unsupported.join('\n')}\ndsh: installed dependencies remain; bundle selection is unchanged. Use a supported Host or remove the unwanted dependencies with 'dsh plugin remove <package>'.\n`
+          const diagnostic = `\nhydra: bundle activation rejected: ${unsupported.join('\n')}\nhydra: installed dependencies remain; bundle selection is unchanged. Use a supported Host or remove the unwanted dependencies with 'hydra plugin remove <package>'.\n`
           await log.write(diagnostic)
           options.onOutput?.(diagnostic, 'stderr')
           append(Buffer.from(diagnostic))
@@ -569,7 +569,7 @@ export async function runPluginCommand(
     if (!existsSync(join(dir, 'package.json'))) {
       const template = PROFILE_TEMPLATES[context.profile]
       initProfile(dir, template?.bundles ?? DEFAULT_PROFILE_BUNDLES)
-      options.onOutput?.(`dsh: initialized profile ${context.profile} at ${dir}\n`, 'stderr')
+      options.onOutput?.(`hydra: initialized profile ${context.profile} at ${dir}\n`, 'stderr')
     }
     return runProfilePnpm(context, args, options)
   }, options.lockWaitMs === undefined ? undefined : { waitMs: options.lockWaitMs })

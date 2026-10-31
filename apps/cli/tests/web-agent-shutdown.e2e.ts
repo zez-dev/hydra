@@ -59,7 +59,7 @@ it.each([
       expect(result.timedOut, result.stderr).toBe(false)
       expect(result.signal, result.stderr).toBeUndefined()
       expect(result.exitCode, result.stderr).toBe(0)
-      expect(result.stderr).not.toMatch(/dsh: fatal|projection registration is not active/u)
+      expect(result.stderr).not.toMatch(/hydra: fatal|projection registration is not active/u)
       const evidence: unknown = JSON.parse(await readFile(resultPath, 'utf8'))
       expect(evidence).toMatchObject({
         abortHandled: 1,

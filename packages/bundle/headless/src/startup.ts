@@ -52,7 +52,7 @@ declare module '@deepseek-ai/cordis' {
  */
 function headlessCommand(): Command {
   return new Command()
-    .name('dsh --profile headless')
+    .name('hydra --profile headless')
     .description('Answer one task and exit; the answer goes to stdout and diagnostics to stderr.')
     .helpOption('-h, --help', 'show this help')
     .option('--json', 'write newline-delimited run events to stdout instead of the final message')
@@ -65,12 +65,12 @@ function headlessCommand(): Command {
     .argument('[task...]', 'the task text; multiple words are joined by spaces, and `-` reads stdin')
     .addHelpText('after', `
 Examples:
-  dsh --profile headless "run the tests"          answer one task and exit
-  echo "run the tests" | dsh --profile headless   read the task from stdin
-  dsh --profile headless --json "run the tests"   emit machine-readable run events
-  dsh --profile headless --session-id session-… "continue"   resume an existing Session
-  dsh --profile headless --permission-mode workspace-write --add-dir /repo/.git "commit the fix"
-                                                        grant shared Git metadata for this task
+  hydra --profile headless "run the tests"          answer one task and exit
+  echo "run the tests" | hydra --profile headless   read the task from stdin
+  hydra --profile headless --json "run the tests"   emit machine-readable run events
+  hydra --profile headless --session-id session-… "continue"   resume an existing Session
+  hydra --profile headless --permission-mode workspace-write --add-dir /repo/.git "commit the fix"
+                                                          grant shared Git metadata for this task
 `)
 }
 
@@ -120,11 +120,11 @@ export function apply(ctx: Context): void {
     }
     const joined = program.args.join(' ')
     if (program.args.length > 0 && joined.trim() === '') {
-      program.error('error: a task is required, for example: dsh --profile headless "run the tests"')
+      program.error('error: a task is required, for example: hydra --profile headless "run the tests"')
     }
     const task = program.args.length === 0 ? undefined : joined
     if (task === undefined && internals.stdinIsTty()) {
-      program.error('error: a task is required, for example: dsh --profile headless "run the tests"')
+      program.error('error: a task is required, for example: hydra --profile headless "run the tests"')
     }
     const options = program.opts<{
       json?: boolean

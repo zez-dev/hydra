@@ -115,7 +115,7 @@ describe.skipIf(process.platform === 'win32')('a run with descendants', () => {
     const outcome = await runProfilePnpm(context, ['add', './held'], options)
     const descendant = await readPid(pidFile)
     expect(outcome).toMatchObject({ exitCode: 0 })
-    expect(outcome.output).toContain('dsh: pnpm output was cut short after its process exited')
+    expect(outcome.output).toContain('hydra: pnpm output was cut short after its process exited')
     // The descendant still holds the pipes, so the run settled under its drain bound instead of waiting for their end.
     expect(() => process.kill(descendant, 0)).not.toThrow()
   })

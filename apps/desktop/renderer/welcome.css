@@ -219,6 +219,38 @@ body {
   opacity: 1;
 }
 
+/* The disclaimer sits in the bottom band below the entry actions, like the back action on the key page. */
+.actions .disclaimer {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  width: 440px;
+  margin: 0;
+  transform: translateX(-50%);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  user-select: text;
+}
+
+.actions .disclaimer a {
+  color: var(--dsw-alias-label-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  app-region: no-drag;
+}
+
+.actions .disclaimer a:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.actions .disclaimer a:focus-visible {
+  outline: 2px solid var(--dsw-alias-label-primary);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .actions button {
     transition: none;

@@ -5,6 +5,7 @@ import { Toast } from '@deepseek-ai/dsh-client-ui-primitives/src/Toast.tsx'
 import { StateDot } from '@deepseek-ai/dsh-client-ui-primitives/src/StateDot.tsx'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
 import type { WelcomeApi } from '../welcome-api.ts'
+import { HYDRA_DISCLAIMER_URL } from '../disclaimer.ts'
 
 type Page = 'entry' | 'key' | 'account'
 
@@ -211,6 +212,9 @@ export function Welcome({ api }: { api: WelcomeApi }) {
       <div id="entry-actions" className="actions" hidden={page !== 'entry'}>
         <button id="sign-in" className="primary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'sign_in' }); void start() }}>{m.welcomeSignIn}</button>
         <button ref={keyButton} id="api-key" className="secondary" type="button" onClick={() => { void api.analytics?.('auth_page_click', { button_name: 'api-key' }); navigate('key') }}>{m.welcomeApiKey}</button>
+        <p id="disclaimer" className="disclaimer">
+          {m.disclaimer} <a href={HYDRA_DISCLAIMER_URL} target="_blank" rel="noreferrer">{m.disclaimerLink}</a>
+        </p>
       </div>
       <div id="key-actions" className="actions" hidden={page !== 'key'}>
         <button id="save-key" className="primary" type="submit" form="key-form" disabled={busy || draft.trim() === ''}>{m.welcomeKeySave}</button>

@@ -627,13 +627,13 @@ describe('headless runner', () => {
     const result = await running
     expect(streamed).toEqual({
       out: '',
-      err: 'dsh: reasoning:\nchecking the workspace safely\nsecond pass\n',
+      err: 'hydra: reasoning:\nchecking the workspace safely\nsecond pass\n',
       order: [],
     })
     expect(result).toEqual({
       code: 0,
       out: 'done\n',
-      err: 'dsh: reasoning:\nchecking the workspace safely\nsecond pass\n',
+      err: 'hydra: reasoning:\nchecking the workspace safely\nsecond pass\n',
       order: ['flush', 'exit'],
     })
     await test.ctx.fiber.dispose()
@@ -672,11 +672,11 @@ describe('headless runner', () => {
     })
     const running = test.run()
     await reasoningAppended.promise
-    expect(test.output().err).toBe('dsh: reasoning:\nunfinished reasoning')
+    expect(test.output().err).toBe('hydra: reasoning:\nunfinished reasoning')
 
     releaseEnd.resolve(undefined)
     await ended.promise
-    expect(test.output().err).toBe('dsh: reasoning:\nunfinished reasoning\n')
+    expect(test.output().err).toBe('hydra: reasoning:\nunfinished reasoning\n')
 
     finish.resolve(undefined)
     await expect(running).resolves.toMatchObject({ code: 1 })
@@ -687,7 +687,7 @@ describe('headless runner', () => {
     const test = await bench({
       afterPrompt(session, message) { appendTurn(session, 1, message, undefined, false) },
     })
-    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: aborted: cancelled by the user\n' })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: aborted: cancelled by the user\n' })
     await test.ctx.fiber.dispose()
   })
 
@@ -707,7 +707,7 @@ describe('headless runner', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: '\n',
-      err: 'dsh: SERVER: provider unavailable\n',
+      err: 'hydra: SERVER: provider unavailable\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -730,7 +730,7 @@ describe('headless runner', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: '\n',
-      err: 'dsh: reasoning:\ntrying recovery\ndsh: SERVER: provider unavailable\n',
+      err: 'hydra: reasoning:\ntrying recovery\nhydra: SERVER: provider unavailable\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -755,7 +755,7 @@ describe('headless runner', () => {
     expect(result).toMatchObject({
       code: 1,
       out: '',
-      err: `dsh: headless summary cannot read seq 0 below captured length ${String(capturedLength)}\n`,
+      err: `hydra: headless summary cannot read seq 0 below captured length ${String(capturedLength)}\n`,
     })
     await test.ctx.fiber.dispose()
   })
@@ -778,7 +778,7 @@ describe('headless runner', () => {
     })
     expect(await test.run()).toMatchObject({
       code: 1,
-      err: 'dsh: a task is required, for example: dsh --profile headless "run the tests"\n',
+      err: 'hydra: a task is required, for example: hydra --profile headless "run the tests"\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -1190,7 +1190,7 @@ describe('headless runner', () => {
     })
     const result = await test.run()
     expect(result.code).toBe(1)
-    expect(result.err).toBe('dsh: log is corrupt\n')
+    expect(result.err).toBe('hydra: log is corrupt\n')
     await test.ctx.fiber.dispose()
   })
 
@@ -1282,7 +1282,7 @@ describe('headless runner', () => {
     ctx.provide('agents', { create: () => Promise.reject(new Error('factory exploded')) } as never)
     apply(ctx, { task: 't' })
     expect(await exited).toBe(1)
-    expect(err).toBe('dsh: factory exploded\n')
+    expect(err).toBe('hydra: factory exploded\n')
     await ctx.fiber.dispose()
   })
 
@@ -1304,7 +1304,7 @@ describe('headless runner', () => {
     ctx.provide('agents', { create: () => rejected } as never)
     apply(ctx, { task: 't' })
     expect(await exited).toBe(1)
-    expect(err).toBe('dsh: factory exploded\n')
+    expect(err).toBe('hydra: factory exploded\n')
     await ctx.fiber.dispose()
   })
 
@@ -1457,7 +1457,7 @@ describe('headless runner outcome', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: 'The first half, still cut\n',
-      err: 'dsh: max-tokens: the answer stopped at the output limit\n',
+      err: 'hydra: max-tokens: the answer stopped at the output limit\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -1476,7 +1476,7 @@ describe('headless runner outcome', () => {
     expect(await test.run()).toMatchObject({
       code: 1,
       out: 'Fixing the next file.\n',
-      err: 'dsh: aborted: spend-guard: session token budget reached\n',
+      err: 'hydra: aborted: spend-guard: session token budget reached\n',
     })
     await test.ctx.fiber.dispose()
   })
@@ -1493,7 +1493,7 @@ describe('headless runner outcome', () => {
         session.append('turn/end', { turn: 1, reason: { kind: 'aborted', reason: cause } })
       },
     })
-    expect(await test.run()).toMatchObject({ code: 1, out: 'Partway.\n', err: `dsh: aborted: ${phrase}\n` })
+    expect(await test.run()).toMatchObject({ code: 1, out: 'Partway.\n', err: `hydra: aborted: ${phrase}\n` })
     await test.ctx.fiber.dispose()
   })
 
@@ -1505,7 +1505,7 @@ describe('headless runner outcome', () => {
         session.append('turn/end', { turn: 1, reason: { kind: 'blocked' } })
       },
     })
-    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: turn ended: blocked\n' })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: turn ended: blocked\n' })
     await test.ctx.fiber.dispose()
   })
 
@@ -1552,7 +1552,7 @@ describe('headless runner outcome', () => {
     test.ctx.provide('commands', {
       execute: () => Promise.resolve({ commandId: 'command-1', result: { kind: 'error', text: 'no such folder: docs' } }),
     } as never)
-    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'dsh: /kb: no such folder: docs\n' })
+    expect(await test.run()).toMatchObject({ code: 1, out: '\n', err: 'hydra: /kb: no such folder: docs\n' })
     await test.ctx.fiber.dispose()
   })
 
@@ -1568,7 +1568,7 @@ describe('headless runner outcome', () => {
     expect(await test.run()).toMatchObject({
       code: 0,
       out: 'Round one is done.\n',
-      err: 'dsh: goal "make every test pass" is still active; this headless run answered one task, so the goal\'s next round did not start\n',
+      err: 'hydra: goal "make every test pass" is still active; this headless run answered one task, so the goal\'s next round did not start\n',
     })
     expect(flushesAtDisarm).toEqual([0])
     await test.ctx.fiber.dispose()

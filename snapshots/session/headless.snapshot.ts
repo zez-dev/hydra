@@ -410,7 +410,7 @@ function stderrFromSession(log: string): string {
   const appendReasoning = (text: string): void => {
     if (text === '') return
     if (!open) {
-      output += 'dsh: reasoning:\n'
+      output += 'hydra: reasoning:\n'
       open = true
     }
     output += text
@@ -495,11 +495,11 @@ function turnEndNotice(reason: JsonObject): string {
       if (typeof error?.code !== 'string' || typeof error.message !== 'string') {
         throw new Error('headless snapshot error reason has no code and message')
       }
-      return `dsh: ${error.code}: ${error.message}\n`
+      return `hydra: ${error.code}: ${error.message}\n`
     }
-    case 'aborted': return `dsh: aborted: ${cancelPhrase(reason.reason as JsonObject | undefined)}\n`
-    case 'max-tokens': return 'dsh: max-tokens: the answer stopped at the output limit\n'
-    default: return `dsh: turn ended: ${String(reason.kind)}\n`
+    case 'aborted': return `hydra: aborted: ${cancelPhrase(reason.reason as JsonObject | undefined)}\n`
+    case 'max-tokens': return 'hydra: max-tokens: the answer stopped at the output limit\n'
+    default: return `hydra: turn ended: ${String(reason.kind)}\n`
   }
 }
 
@@ -1148,11 +1148,11 @@ describe('headless recorded-session snapshots', () => {
     ].map(record => JSON.stringify(record)).join('\n')
 
     expect(stderrFromSession(log)).toBe([
-      'dsh: reasoning:',
+      'hydra: reasoning:',
       'first',
-      'dsh: reasoning:',
+      'hydra: reasoning:',
       'second',
-      'dsh: reasoning:',
+      'hydra: reasoning:',
       'third',
       '',
     ].join('\n'))
@@ -1176,7 +1176,7 @@ describe('headless recorded-session snapshots', () => {
         { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
       ].map(record => JSON.stringify(record)).join('\n')
 
-      expect(stderrFromSession(log)).toBe('dsh: reasoning:\nfirst thought\n')
+      expect(stderrFromSession(log)).toBe('hydra: reasoning:\nfirst thought\n')
     },
   )
 
@@ -1199,7 +1199,7 @@ describe('headless recorded-session snapshots', () => {
       { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } },
     ].map(record => JSON.stringify(record)).join('\n')
 
-    expect(stderrFromSession(log)).toBe('dsh: reasoning:\nfirst thought\ndsh: reasoning:\nsecond\n')
+    expect(stderrFromSession(log)).toBe('hydra: reasoning:\nfirst thought\nhydra: reasoning:\nsecond\n')
   })
 
   it.each([10, 20])('assigns sibling roles by catalog order when the first child timestamp is %i', async (firstCreatedAt) => {

@@ -298,8 +298,8 @@ describe('manifest resolution', () => {
     // A preset declaration may omit the id that the Loader type requires.
     prepareProfileEntries(context(f), [{ name: 'denied-plugin' } as EntryOptions], base)
     expect(f.warnings).toEqual([
-      expect.stringMatching(/^dsh: disabling profile plugin row "row": Plugin denied-plugin@1\.0\.0 /),
-      expect.stringMatching(/^dsh: disabling profile plugin denied-plugin: Plugin denied-plugin@1\.0\.0 /),
+      expect.stringMatching(/^hydra: disabling profile plugin row "row": Plugin denied-plugin@1\.0\.0 /),
+      expect.stringMatching(/^hydra: disabling profile plugin denied-plugin: Plugin denied-plugin@1\.0\.0 /),
     ])
   })
 

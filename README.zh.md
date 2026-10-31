@@ -1,6 +1,8 @@
-# DeepSeek Harness
+# Hydra
 
 [English](README.md) | 中文
+
+<a id="disclaimer"></a>
 
 > 本仓库是 Hydra：一个基于 DeepSeek Harness 的非官方社区分支，与 DeepSeek 无隶属或背书关系。Hydra 的功能、安装与运行说明见[英文 README](README.md)。以下为上游 DeepSeek Harness 的原始说明。
 >

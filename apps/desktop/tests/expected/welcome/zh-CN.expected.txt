@@ -1,6 +1,7 @@
-DeepSeek Harness
-DeepSeek Harness
-欢迎使用 DeepSeek Harness
+Hydra
+Hydra
+欢迎使用 Hydra
 组装无限可能，共探智能上限
 登录
 添加 API Key
+Hydra 是独立的社区项目，与 DeepSeek 及任何模型提供方均无隶属或背书关系，按“原样”提供，不附带任何担保。 阅读免责声明 [https://github.com/zez-dev/hydra#disclaimer]

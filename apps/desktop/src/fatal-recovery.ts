@@ -100,7 +100,7 @@ export class DesktopFatalRecovery {
             await this.operations.revealReport(this.reportState.path)
             message = messages.reportShareHint
           } catch (failure) {
-            console.error('dsh desktop: could not reveal crash report', failure)
+            console.error('hydra desktop: could not reveal crash report', failure)
             message = messages.reportRevealFailed
           }
         }
@@ -129,7 +129,7 @@ export class DesktopFatalRecovery {
       const path = await this.operations.writeReport(error, source)
       this.reportState = path === undefined ? { kind: 'failed' } : { kind: 'ready', path }
     } catch (failure) {
-      console.error('dsh desktop: crash report failed', failure)
+      console.error('hydra desktop: crash report failed', failure)
       this.reportState = { kind: 'failed' }
     }
   }

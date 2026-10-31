@@ -92,7 +92,7 @@ export function checkHome(env: DoctorEnvironment, profile: string): DoctorRow[] 
       : row('home', '.env', 'warn', `${dotenv} missing`, 'create it with your API keys, for example DEEPSEEK_API_KEY=...'),
     env.exists(manifest)
       ? row('home', `profile ${profile}`, 'ok', manifest)
-      : row('home', `profile ${profile}`, 'warn', 'not initialized yet', `run dsh --profile ${profile} once; it initializes the profile`),
+      : row('home', `profile ${profile}`, 'warn', 'not initialized yet', `run hydra --profile ${profile} once; it initializes the profile`),
   ]
 }
 

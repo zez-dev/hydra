@@ -207,7 +207,7 @@ describe('headless command-line provider', () => {
     const first = JSON.parse(observed.out.trim().split('\n')[0] ?? '{}') as { type: string; message: string }
     expect(first).toEqual({
       type: 'error',
-      message: 'a task is required, for example: dsh --profile headless "run the tests"',
+      message: 'a task is required, for example: hydra --profile headless "run the tests"',
     })
     expect(task).toBeUndefined()
     expect(observed.err).toBe('')
@@ -269,7 +269,7 @@ describe('headless command-line provider', () => {
 
   it('prints its own help and leaves the runner pending', async () => {
     const { task, observed } = await bootStartup(['--help'])
-    expect(observed.out).toContain('dsh --profile headless')
+    expect(observed.out).toContain('hydra --profile headless')
     expect(observed.out).toContain('the answer goes to stdout and diagnostics to stderr')
     expect(observed.out).toContain('--session-id')
     expect(task).toBeUndefined()

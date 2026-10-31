@@ -46,8 +46,8 @@ describe('CLI help discovery', () => {
     }, ['web'])
     expect(visited).toEqual(['', 'plugin', 'web', 'web nested', '--profile web'])
     expect(pages.map(page => page.invocations)).toEqual([
-      ['dsh'], ['dsh plugin'], ['dsh web', 'dsh --profile web'],
-      ['dsh web nested', 'dsh --profile web nested'],
+      ['hydra'], ['hydra plugin'], ['hydra web', 'hydra --profile web'],
+      ['hydra web nested', 'hydra --profile web nested'],
     ])
   })
 
@@ -63,8 +63,8 @@ describe('CLI help discovery', () => {
     }, ['web'])
     expect(visited).toEqual(['', 'plugin', 'web', 'web serve', 'web s', 'web help', '--profile web'])
     expect(pages.map(page => page.invocations)).toEqual([
-      ['dsh'], ['dsh plugin'], ['dsh web', 'dsh web help', 'dsh --profile web', 'dsh --profile web help'],
-      ['dsh web serve', 'dsh web s', 'dsh --profile web serve', 'dsh --profile web s'],
+      ['hydra'], ['hydra plugin'], ['hydra web', 'hydra web help', 'hydra --profile web', 'hydra --profile web help'],
+      ['hydra web serve', 'hydra web s', 'hydra --profile web serve', 'hydra --profile web s'],
     ])
   })
 

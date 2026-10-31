@@ -165,7 +165,7 @@ export async function apply(ctx: Context, config: HostPluginConfig): Promise<voi
         },
       }))
       // This readiness URL is emitted while the plugin tree is still loading, before a logger sink is guaranteed.
-      console.log(`dsh inspector: ${handle.endpoint.devtoolsFrontendUrl}`)
+      console.log(`hydra inspector: ${handle.endpoint.devtoolsFrontendUrl}`)
       ready.resolve(handle.endpoint.client)
       if (ctx.get('cmdlineArgs')?.get().includes('--inspect')) {
         const { default: open, apps } = await import('open')

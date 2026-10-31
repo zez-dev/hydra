@@ -336,7 +336,7 @@ it('logs a stopped plugin that does not start again after the publication fails'
   await f.ctx.loader.create({ name: 'late-plugin' })
   await f.ctx.loader.await()
   await expect(f.reconcile()).rejects.toThrow('resolution unreadable')
-  expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^dsh: addon \(addon\): .*addon cannot start/su))
+  expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^hydra: addon \(addon\): .*addon cannot start/su))
   expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('late-plugin'))
 })
 

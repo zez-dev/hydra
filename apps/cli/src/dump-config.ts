@@ -17,7 +17,7 @@ import {
 } from '@deepseek-ai/dsh-app-boot'
 import { homePatchPath, prepareProfile, PROFILE_ROOT_FILENAME } from './profile-boot.ts'
 
-const NAME = 'dsh'
+const NAME = 'hydra'
 
 /* v8 ignore start -- built-bin acceptance drives this boot-free dispatch */
 /**

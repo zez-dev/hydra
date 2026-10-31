@@ -1,1 +1,1 @@
-dsh: SERVER: CLI mock provider failed
+hydra: SERVER: CLI mock provider failed

@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-`dsh-headless` 从命令行运行一个 dsh 任务并打印最终答案，然后退出——没有 GUI、没有服务器、没有浏览器。输入 `dsh --profile headless "run the tests"`，agent（智能体）会以与所有其他表层相同的模型、工具与安全默认值完成该任务。它非常适合脚本、CI 与一次性任务：进程不打开任何端口，也不会留下任何后台运行的东西。监督进程还可以通过按行 JSON 事件流（`--json`）驱动它，并用该事件流报告的标识（`--session-id`）在同一段对话上继续唤醒。退出码告诉你结果——任务完成时为 0，中止或出错时为 1。主要边界：每次调用只运行一个任务，没有交互式后续。
+`dsh-headless` 从命令行运行一个 dsh 任务并打印最终答案，然后退出——没有 GUI、没有服务器、没有浏览器。输入 `hydra --profile headless "run the tests"`，agent（智能体）会以与所有其他表层相同的模型、工具与安全默认值完成该任务。它非常适合脚本、CI 与一次性任务：进程不打开任何端口，也不会留下任何后台运行的东西。监督进程还可以通过按行 JSON 事件流（`--json`）驱动它，并用该事件流报告的标识（`--session-id`）在同一段对话上继续唤醒。退出码告诉你结果——任务完成时为 0，中止或出错时为 1。主要边界：每次调用只运行一个任务，没有交互式后续。
 
 ## 目录
 
@@ -33,13 +33,13 @@ kind: "package-bundle"
 dsh --profile headless "run the tests"
 ```
 
-agent 会完成该任务，把提供方的每个非空推理（reasoning）增量流式写入 stderr 的 `dsh: reasoning:` 段，然后把最终答案写入 stdout 并退出。连续推理增量保持在同一段中；提供方未给尾换行时，runner 会在后续输出前结束该段。没有推理内容的成功运行保持 stderr 为空；最终轮次未完成的运行退出码为 1，并向 stderr 写入一行说明原因的 `dsh:` 行，例如模型失败时为 `dsh: <code>: <message>`，轮次被取消时为 `dsh: aborted: <cause>`。任务来自位置参数，参数省略或为单独的 `-` 时则来自 stdin；空白位置参数或空管道会在任何执行开始之前被拒绝。位置参数会原样作为任务，stdin 不会被读取，因此想让管道内容进入提示词时，请把完整提示写进管道；管道任务会原样发送，包括结尾换行。
+agent 会完成该任务，把提供方的每个非空推理（reasoning）增量流式写入 stderr 的 `hydra: reasoning:` 段，然后把最终答案写入 stdout 并退出。连续推理增量保持在同一段中；提供方未给尾换行时，runner 会在后续输出前结束该段。没有推理内容的成功运行保持 stderr 为空；最终轮次未完成的运行退出码为 1，并向 stderr 写入一行说明原因的 `hydra:` 行，例如模型失败时为 `hydra: <code>: <message>`，轮次被取消时为 `hydra: aborted: <cause>`。任务来自位置参数，参数省略或为单独的 `-` 时则来自 stdin；空白位置参数或空管道会在任何执行开始之前被拒绝。位置参数会原样作为任务，stdin 不会被读取，因此想让管道内容进入提示词时，请把完整提示写进管道；管道任务会原样发送，包括结尾换行。
 
 ```sh
 { echo "Summarize these changes:"; git diff --stat; } | dsh --profile headless
 ```
 
-任务若指名一个已注册的斜杠命令，则像 Web 输入框那样运行该命令，而不是向模型发送提示；其结果写入 stdout，命令失败时退出码为 1，并向 stderr 写入 `dsh: /<name>: <error>`。未指名任何已注册命令的文本（例如以 `/` 开头的路径）按普通任务处理。
+任务若指名一个已注册的斜杠命令，则像 Web 输入框那样运行该命令，而不是向模型发送提示；其结果写入 stdout，命令失败时退出码为 1，并向 stderr 写入 `hydra: /<name>: <error>`。未指名任何已注册命令的文本（例如以 `/` 开头的路径）按普通任务处理。
 
 ```sh
 dsh --profile headless "/doctor"
@@ -105,7 +105,7 @@ dsh headless --permission-mode workspace-write --add-dir "$git_dir" --json - < t
 
 ### 机器可读输出
 
-`--json` 用按行 JSON 事件流取代 stdout 的最终文本行，stderr 仅保留 `dsh:` 诊断信息。事件流以 `session`（携带本次运行使用的标识）开头、以 `final` 结尾，其间为 `status`、`text`、`thinking`、`tool_call` 与 `tool_result` 事件。`text` 与 `thinking` 只从已提交的 assistant 消息投影，因此被重试或丢弃的尝试不会进入事件流；它们在步骤提交时到达，而不是逐 token 到达，默认模式的 stderr 推理仍是唯一的实时文本通道。终止 `final` 事件携带精确的 `sessionId`、持久化轮次的 `reason`（最后一轮没有终止事件时为 `null`），以及与默认模式相同的无损答案；该事件不做限长；其他每个字符串与对象键上限为 8 KiB，超出时标记 `truncated`，单条事件行（含换行）上限为 32 KiB——超长事件保留标量字段、丢弃结构化字段，极端情况下只剩 `type` 与 `truncated`，嵌套达到 64 层及以上的负载会在该深度被截断。空工具参数字符串会投影为 `{}`，与执行器实际运行的值一致；而 JSON 无法往返的参数——例如溢出为 `Infinity` 的数字 `1e400`——会保留原始文本，而不是 `JSON.stringify` 会报告的 `null`。runner 在轮次之外抛出的失败会写出 `error` 事件并在没有 `final` 的情况下结束事件流，同时向 stderr 写入 `dsh:` 行；若 profile 自身的插件加载失败，进程会在 runner 挂载前退出，该情形只保留 loader 的 stderr 诊断。轮次内失败的运行仍会以 `final` 事件（通常为空）结束且没有 `error` 事件，因此格式良好的事件流也可能描述一次失败的运行：请在判断任务报告前检查进程退出状态和 `final.reason`。
+`--json` 用按行 JSON 事件流取代 stdout 的最终文本行，stderr 仅保留 `hydra:` 诊断信息。事件流以 `session`（携带本次运行使用的标识）开头、以 `final` 结尾，其间为 `status`、`text`、`thinking`、`tool_call` 与 `tool_result` 事件。`text` 与 `thinking` 只从已提交的 assistant 消息投影，因此被重试或丢弃的尝试不会进入事件流；它们在步骤提交时到达，而不是逐 token 到达，默认模式的 stderr 推理仍是唯一的实时文本通道。终止 `final` 事件携带精确的 `sessionId`、持久化轮次的 `reason`（最后一轮没有终止事件时为 `null`），以及与默认模式相同的无损答案；该事件不做限长；其他每个字符串与对象键上限为 8 KiB，超出时标记 `truncated`，单条事件行（含换行）上限为 32 KiB——超长事件保留标量字段、丢弃结构化字段，极端情况下只剩 `type` 与 `truncated`，嵌套达到 64 层及以上的负载会在该深度被截断。空工具参数字符串会投影为 `{}`，与执行器实际运行的值一致；而 JSON 无法往返的参数——例如溢出为 `Infinity` 的数字 `1e400`——会保留原始文本，而不是 `JSON.stringify` 会报告的 `null`。runner 在轮次之外抛出的失败会写出 `error` 事件并在没有 `final` 的情况下结束事件流，同时向 stderr 写入 `hydra:` 行；若 profile 自身的插件加载失败，进程会在 runner 挂载前退出，该情形只保留 loader 的 stderr 诊断。轮次内失败的运行仍会以 `final` 事件（通常为空）结束且没有 `error` 事件，因此格式良好的事件流也可能描述一次失败的运行：请在判断任务报告前检查进程退出状态和 `final.reason`。
 
 `tool_result.error` 存在时，在相同输出限制内保留持久化的 `{ name, code, reason? }` 错误字段。`AUTO_REVIEW_DENIED` 标识最终策略拒绝；`AUTO_REVIEW_FAILED` 标识 reviewer 失败。两者都不会执行调用 body。截断记录可能省略结构化详情；需要完整理由时读取持久 Session。
 
@@ -115,7 +115,7 @@ dsh headless --permission-mode workspace-write --add-dir "$git_dir" --json - < t
 
 ### 帮助与任务错误
 
-`dsh --profile headless --help` 打印该命令的帮助文本并直接退出，不运行任何内容。只有空白的位置参数本身就属于用法错误——什么都不运行，进程退出 1，即使 stdin 不是终端也一样，因此误传的空白参数绝不会消费管道内容。完全缺失任务时，仅在 stdin 是终端时属于用法错误；stdin 不是终端时，runner 改从 stdin 读取任务，并以同样方式拒绝空结果。单独的 `-` 是唯一的 stdin 标记；把它与其他任务词混用属于用法错误，而不是以连字符开头的任务。在 `--json` 模式下，所有用法错误——包括 commander 自身的语法拒绝，例如未知选项或选项缺少取值——都会在进程退出前向 stdout 写出 `error` 事件，因此按行解析的监督进程即使 runner 从未挂载也能看到格式良好的事件流；事件 `message` 中的文本不带 commander 的 `error: ` 前缀。
+`hydra --profile headless --help` 打印该命令的帮助文本并直接退出，不运行任何内容。只有空白的位置参数本身就属于用法错误——什么都不运行，进程退出 1，即使 stdin 不是终端也一样，因此误传的空白参数绝不会消费管道内容。完全缺失任务时，仅在 stdin 是终端时属于用法错误；stdin 不是终端时，runner 改从 stdin 读取任务，并以同样方式拒绝空结果。单独的 `-` 是唯一的 stdin 标记；把它与其他任务词混用属于用法错误，而不是以连字符开头的任务。在 `--json` 模式下，所有用法错误——包括 commander 自身的语法拒绝，例如未知选项或选项缺少取值——都会在进程退出前向 stdout 写出 `error` 事件，因此按行解析的监督进程即使 runner 从未挂载也能看到格式良好的事件流；事件 `message` 中的文本不带 commander 的 `error: ` 前缀。
 
 -----
 
@@ -137,7 +137,7 @@ patch 叠加在 `dsh-base` 之上：继承投影缓存与共享 PTC 运行时，
 
 ### 退出映射
 
-最终 `turn/end` 完成时退出码为 0。最终轮次以 `max-tokens` 结束、但 auto-continue 续写了每个被截断的答案且最后一个答案正常结束时，退出码同样为 0；该轮次保留 `max-tokens` 原因，因为任一步骤达到上限后该原因就保持不变。任何其他结果——aborted、error、仍在上限处被截断的答案，或所属区间内没有轮次——退出码为 1，且未完成的最终轮次会向 stderr 写入一行：error 时为 `dsh: <code>: <message>`，取消时为 `dsh: aborted: <cause>`（钩子的原因原样输出，例如花费守卫的原因），或者 `dsh: max-tokens: the answer stopped at the output limit`，或者 `dsh: turn ended: <kind>`。斜杠命令成功且未启动轮次时退出码为 0，失败时退出码为 1 并输出 `dsh: /<name>: <error>`。被解除的目标会向 stderr 追加 `dsh: goal "<objective>" is still active; …`，不改变退出码。若实时 Agent 失败后没有提交更晚的 `turn/end`，则视为直接驱动器失败，包括汇总轮次的开始或结束无法持久化；更早的已完成轮次不能使该次运行成功。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `dsh: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件，不发出 `final` 事件。
+最终 `turn/end` 完成时退出码为 0。最终轮次以 `max-tokens` 结束、但 auto-continue 续写了每个被截断的答案且最后一个答案正常结束时，退出码同样为 0；该轮次保留 `max-tokens` 原因，因为任一步骤达到上限后该原因就保持不变。任何其他结果——aborted、error、仍在上限处被截断的答案，或所属区间内没有轮次——退出码为 1，且未完成的最终轮次会向 stderr 写入一行：error 时为 `hydra: <code>: <message>`，取消时为 `hydra: aborted: <cause>`（钩子的原因原样输出，例如花费守卫的原因），或者 `hydra: max-tokens: the answer stopped at the output limit`，或者 `hydra: turn ended: <kind>`。斜杠命令成功且未启动轮次时退出码为 0，失败时退出码为 1 并输出 `hydra: /<name>: <error>`。被解除的目标会向 stderr 追加 `hydra: goal "<objective>" is still active; …`，不改变退出码。若实时 Agent 失败后没有提交更晚的 `turn/end`，则视为直接驱动器失败，包括汇总轮次的开始或结束无法持久化；更早的已完成轮次不能使该次运行成功。直接驱动器失败（例如 Agent 创建失败或不可用的 `--session-id`）向 stderr 写入 `hydra: <message>` 并退出 1，且在 `--json` 模式下额外发出一个 `error` 事件，不发出 `final` 事件。
 
 ### 源码地图
 
@@ -182,13 +182,13 @@ runner 不向请求前缀添加任何内容；它只是驱动组合出的配置�
 <a id="known-limitations-and-deferred-work"></a>
 
 
-这些限制告诉你 headless 何时不适用、它需要 `dsh` 启动器提供什么。它们是当前包约束，不是通用的 CLI（命令行界面）对比或任务积压。
+这些限制告诉你 headless 何时不适用、它需要 `hydra` 启动器提供什么。它们是当前包约束，不是通用的 CLI（命令行界面）对比或任务积压。
 
 - **每次运行一个任务**——任务得到回答后进程即退出；没有交互式后续，因此多步工作请拆成多次运行。该次运行创建的目标保持激活，但在此不会获得后续轮次；请在 Web 应用等长期运行的宿主中恢复它。
 - **持久化历史可能缺少后台 job 的最后一条结算**——进程销毁可能在有主 job 结算前停止 Session 路由或关闭写句柄，正常结束和信号关停也可能如此；[job 生命周期约定](../../../docs/subsystems/jobs.zh.md#session-lifecycle-records)说明消费方如何保留不完整区间。
 - **自定义 startup**——禁用 `headless-startup` 的组合必须[直接配置策略](../../../docs/upgrade-guide/v0.2.1-rc.2/headless-policy-composition/guide.zh.md)。
 - **Windows 额外根目录**——ACL 后端在工具执行时拒绝带额外根目录的子进程调用，不会阻止模型请求。文件系统工具独立执行这些授权。参见[平台限制](../../sandbox/sandbox-local/README.zh.md)。
-- **通过 `dsh` 启动器运行**——以其他方式启动 headless profile 会在启动时失败，因为只有启动器能请求进程退出。
+- **通过 `hydra` 启动器运行**——以其他方式启动 headless profile 会在启动时失败，因为只有启动器能请求进程退出。
 - **首个 token 前没有心跳**——默认模式下，提供方发出第一个非空推理增量前，stderr 保持静默；延迟首个 token 的提供方不会更早给出进度信号。
 - **推理进入 stderr 日志**——默认模式下，重定向与监督进程可能保留显著更多且可能敏感的模型输出；需要时应把 stderr 路由到受控位置。
 - **默认 stdout 只承载最终答案**——没有 assistant 消息的运行向 stdout 打印空行并以 1 退出；中间工具输出不会打印，除非显式启用 `--json`。

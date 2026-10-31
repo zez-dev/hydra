@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh",
-  "description": "dsh CLI: profile launch, plugin management, and configuration inspection",
+  "description": "Hydra CLI (hydra, also dsh): profile launch, plugin management, and configuration inspection",
   "version": "0.2.2-alpha.2",
   "publishConfig": {
     "access": "public"
@@ -12,6 +12,7 @@
   },
   "type": "module",
   "bin": {
+    "hydra": "lib/bin.js",
     "dsh": "lib/bin.js"
   },
   "files": [

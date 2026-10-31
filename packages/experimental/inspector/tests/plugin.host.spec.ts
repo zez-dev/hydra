@@ -57,7 +57,7 @@ describe('experimental Inspector Host plugin', () => {
     context.emit('webserver/index-inject', rows, PAGE_PEER)
     const bootstrap = rows.find(row => row.kind === 'global' && row.name === '__DSH_INSPECTOR__')
     expect(bootstrap).toMatchObject({ kind: 'global', name: '__DSH_INSPECTOR__' })
-    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^dsh inspector: devtools:\/\//u))
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^hydra inspector: devtools:\/\//u))
     expect(context.inspector).toBeDefined()
     expect(registerRoute).toHaveBeenCalledWith(expect.objectContaining({ kind: 'prefix', path: '/inspector/devtools' }))
     expect(registerUpgrade).toHaveBeenCalledWith(expect.objectContaining({ path: '/inspector/devtools/cdp' }))

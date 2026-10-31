@@ -658,7 +658,7 @@ it.each(['throw', 'reject'])('delivers diagnostics to later subscribers when an 
   expect(await manager.setBundleEnabled('extra', false)).toMatchObject({ changed: true, application: 'restart-required' })
   expect(readProfileManifest('test', dir).dsh?.profile?.bundles).not.toContain('extra')
   expect(facts.map(event => event.phase)).toEqual(['started', 'settled'])
-  await vi.waitFor(() => { expect(errors).toHaveBeenCalledWith('dsh plugin-manager: operation diagnostic delivery failed') })
+  await vi.waitFor(() => { expect(errors).toHaveBeenCalledWith('hydra plugin-manager: operation diagnostic delivery failed') })
 })
 
 it('turns a plugin off and on without leaving a patch override the bundle already implies', async () => {
@@ -1597,7 +1597,7 @@ it('installs from the next registry after one is unreachable, restoring the file
 it('does not ask the next registry after the manager terminated a silent run', async () => {
   const { manager } = await fixture()
   const install = vi.spyOn(operations, 'runProfilePnpm').mockResolvedValue({
-    exitCode: 1, output: 'installing\ndsh: pnpm printed nothing for 600000ms and was terminated\n',
+    exitCode: 1, output: 'installing\nhydra: pnpm printed nothing for 600000ms and was terminated\n',
     truncated: false, logPath: '/dev/null', timedOut: true,
   })
   onTestFinished(() => { install.mockRestore() })
@@ -1615,7 +1615,7 @@ it('drops the earlier registry failure once a later attempt is terminated for si
       truncated: false, logPath: '/dev/null',
     })
     .mockResolvedValueOnce({
-      exitCode: 1, output: 'installing\ndsh: pnpm printed nothing for 600000ms and was terminated\n',
+      exitCode: 1, output: 'installing\nhydra: pnpm printed nothing for 600000ms and was terminated\n',
       truncated: false, logPath: '/dev/null', timedOut: true,
     })
   onTestFinished(() => { install.mockRestore() })
@@ -1732,7 +1732,7 @@ it.each(['dsh-x', 'dsh-x@^2.0.0'])('retains the refused package identity for %s'
   ctx.on('plugin-manager/operation', (event) => { facts.push(event) })
   const incompatible = [{ name: 'dsh-x', version: '2.0.0', runtimeVersion: getDshRuntimeVersion(), requirements: { '@deepseek-ai/dsh': '999.0.0' } }]
   const install = vi.spyOn(operations, 'runProfilePnpm').mockResolvedValue({
-    exitCode: 1, output: 'dsh: installation rejected', truncated: false, logPath: 'pnpm.log', kind: 'unknown', incompatible,
+    exitCode: 1, output: 'hydra: installation rejected', truncated: false, logPath: 'pnpm.log', kind: 'unknown', incompatible,
   })
   onTestFinished(() => { install.mockRestore() })
   const result = await manager.installBundle(spec)

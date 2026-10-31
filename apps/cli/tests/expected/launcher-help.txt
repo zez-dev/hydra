@@ -1,12 +1,12 @@
-Usage: dsh [--profile] <name> [options] [app-args...]
-       dsh plugin --profile <name> <pnpm-args...>
+Usage: hydra [--profile] <name> [options] [app-args...]
+       hydra plugin --profile <name> <pnpm-args...>
 
-dsh: boot a Hydra profile — an ordered stack of plugin-bundle patch layers under
-your own overrides.
+hydra: boot a Hydra profile — an ordered stack of plugin-bundle patch layers
+under your own overrides.
 
 Arguments:
   args                           arguments for the booted profile's app (see:
-                                 dsh --profile <name> --help)
+                                 hydra --profile <name> --help)
 
 Options:
   -V, --version                  output the version number
@@ -22,11 +22,13 @@ Options:
                                  or --patch overlays and exit
 
 Examples:
-  dsh web                                   boot the web profile (same as: dsh --profile web)
-  dsh rescue --from-default-profile web
+  hydra web                                 boot the web profile (same as: hydra --profile web)
+  hydra rescue --from-default-profile web
                                             recreate rescue from the shipped web template, then boot it
-  dsh headless "run the tests"              answer one task, print the result, and exit
-  dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
-  dsh tui --resume <session>                arguments after the launcher flags reach the app
-  dsh web --help                            the web app's own flags and help
-  dsh plugin --profile tui add <package>    install a plugin into the tui profile
+  hydra headless "run the tests"            answer one task, print the result, and exit
+  hydra tui --patch ./extra.yml             boot a custom profile with one extra overlay
+  hydra tui --resume <session>              arguments after the launcher flags reach the app
+  hydra web --help                          the web app's own flags and help
+  hydra plugin --profile tui add <package>  install a plugin into the tui profile
+
+dsh is the same command under its earlier name.
