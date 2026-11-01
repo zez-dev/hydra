@@ -9,6 +9,11 @@ export type DesktopRuntimePatch =
 /** Every workspace patch requires an explicit Desktop decision; runtime-only entries may add or replace a patch. */
 export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatch>> = {
   '@botiverse/oar@0.67.0': { scope: 'workspace-only', reason: 'Patched OAR adapters are embedded in the provider bundle.' },
+  '@deepseek-ai/libreoffice-kit@0.1.5': {
+    scope: 'runtime-only',
+    path: 'apps/desktop/patches/@deepseek-ai__libreoffice-kit@0.1.5.patch',
+    reason: 'Inside app.asar, Electron reports a missing package as null, which the kit counts as installed, so Linux never falls back to WASM.',
+  },
   '@earendil-works/pi-ai@1.3.0': { scope: 'shared', reason: 'Runtime providers need the streamed argument parsing fix.' },
   '@electron/osx-sign@1.3.3': { scope: 'workspace-only', reason: 'Signing executes on the build host.' },
   '@fortune-sheet/core@1.0.4': { scope: 'workspace-only', reason: 'Patched spreadsheet code is embedded in the client bundle.' },
@@ -24,6 +29,8 @@ export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatc
 
 /** Reviewed Desktop dependency constraints, independent of patch selection. */
 export const DESKTOP_RUNTIME_DEPENDENCY_OVERRIDES: Readonly<Record<string, string>> = {
+  // The Office packages declare ^0.1.5; the kit's patch is qualified against 0.1.5.
+  '@deepseek-ai/libreoffice-kit@^0.1.5': '0.1.5',
   // The provider declares ^1.3.0; its patch is qualified against 1.3.0.
   '@earendil-works/pi-ai@^1.3.0': '1.3.0',
 }
