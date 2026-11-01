@@ -1,7 +1,8 @@
 /** Process-local turn order for a Team whose teammates take turns. */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
+import type { MessageId, UserMessage } from '@deepseek-ai/dsh-llm'
 import { errorMessage, TeamError } from './error.ts'
 import type { TeamId } from './types.ts'
 
@@ -160,6 +161,11 @@ export class TurnQueue {
   }
 }
 
+/** Whether another Agent addressed this message to its recipient, as a Team message does. */
+function isRelay(message: UserMessage): boolean {
+  return 'form' in message.source && message.source.form === 'relay'
+}
+
 /**
  * Hold teammates outside their Team's turn. Input entering an idle teammate
  * while another teammate has the turn starts an Agent maintenance hold: the
@@ -169,6 +175,10 @@ export class TurnQueue {
  * when it leaves the registry, and while it waits for Team activity.
  */
 export class TeamTurnGate {
+  /** Arrival position of each message entering a teammate's inbox, until a step claims it. */
+  private readonly arrivals = new WeakMap<Agent, Map<MessageId, number>>()
+  private arrived = 0
+
   /**
    * Register the gate's listeners in the Team service context.
    * @param ctx - Team service context; its disposal removes the listeners.
@@ -180,21 +190,68 @@ export class TeamTurnGate {
     private readonly queue: TurnQueue,
     private readonly teamOf: (agent: Agent) => TeamId | undefined,
   ) {
-    ctx.on('agent/inbox/inserted', ({ agent }) => { this.admit(agent) })
+    ctx.on('agent/inbox/inserted', ({ agent, message }) => {
+      if (this.teamOf(agent) !== undefined) this.recordArrival(agent, message.id)
+      this.admit(agent)
+    })
     // Prepended so no other step work, such as pressure compaction, runs before the turn.
-    ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    ctx.on('agent/pre-step', async ({ agent, signal, step }, next) => {
       const team = this.teamOf(agent)
       if (team !== undefined && !this.queue.holds(team, agent)) {
         this.endWhenIdle(team, agent, await this.queue.acquire(team, agent, signal))
       }
-      return await next()
+      const decision = await next()
+      return team === undefined ? decision : this.openTurnInArrivalOrder(agent, step, decision)
     }, { prepend: true })
     ctx.on('agent/status', ({ agent, status }) => {
       if (status !== 'idle') return
       const team = this.teamOf(agent)
       if (team !== undefined) this.queue.release(team, agent)
     })
-    ctx.on('agent/disposed', ({ agent }) => { this.queue.forget(agent) })
+    ctx.on('agent/disposed', ({ agent }) => {
+      this.queue.forget(agent)
+      this.arrivals.delete(agent)
+    })
+  }
+
+  /**
+   * Keep a held teammate's queued turn input ahead of Team messages that arrived after it.
+   * While another teammate has the turn, a waiting teammate's assignment stays queued for its next
+   * turn and Team messages queue for its next step; the turn's first claim lists step input first,
+   * so a message sent after the assignment would otherwise reach the model before it.
+   * @param agent - teammate whose step was decided.
+   * @param step - step number within the turn; only a turn's first step claims queued turn input.
+   * @param decision - the step decision after every later listener.
+   * @returns the decision, with the queued turn input moved ahead of later Team messages when needed.
+   */
+  private openTurnInArrivalOrder(agent: Agent, step: number, decision: PreStepDecision): PreStepDecision {
+    const order = this.arrivals.get(agent)
+    if (decision.kind !== 'enter' || order === undefined) return decision
+    const claimed: (readonly [UserMessage, number])[] = []
+    for (const message of decision.messages) {
+      const at = order.get(message.id)
+      if (at === undefined) continue
+      claimed.push([message, at])
+      order.delete(message.id)
+    }
+    // A claim lists the queued turn input last; the runtime context after it never entered the inbox.
+    const opening = claimed.at(-1)
+    if (step !== 1 || opening === undefined || isRelay(opening[0])) return decision
+    const later = claimed.find(([message, at]) => isRelay(message) && at > opening[1])
+    if (later === undefined) return decision
+    const rest = decision.messages.filter(message => message !== opening[0])
+    const index = rest.indexOf(later[0])
+    return { ...decision, messages: [...rest.slice(0, index), opening[0], ...rest.slice(index)] }
+  }
+
+  /** Remember when one message entered a teammate's inbox. */
+  private recordArrival(agent: Agent, id: MessageId): void {
+    let order = this.arrivals.get(agent)
+    if (order === undefined) {
+      order = new Map()
+      this.arrivals.set(agent, order)
+    }
+    order.set(id, this.arrived++)
   }
 
   /**

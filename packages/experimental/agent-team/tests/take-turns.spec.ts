@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { LlmAdapter, createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -239,6 +239,34 @@ describe('Team turn-taking', () => {
     await waitGone(ctx, alpha.id)
     expect(adapter.teammateRequests()).toEqual([alpha.id, beta.id, alpha.id])
     expect(adapter.maxTeammatesInFlight).toBe(1)
+  })
+
+  it('opens a waiting teammate\'s turn with its assignment before messages that arrived later', async () => {
+    const { ctx, lead, adapter } = await setup()
+    const alpha = await spawn(ctx, lead, 'alpha')
+    const beta = await spawn(ctx, lead, 'beta')
+    await waitInFlight(adapter, alpha.id)
+    await ctx.agentTeams.sendMessage(live(ctx, alpha.id), { target: 'beta', content: content('question'), signal: SIGNAL })
+    const betaRequest = Promise.withResolvers<string[]>()
+    adapter.auto = (options) => {
+      if (String(options.sessionId) === beta.id) betaRequest.resolve(requestText(options))
+      return Promise.resolve(textResponse('done'))
+    }
+    await adapter.reply(alpha.id, 'alpha asked')
+    const texts = await betaRequest.promise
+    expect(texts.filter(text => ['beta initial', 'Team message from alpha:', 'question'].includes(text)))
+      .toEqual(['beta initial', 'Team message from alpha:', 'question'])
+  })
+
+  it('leaves a teammate step that a later listener rejects as rejected', async () => {
+    const { ctx, lead, adapter } = await setup()
+    const alpha = await spawn(ctx, lead, 'alpha')
+    const beta = await spawn(ctx, lead, 'beta')
+    ctx.on('agent/pre-step', async ({ agent }, next): Promise<PreStepDecision> =>
+      agent.id === beta.id ? { kind: 'reject' } : await next())
+    await adapter.reply(alpha.id, 'alpha done')
+    await waitGone(ctx, beta.id)
+    expect(adapter.teammateRequests()).toEqual([alpha.id])
   })
 
   it('delivers every message in order without deadlock when three teammates message each other', async () => {

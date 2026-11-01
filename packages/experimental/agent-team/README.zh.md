@@ -153,7 +153,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 ### 轮流工作
 
-`TurnQueue` 为每个 Team 保存一个进程内轮次：当前授予以及一个先进先出的等待 teammate 列表。`TeamTurnGate` 负责执行这一顺序。输入进入空闲 teammate 的 inbox 时，它会占用空闲的轮次，或启动一个等待轮次的 Agent maintenance hold；输入保持在持久 inbox 中待处理，Agent loop 会锁存其唤醒，直到 hold 结束。没有轮次就开始的 teammate 步骤会在前置的 `agent/pre-step` 监听器中等待，之后才进行其他步骤工作。这种情况出现在宿主以 keep-inbox 方式中断并结束 hold 之后，或输入到达时其他 maintenance 正占用该 Agent；该步骤已 claim 的输入在等待期间不在持久 inbox 中。轮次在以下时刻移交：持有者的 `agent/status` 空闲边、持有者离开注册表、`waitForChange()` 让出轮次，以及某个授予对应的 Agent 未使用该授予就再次空闲。
+`TurnQueue` 为每个 Team 保存一个进程内轮次：当前授予以及一个先进先出的等待 teammate 列表。`TeamTurnGate` 负责执行这一顺序。输入进入空闲 teammate 的 inbox 时，它会占用空闲的轮次，或启动一个等待轮次的 Agent maintenance hold；输入保持在持久 inbox 中待处理，Agent loop 会锁存其唤醒，直到 hold 结束。没有轮次就开始的 teammate 步骤会在前置的 `agent/pre-step` 监听器中等待，之后才进行其他步骤工作。这种情况出现在宿主以 keep-inbox 方式中断并结束 hold 之后，或输入到达时其他 maintenance 正占用该 Agent；该步骤已 claim 的输入在等待期间不在持久 inbox 中。轮次在以下时刻移交：持有者的 `agent/status` 空闲边、持有者离开注册表、`waitForChange()` 让出轮次，以及某个授予对应的 Agent 未使用该授予就再次空闲。同一监听器还保证等待中 teammate 的消息按到达顺序送达：Agent loop 在一个轮次中的首次 claim 会把步骤输入排在排队的轮次输入之前，因此 gate 记录每条消息进入 teammate inbox 的时间，并把该轮次自身的输入移到在它之后到达的 Team 消息之前。
 
 任何 Team 操作都不会在持有轮次时等待轮次，因此轮流不会死锁（[决策](../../../.agents/notes/implemented/feature/2026-10-31-agent-team-take-turns.zh.md)）：发送在 inbox 接收时返回，创建在初始提示已在持久 inbox 中待处理时返回，`waitForChange()` 先让出轮次再等待，而 Lead 从不等待轮次。dispose 会移除这些监听器并停止 teammate，停止操作会以清空 inbox 的方式取消它们的 hold；之后以 `TEAM_DISPOSED` 拒绝剩余的轮次等待。
 
