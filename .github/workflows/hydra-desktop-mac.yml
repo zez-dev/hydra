@@ -1,0 +1,57 @@
+# Hydra's macOS desktop build: an unsigned DMG for Apple Silicon Macs,
+# packaged on a clean GitHub-hosted runner and kept as this run's downloadable
+# file. It runs only when started by hand and publishes nothing; a GitHub
+# release is a separate step.
+name: Hydra desktop · macOS arm64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  package:
+    name: package the macOS arm64 DMG
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the native addon
+        run: pnpm run build:native-system
+
+      # Settings and build tools fail here in about a minute rather than after the build.
+      - name: Check the packaging configuration and tools
+        run: pnpm -C apps/desktop run package:mac:arm64:unsigned --check
+
+      - name: Package
+        run: pnpm -C apps/desktop run package:mac:arm64:unsigned
+
+      # The standard macOS runner has a smaller disk than the Linux one.
+      - name: Show the free disk space after a failed build
+        if: failure()
+        run: df -h .
+
+      - name: Keep the DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: hydra-mac-arm64
+          path: apps/desktop/.desktop-build/targets/mac-arm64/unsigned-artifacts/*.dmg
+          if-no-files-found: error
+          retention-days: 14
