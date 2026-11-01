@@ -14,7 +14,12 @@ export interface DesktopElectronBuilderConfig {
     { readonly from: string, readonly to: 'dsh', readonly filter: readonly ['**/*'] },
     { readonly from: string, readonly to: 'dsh/node_modules', readonly filter: readonly ['**/*'] },
   ]
-  readonly extraMetadata: { readonly productName: 'Hydra', readonly dshDesktopAppId: string }
+  readonly extraMetadata: {
+    readonly productName: 'Hydra'
+    readonly homepage: 'https://github.com/zez-dev/hydra'
+    readonly desktopName: 'hydra.desktop'
+    readonly dshDesktopAppId: string
+  }
   readonly asarUnpack: readonly string[]
   readonly extraResources: readonly [
     { readonly from: string, readonly to: 'runtime' },
@@ -50,6 +55,7 @@ export interface DesktopElectronBuilderConfig {
     readonly icon: string
     readonly category: 'Development'
     readonly executableName: 'hydra'
+    readonly syncDesktopName: true
     readonly maintainer: string
     readonly vendor: 'Hydra'
     readonly synopsis: string
