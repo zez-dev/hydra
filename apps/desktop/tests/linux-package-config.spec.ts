@@ -25,6 +25,12 @@ describe('Linux package configuration', () => {
     expect(config.directories.output).toContain('linux-x64')
   })
 
+  it('gives the .deb a homepage and ties Hydra windows to hydra.desktop', () => {
+    const config = createElectronBuilderConfig(LINUX, 'linux', 'x64')
+    expect(config.extraMetadata).toMatchObject({ homepage: 'https://github.com/zez-dev/hydra', desktopName: 'hydra.desktop' })
+    expect(config.linux.syncDesktopName).toBe(true)
+  })
+
   it('builds the AppImage on the static runtime, which needs no libfuse2 on the PC', () => {
     expect(createElectronBuilderConfig(LINUX, 'linux', 'x64').toolsets).toEqual({ appimage: '1.0.3' })
   })

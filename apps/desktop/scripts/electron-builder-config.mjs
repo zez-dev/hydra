@@ -101,6 +101,11 @@ export function createElectronBuilderConfig(
       // Electron names its userData directory after the manifest's productName, falling back to the scoped package
       // name; this keeps the shell's own folder Hydra, which the Windows uninstaller removes as the product directory.
       productName: 'Hydra',
+      // electron-builder refuses a .deb without a homepage, and the manifest names none.
+      homepage: 'https://github.com/zez-dev/hydra',
+      // On Linux, Electron derives the window's app ID from desktopName; matching hydra.desktop lets the dock
+      // associate Hydra's windows with its launcher.
+      desktopName: 'hydra.desktop',
       dshDesktopAppId: appId,
       dshDesktopUpdateChannel: 'nightly',
       ...buildVersion === productVersion ? {} : { version: buildVersion },
@@ -238,6 +243,7 @@ export function createElectronBuilderConfig(
       icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
       category: 'Development',
       executableName: 'hydra',
+      syncDesktopName: true,
       maintainer: 'zez-dev <278317123+zez-dev@users.noreply.github.com>',
       vendor: 'Hydra',
       synopsis: 'Desktop app for the Hydra AI agent',
