@@ -312,7 +312,7 @@ describe('dsh-tool-workflow', () => {
     engine.settle({ value: null, stopReason: 'error', error: 'script threw: boom', agentsStarted: 2 })
     const result = await pending
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toContain('workflow run failed: script threw: boom')
+    expect((result.content[0] as { text: string }).text).toContain('workflow run run-1 failed: script threw: boom')
     expect(engine.disposed).toBe(1)
   })
 
@@ -323,12 +323,12 @@ describe('dsh-tool-workflow', () => {
     engine.settle({ value: null, stopReason: 'cancelled', error: 'user', agentsStarted: 0 })
     const result = await pending
     expect(result.isError).toBe(true)
-    expect((result.content[0] as { text: string }).text).toContain('workflow run was cancelled (user)')
+    expect((result.content[0] as { text: string }).text).toContain('workflow run run-1 was cancelled (user)')
 
     const bare = execute(ctx, { script: SCRIPT, meta: META }, { agent: parent })
     await vi.waitFor(() => { expect(engine.requests.length).toBe(2) })
     engine.settle({ value: null, stopReason: 'cancelled', agentsStarted: 0 })
-    expect(((await bare).content[0] as { text: string }).text.trim().endsWith('cancelled')).toBe(true)
+    expect(((await bare).content[0] as { text: string }).text.trim().endsWith('workflow run run-2 was cancelled')).toBe(true)
   })
 
   it('an error result without a message renders the unknown-error fallback', async () => {
@@ -486,6 +486,15 @@ describe('dsh-tool-workflow', () => {
       return ctx.jobs.readAt(jobId, 0, owner.id).chunks.map(chunk => chunk.text).join('')
     }
 
+    it('resumes an earlier run in the background and names the new run in the acceptance', async () => {
+      const { ctx, engine, parent } = await setupBackground()
+      const result = await execute(ctx,
+        { script: SCRIPT, meta: META, run_in_background: true, resumeRunId: 'run-earlier' }, { agent: parent })
+      expect(result.isError).toBe(false)
+      expect(engine.requests[0]).toMatchObject({ resumeRunId: 'run-earlier' })
+      expect((result.content[0] as { text: string }).text).toContain(' (run run-1). ')
+    })
+
     it('registers an owned job, mirrors progress into its ring, and settles with the rendered value', async () => {
       const { ctx, engine, parent, session } = await setupBackground()
       const result = await execute(ctx, { script: SCRIPT, meta: META, run_in_background: true }, { agent: parent })
@@ -494,7 +503,7 @@ describe('dsh-tool-workflow', () => {
       const jobId = (result.value as { jobId: string }).jobId as JobId
       expect(result.value).toEqual({ kind: 'background', jobId, runId: 'run-1' })
       expect((result.content[0] as { text: string }).text)
-        .toContain(`workflow "audit" started in the background as job ${jobId}`)
+        .toContain(`workflow "audit" started in the background as job ${jobId} (run run-1). `)
       // The engine run carries no tool-step signal: the job owns cancellation.
       expect(engine.requests[0]!.signal).toBeUndefined()
 

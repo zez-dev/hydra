@@ -198,17 +198,18 @@ function presentWorkflowResult(args: WorkflowCallArgs, result: { content: Conten
 }
 
 /** A non-`completed` stop reason means the script did not finish cleanly. */
-function stopReasonError(result: WorkflowResult): string | undefined {
+function stopReasonError(result: WorkflowResult, runId: WorkflowRunId): string | undefined {
+  // The run id is what `resumeRunId` takes, and this message is the only place the model sees it.
   switch (result.stopReason) {
     case 'completed':
       return undefined
     case 'cancelled':
-      return `workflow run was cancelled${result.error !== undefined ? ` (${result.error})` : ''}`
+      return `workflow run ${runId} was cancelled${result.error !== undefined ? ` (${result.error})` : ''}`
     case 'error':
-      return `workflow run failed: ${result.error ?? 'unknown error'}`
+      return `workflow run ${runId} failed: ${result.error ?? 'unknown error'}`
     /* v8 ignore start -- defensive: WorkflowStopReason is a closed union, exhaustive by construction; a future variant fails here loudly */
     default:
-      return `workflow run ended abnormally (${String(result.stopReason satisfies never)})`
+      return `workflow run ${runId} ended abnormally (${String(result.stopReason satisfies never)})`
     /* v8 ignore stop */
   }
 }
@@ -411,7 +412,7 @@ export function apply(ctx: Context, config: Config): void {
       render: (args, value) => [{
         type: 'text',
         text: value.kind === 'background'
-          ? `workflow "${args.meta.name}" started in the background as job ${value.jobId}. Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`
+          ? `workflow "${args.meta.name}" started in the background as job ${value.jobId} (run ${value.runId}). Its return value arrives with the completion notice; check on it with job_output, stop it with job_kill.`
           : renderResult(args.meta.name, value.agentsStarted, value.result, maxResultChars),
       }],
     },
@@ -463,7 +464,7 @@ export function apply(ctx: Context, config: Config): void {
       let result: WorkflowResult | undefined
       try {
         result = await run.result
-        const error = stopReasonError(result)
+        const error = stopReasonError(result, run.id)
         if (error !== undefined) {
           // Map a non-clean finish to an isError result (the registry turns a
           // throw into an isError). Report the reason, not partial output.
