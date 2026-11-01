@@ -1036,7 +1036,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-doctor`
 
 - `inject`: `commands` · `llm`
-- `source`: [`packages/boot/doctor/src/index.ts:53`](../packages/boot/doctor/src/index.ts)
+- `source`: [`packages/boot/doctor/src/index.ts:54`](../packages/boot/doctor/src/index.ts)
 
 ```ts config-catalog
 /** Doctor configuration. */
