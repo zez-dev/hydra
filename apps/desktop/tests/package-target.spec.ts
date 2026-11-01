@@ -26,7 +26,9 @@ describe('desktop package target', () => {
   })
 
   it('rejects unsupported targets and hosts before building', () => {
-    expect(() => resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toThrow(/unsupported target/u)
+    expect(() => resolveDesktopPackageTarget('linux-arm64', 'linux', 'arm64')).toThrow(/unsupported target/u)
+    expect(() => resolveDesktopPackageTarget('linux-x64', 'darwin', 'arm64')).toThrow(/Linux x64/u)
+    expect(() => resolveDesktopPackageTarget('linux-x64', 'linux', 'arm64')).toThrow(/Linux x64/u)
     expect(() => resolveDesktopPackageTarget('win-x64', 'darwin', 'arm64')).toThrow(/Windows x64/u)
     expect(() => resolveDesktopPackageTarget('mac-arm64', 'darwin', 'x64')).toThrow(/Apple Silicon/u)
     expect(() => resolveDesktopPackageTarget('mac-arm64', 'linux', 'arm64')).toThrow(/macOS/u)
@@ -56,6 +58,18 @@ describe('desktop package target', () => {
     expect(parseDesktopPackageInvocation(['--', '--check'], 'darwin', 'arm64').check).toBe(true)
     expect(() => parseDesktopPackageInvocation(['mac-arm64', '--build-version', '  '], 'darwin', 'arm64'))
       .toThrow(/--build-version requires a value/u)
+  })
+
+  it('resolves the Linux target on a Linux x64 host, unsigned only', () => {
+    expect(resolveDesktopPackageTarget('linux-x64', 'linux', 'x64')).toEqual({
+      name: 'linux-x64', platform: 'linux', arch: 'x64', builderPlatform: '--linux', builderArch: '--x64',
+    })
+    expect(parseDesktopPackageInvocation(['--unsigned'], 'linux', 'x64')).toMatchObject({ unsigned: true, target: { name: 'linux-x64' } })
+    expect(parseDesktopPackageInvocation(['linux-x64', '--unsigned', '--dir'], 'linux', 'x64').directory).toBe(true)
+    expect(() => parseDesktopPackageInvocation(['linux-x64'], 'linux', 'x64')).toThrow(/linux-x64 builds are unsigned/u)
+    expect(desktopElectronBuilderArguments(resolveDesktopPackageTarget('linux-x64', 'linux', 'x64'), false)).toEqual([
+      'exec', 'electron-builder', '--config', 'electron-builder.config.mjs', '--linux', '--x64', '--publish', 'never',
+    ])
   })
 
   it('keeps electron-builder publishing disabled for the separate validated upload', () => {

@@ -232,10 +232,23 @@ export function createElectronBuilderConfig(
       },
       target: ['nsis'],
     },
+    // Linux builds are unsigned: an AppImage that runs from any folder, and a .deb that installs to /opt/Hydra.
+    // The manifest's author is DeepSeek, which wrote the upstream application, so the package names Hydra's maintainer.
     linux: {
+      icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
       category: 'Development',
-      target: ['AppImage'],
+      executableName: 'hydra',
+      maintainer: 'zez-dev <278317123+zez-dev@users.noreply.github.com>',
+      vendor: 'Hydra',
+      synopsis: 'Desktop app for the Hydra AI agent',
+      description: 'Hydra runs an AI agent on your projects, built on DeepSeek Harness. It is not affiliated with or endorsed by DeepSeek or any model provider.',
+      target: ['AppImage', 'deb'],
     },
+    // Debian package names are lowercase; without this, electron-builder names the package after the product, Hydra.
+    deb: { packageName: 'hydra' },
+    // The default AppImage runtime loads libfuse2, which Ubuntu 22.04 and later do not install; toolset 1.0.3 is
+    // electron-builder's static runtime, still marked beta, which bundles its own FUSE library.
+    toolsets: { appimage: '1.0.3' },
     nsis: {
       uninstallDisplayName: '${productName}',
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),

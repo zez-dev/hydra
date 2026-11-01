@@ -1,0 +1,51 @@
+# Hydra's Linux desktop build: an unsigned AppImage and .deb for x86-64 PCs,
+# packaged on a clean GitHub-hosted runner and kept as this run's downloadable
+# files. It runs only when started by hand and publishes nothing; a GitHub
+# release is a separate step.
+name: Hydra desktop · Linux x64
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+
+jobs:
+  package:
+    name: package the Linux x64 AppImage and .deb
+    # A build on 22.04 links against an older C library than 24.04's, so it also runs on 22.04 PCs.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the native addon
+        run: pnpm run build:native-system
+
+      - name: Package
+        run: pnpm -C apps/desktop run package:linux:x64:unsigned
+
+      - name: Keep the packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: hydra-linux-x64
+          path: |
+            apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/*.AppImage
+            apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 14

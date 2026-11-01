@@ -11,4 +11,7 @@ while [ -L "$launcher" ]; do
   esac
 done
 resources=$(CDPATH= cd -- "$(dirname -- "$launcher")/../../.." && pwd -P)
-ELECTRON_RUN_AS_NODE=1 exec "$resources/../MacOS/Hydra" --expose-internals "$resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js" "$@"
+# macOS keeps the executable in the bundle's MacOS directory; Linux keeps it beside resources.
+electron=$resources/../MacOS/Hydra
+[ -x "$electron" ] || electron=$resources/../hydra
+ELECTRON_RUN_AS_NODE=1 exec "$electron" --expose-internals "$resources/app.asar/dsh/node_modules/@deepseek-ai/dsh-desktop-host/lib/cli.js" "$@"
