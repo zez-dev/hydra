@@ -1807,7 +1807,7 @@ export interface Config {
 ```ts config-catalog
 /** Evaluator configuration. */
 export interface Config {
-  /** How many most-recent tool results are sent as evidence. */
+  /** How many most-recent tool results are sent as evidence; earlier `update_goal` results are left out. */
   evidenceEvents: number
   /** Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted. */
   maxWorkspaceChangeEntries: number

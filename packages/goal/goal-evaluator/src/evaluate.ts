@@ -17,14 +17,22 @@ export const EVALUATION_SYSTEM_PROMPT = [
 
 /**
  * Render the last `limit` tool results of a session log as evidence lines.
+ * Results of the `excluded` tools are left out before the last `limit` are
+ * taken.
  * @param events - the session's events in sequence order.
  * @param limit - how many most-recent tool results to keep.
- * @param maxChars - per-result character cap; longer results are truncated with an ellipsis.
+ * @param maxChars - per-result character cap; see {@link clipEvidence}.
+ * @param excluded - tool names whose results are not evidence of the work; none when omitted.
  * @returns evidence lines in log order, each `<tool>: <result text>`.
  */
-export function collectEvidence(events: readonly SessionEvent[], limit: number, maxChars: number): string[] {
+export function collectEvidence(
+  events: readonly SessionEvent[],
+  limit: number,
+  maxChars: number,
+  excluded: ReadonlySet<string> = new Set(),
+): string[] {
   const names = new Map<string, string>()
-  const results: { callId: string; text: string }[] = []
+  const results: { name: string; text: string }[] = []
   for (const event of events) {
     if (event.type === 'tool/call') {
       names.set(event.data.callId, event.data.name)
@@ -32,13 +40,32 @@ export function collectEvidence(events: readonly SessionEvent[], limit: number, 
     }
     if (event.type !== 'tool/result') continue
     const message = event.data.message
+    const name = names.get(message.toolCallId) ?? 'tool'
+    if (excluded.has(name)) continue
     const text = message.content.map(part => part.type === 'text' ? part.text : `[${part.type}]`).join('')
-    results.push({ callId: message.toolCallId, text })
+    results.push({ name, text })
   }
-  return results.slice(-limit).map(({ callId, text }) => {
-    const body = text.length <= maxChars ? text : `${text.slice(0, Math.max(0, maxChars - 1))}…`
-    return `${names.get(callId) ?? 'tool'}: ${body}`
-  })
+  return results.slice(-limit).map(({ name, text }) => `${name}: ${clipEvidence(text, maxChars)}`)
+}
+
+/**
+ * Cap one tool result at `maxChars`. A longer result keeps its first and last
+ * characters around a count of the omitted ones, because command output ends
+ * with its summary; when the cap cannot hold that count, the result keeps its
+ * first characters and an ellipsis.
+ * @param text - the tool result text.
+ * @param maxChars - the most characters the clipped text may hold.
+ * @returns `text` itself when it fits, otherwise its clipped form.
+ */
+export function clipEvidence(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text
+  const marker = (omitted: number): string => `\n… [${omitted} characters omitted] …\n`
+  // The full length bounds the omitted count, so this marker is at least as long as the final one.
+  const room = maxChars - marker(text.length).length
+  if (room < 2) return `${text.slice(0, Math.max(0, maxChars - 1))}…`
+  const head = Math.floor(room * 0.3)
+  const tail = room - head
+  return `${text.slice(0, head)}${marker(text.length - head - tail)}${text.slice(text.length - tail)}`
 }
 
 /**

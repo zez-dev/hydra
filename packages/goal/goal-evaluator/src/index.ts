@@ -24,7 +24,7 @@ import { collectEvidence, EVALUATION_SYSTEM_PROMPT, parseVerdict, renderWorkspac
 import type { GoalVerdict } from './types.ts'
 
 export type * from './types.ts'
-export { collectEvidence, EVALUATION_SYSTEM_PROMPT, parseVerdict, renderWorkspaceEvidence } from './evaluate.ts'
+export { clipEvidence, collectEvidence, EVALUATION_SYSTEM_PROMPT, parseVerdict, renderWorkspaceEvidence } from './evaluate.ts'
 
 export const name = 'goal-evaluator'
 export const inject = ['tools', 'llm', 'goals']
@@ -49,7 +49,7 @@ const EVIDENCE_RESULT_CHARS = 2000
 
 /** Evaluator configuration. */
 export interface Config {
-  /** How many most-recent tool results are sent as evidence. */
+  /** How many most-recent tool results are sent as evidence; earlier `update_goal` results are left out. */
   evidenceEvents: number
   /** Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted. */
   maxWorkspaceChangeEntries: number
@@ -100,7 +100,8 @@ export async function evaluateGoal(
   const session = agent.session
   const route = auxiliaryRoute(config, session.requestHeader()?.config)
   if (route === undefined) throw new Error('goal-evaluator: no evaluation route; configure provider and model or log a request first')
-  const evidence = collectEvidence(observed, config.evidenceEvents, EVIDENCE_RESULT_CHARS)
+  // An earlier update_goal result is an earlier verdict, not evidence of the work.
+  const evidence = collectEvidence(observed, config.evidenceEvents, EVIDENCE_RESULT_CHARS, new Set([UPDATE_GOAL]))
   const changes = renderWorkspaceEvidence(workspace, config.maxWorkspaceChangeEntries)
   const messages: Message[] = [createUserMessage({
     content: [{

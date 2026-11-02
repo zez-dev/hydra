@@ -13,7 +13,7 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { defineContentToolFixture, executeToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import GoalService from '@deepseek-ai/dsh-goal'
 import * as Evaluator from '@deepseek-ai/dsh-goal-evaluator'
-import { collectEvidence, parseVerdict, renderWorkspaceEvidence } from '@deepseek-ai/dsh-goal-evaluator'
+import { clipEvidence, collectEvidence, parseVerdict, renderWorkspaceEvidence } from '@deepseek-ai/dsh-goal-evaluator'
 import type { WorkspaceChanges, WorkspaceChangesSummary } from '@deepseek-ai/dsh-workspace-changes'
 
 /** Answers each request with the script's chunks; the route offers `efforts` as its reasoning efforts, or none when absent. */
@@ -149,6 +149,34 @@ describe('collectEvidence', () => {
     expect(evidence[0]).toContain('tool1')
     expect(evidence[1]).toContain('tool2')
     expect(evidence.every(line => line.length <= 30 + 'tool2: '.length + 1)).toBe(true)
+  })
+
+  it('leaves out excluded tools before taking the last N results', () => {
+    const events: SessionEvent[] = []
+    let seq = 0
+    for (const [index, name] of ['work-a', 'update_goal', 'work-b'].entries()) {
+      events.push({ type: 'tool/call', seq: SessionSeq(seq++), time: seq, data: { turn: 1, step: 1, callId: ToolCallId(`c${index}`), name, arguments: '{}' } } as never)
+      events.push({ type: 'tool/result', seq: SessionSeq(seq++), time: seq, data: { turn: 1, step: 1, message: { toolCallId: ToolCallId(`c${index}`), content: [{ type: 'text', text: `${name} result` }] } } } as never)
+    }
+    expect(collectEvidence(events, 2, 100, new Set(['update_goal']))).toEqual(['work-a: work-a result', 'work-b: work-b result'])
+  })
+})
+
+describe('clipEvidence', () => {
+  it('keeps the start and the end of a long result around the omitted count', () => {
+    const text = `start ${'x'.repeat(5_000)} summary: 91 passed`
+    const clipped = clipEvidence(text, 200)
+    expect(clipped.length).toBeLessThanOrEqual(200)
+    expect(clipped.startsWith('start ')).toBe(true)
+    expect(clipped.endsWith('summary: 91 passed')).toBe(true)
+    expect(clipped).toMatch(/\n… \[\d+ characters omitted\] …\n/u)
+    const omitted = Number(/\[(\d+) characters omitted\]/u.exec(clipped)![1])
+    expect(clipped.length - clipped.match(/\n… \[\d+ characters omitted\] …\n/u)![0].length + omitted).toBe(text.length)
+  })
+
+  it('returns a result that fits unchanged and falls back to a plain cut below the marker size', () => {
+    expect(clipEvidence('exactly ten', 11)).toBe('exactly ten')
+    expect(clipEvidence('x'.repeat(100), 10)).toBe(`${'x'.repeat(9)}…`)
   })
 })
 
