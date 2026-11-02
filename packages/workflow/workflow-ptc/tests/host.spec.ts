@@ -7,7 +7,7 @@ import type { PtcBindingFunction, PtcRunRequest, PtcRunResult, PtcRunSpec } from
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjections from '@deepseek-ai/dsh-session-projection'
 import SandboxPolicy from '@deepseek-ai/dsh-sandbox-policy'
-import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import SubagentRuntime, { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentActivation, SubagentResult } from '@deepseek-ai/dsh-subagent'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import PtcWorkflowEngine from '../src/index.ts'
@@ -179,6 +179,156 @@ describe('workflow host callback validation', () => {
       const result = await handle.result
       expect(result.stopReason, result.error).toBe(confined ? 'completed' : 'error')
       if (!confined) expect(result.error).toContain('cannot enforce the read-only file policy')
+    } finally { await handle.dispose() }
+  })
+})
+
+describe('workflow child admission to a full subagent pool', () => {
+  /**
+   * Model the subagent pool: `capacity` slots, reserved when a start begins, and a
+   * rejection instead of a queue when they are taken. `hold` keeps the next start
+   * of one prompt pending, after its reservation, until the returned release runs.
+   */
+  function poolOf(ctx: Context, capacity: number) {
+    let live = 0
+    let count = 0
+    const attempts: string[] = []
+    const held = new Map<string, PromiseWithResolvers<undefined>>()
+    const startActivation = vi.spyOn(ctx.subagents, 'startActivation').mockImplementation(async (spec) => {
+      const first = spec.request.prompt[0]
+      const prompt = first?.type === 'text' ? first.text : ''
+      const full = live >= capacity
+      attempts.push(`${prompt} ${full ? 'rejected' : 'started'}`)
+      if (!full) live += 1
+      await held.get(prompt)?.promise
+      if (full) throw new SubagentError(`subagent limit reached (active child limit: ${capacity})`, 'ACTIVATION_LIMIT_REACHED')
+      const activation: SubagentActivation = {
+        childId: SessionId(`pooled-${++count}`),
+        result: Promise.resolve({ output: [], stopReason: 'completed' }),
+        dispose: () => { live -= 1; return Promise.resolve() },
+      }
+      return activation
+    })
+    const hold = (prompt: string): (() => void) => {
+      const gate = Promise.withResolvers<undefined>()
+      held.set(prompt, gate)
+      return () => { held.delete(prompt); gate.resolve(undefined) }
+    }
+    return { attempts, startActivation, hold }
+  }
+
+  it('starts a child once one of its own children frees the slot', async () => {
+    const ref: { pool?: ReturnType<typeof poolOf> } = {}
+    const { ctx, start } = await setup(async (bindings) => {
+      const first = await bindings.startChild!({ prompt: 'first' })
+      const second = bindings.startChild!({ prompt: 'second' })
+      await vi.waitFor(() => { expect(ref.pool?.attempts).toContain('second rejected') })
+      await bindings.disposeChild!(first)
+      await bindings.disposeChild!(await second)
+      return completed
+    })
+    const pool = poolOf(ctx, 1)
+    ref.pool = pool
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      expect(pool.attempts).toEqual(['first started', 'second rejected', 'second started'])
+    } finally { await run.dispose() }
+  })
+
+  it('waits while another start of its own still holds a reserved slot', async () => {
+    const ref: { pool?: ReturnType<typeof poolOf>; release?: () => void } = {}
+    const { ctx, start } = await setup(async (bindings) => {
+      const first = bindings.startChild!({ prompt: 'first' })
+      const second = bindings.startChild!({ prompt: 'second' })
+      await vi.waitFor(() => { expect(ref.pool?.attempts).toEqual(['first started', 'second rejected']) })
+      ref.release?.()
+      await bindings.disposeChild!(await first)
+      await bindings.disposeChild!(await second)
+      return completed
+    })
+    const pool = poolOf(ctx, 1)
+    ref.pool = pool
+    ref.release = pool.hold('first')
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      expect(pool.attempts).toEqual(['first started', 'second rejected', 'second started'])
+    } finally { await run.dispose() }
+  })
+
+  it('keeps the rejection when the run holds no slot that could be returned', async () => {
+    const { ctx, start } = await setup(async (bindings) => {
+      await expect(bindings.startChild!({ prompt: 'only' })).rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
+      return completed
+    })
+    const pool = poolOf(ctx, 0)
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      expect(pool.attempts).toEqual(['only rejected'])
+    } finally { await run.dispose() }
+  })
+
+  it('fails every waiting start once no start of the run holds a slot', async () => {
+    const ref: { pool?: ReturnType<typeof poolOf>; release?: () => void } = {}
+    const { ctx, start } = await setup(async (bindings) => {
+      const first = bindings.startChild!({ prompt: 'first' })
+      const second = bindings.startChild!({ prompt: 'second' })
+      await vi.waitFor(() => { expect(ref.pool?.attempts).toEqual(['first rejected', 'second rejected']) })
+      ref.release?.()
+      await expect(first).rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
+      await expect(second).rejects.toMatchObject({ code: 'ACTIVATION_LIMIT_REACHED' })
+      return completed
+    })
+    const pool = poolOf(ctx, 0)
+    ref.pool = pool
+    ref.release = pool.hold('first')
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      expect(pool.attempts).toEqual(['first rejected', 'second rejected', 'second rejected'])
+    } finally { await run.dispose() }
+  })
+
+  it('rethrows any other start failure at once, even while its own child is live', async () => {
+    const failure = new Error('provider unavailable')
+    const ref: { pool?: ReturnType<typeof poolOf> } = {}
+    const { ctx, start } = await setup(async (bindings) => {
+      const first = await bindings.startChild!({ prompt: 'first' })
+      ref.pool?.startActivation.mockRejectedValueOnce(failure)
+      await expect(bindings.startChild!({ prompt: 'second' })).rejects.toBe(failure)
+      await bindings.disposeChild!(first)
+      return completed
+    })
+    const pool = poolOf(ctx, 1)
+    ref.pool = pool
+    const run = start()
+    try {
+      expect((await run.result).stopReason).toBe('completed')
+      expect(pool.attempts).toEqual(['first started'])
+    } finally { await run.dispose() }
+  })
+
+  it('stops waiting for a slot when the run is cancelled', async () => {
+    const waiting = Promise.withResolvers<undefined>()
+    const ref: { pool?: ReturnType<typeof poolOf> } = {}
+    const { ctx, start } = await setup(async (bindings) => {
+      await bindings.startChild!({ prompt: 'first' })
+      const second = bindings.startChild!({ prompt: 'second' })
+      await vi.waitFor(() => { expect(ref.pool?.attempts).toContain('second rejected') })
+      waiting.resolve(undefined)
+      await expect(second).rejects.toBe('stop while waiting for a slot')
+      return completed
+    })
+    const pool = poolOf(ctx, 1)
+    ref.pool = pool
+    const handle = start()
+    try {
+      await waiting.promise
+      handle.cancel('stop while waiting for a slot')
+      expect((await handle.result).stopReason).toBe('cancelled')
+      expect(pool.attempts).toEqual(['first started', 'second rejected'])
     } finally { await handle.dispose() }
   })
 })

@@ -27,6 +27,12 @@ kind: "package-reference"
 
 在提供 subagent、沙箱策略和 [Node PTC 运行时](../../ptc-runtime/ptc-runtime-node/README.zh.md)的组合中挂载本引擎。它为 `dsh-tool-workflow` 及显式启用时的 `dsh-tool-ralph` 提供工作流执行。Ralph 在已发布默认组合中保持禁用。引擎在加载时拒绝非 TypeScript 的 PTC 提供方。Python PTC 组合必须禁用 `workflow-ptc`、`tool-workflow` 以及任何已启用的 `tool-ralph` 条目。
 
+### 记录与恢复运行
+
+挂载 [`dsh-workflow-journal`](../workflow-journal/README.md) 时，引擎会记录每次运行，并在每个 `agent()` 调用结束时记录该调用；运行结果要等到收尾记录持久化之后才会 resolve。只有子 agent 达到 `stopReason: 'completed'` 的调用才会记录为可重放。
+
+传入 `resumeRunId` 会基于该记录启动一次新运行：位置与输入哈希都与可重放调用匹配的 `agent()` 调用直接返回记录的结果，不会启动子 agent，其余调用照常执行。被恢复的运行永远不会被改写；新运行会记录 `resumedFrom`。未挂载日志就恢复，或指定日志中不存在的运行，会在任何工作开始前抛出 `INVALID_ARGUMENT`。
+
 ### 最小配置
 
 上述依赖可用后，挂载引擎及其面向模型的消费方：
@@ -46,7 +52,7 @@ kind: "package-reference"
 
 负责运行的消费方可以为一次运行设置 `WorkflowStartRequest.subagentProvider` 并降低 `WorkflowStartRequest.maxTotalAgents`。脚本钩子不能更改这两项选择。进程堆、输出、控制通信和终止限制由 Node PTC 提供方负责；引擎不增加整体经过时间定时器。生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-workflow-ptc)定义可接受的引擎字段。
 
-Node PTC 提供方的 `maxPendingCalls` 也限制工作流并发：子 agent 启动、结果等待与资源释放会占用这些名额。进度批次至多再占用一个名额。设置 `maxConcurrentAgents` 时应预留余量。
+Node PTC 提供方的 `maxPendingCalls` 也限制工作流并发：子 agent 启动、结果等待与资源释放会占用这些名额。进度批次至多再占用一个名额。设置 `maxConcurrentAgents` 时应预留余量。子 agent 还会占用调用方 Agent 的子代理池名额，该池接纳时不排队（`maxActiveSubagents`，默认 8）。池已满时，子 agent 启动会等待本次运行自己的某个子 agent 结束后再启动；本次运行不占用任何名额（既没有存活的子 agent，也没有其他进行中的启动）时，启动以 `AGENT_START` 失败。
 
 ### 结果与失败
 
@@ -85,6 +91,7 @@ Node PTC 提供方的 `maxPendingCalls` 也限制工作流并发：子 agent 启
 | [`src/runtime.ts`](src/runtime.ts) | VM 求值、辅助函数约定与组合器 |
 | [`src/realm.ts`](src/realm.ts) | 跨 VM realm 的无损 JSON 物化 |
 | [`src/meta.ts`](src/meta.ts) | 元数据校验与规范化 |
+| [`src/recording.ts`](src/recording.ts) | 将运行绑定到 `ctx.workflowJournal`，并选择恢复时可重放的内容 |
 
 ### 值与子 agent 归属
 
@@ -157,6 +164,8 @@ Host 分别跟踪待完成的启动与已接受的 Activation。取消会中止�
 - **子 agent 清理遵循提供方约定**——适配器等待资源释放与待完成启动，不另设放弃等待的定时器。
 - **VM 不是安全边界**——不提供的全局变量用于指导脚本作者；OS 策略约束触达 Node 的代码。
 - **跨 realm 错误在脚本内无法通过 `instanceof Error`**——根据 `name` 与 `code` 等稳定字段分支。
+- **恢复按位置匹配调用，阶段顺序改变时重放更少**——只有位置与输入哈希都匹配的调用才会重放。在 `pipeline()` 中，第二阶段调用随第一阶段结果到达而发出，因此部分重放可能改变该顺序并移动位置。位置移动的调用会照常执行，绝不会拿到其他调用的结果，因此代价是重放覆盖减少，而不是错误答案。
+- **重放的调用报告最初作答的子 agent**——`workflow/agent-start` 携带记录中的子 agent id，因为输出保存在该会话中。恢复的运行没有为它启动任何子 agent。
 
 <a id="dev-note"></a>
 ### 开发备注

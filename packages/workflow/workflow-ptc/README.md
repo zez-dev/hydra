@@ -52,7 +52,7 @@ With those dependencies available, mount the engine and its model-facing consume
 
 An owning consumer may set `WorkflowStartRequest.subagentProvider` and lower `WorkflowStartRequest.maxTotalAgents` for one run. Script hooks cannot change either choice. Process heap, output, control and termination limits belong to the Node PTC provider; the engine adds no overall elapsed timer. The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-workflow-ptc) defines accepted engine fields.
 
-The Node PTC provider's `maxPendingCalls` also limits workflow concurrency: child startup, result waits and disposal use those slots. Progress batches use at most one additional slot. Leave headroom when setting `maxConcurrentAgents`.
+The Node PTC provider's `maxPendingCalls` also limits workflow concurrency: child startup, result waits and disposal use those slots. Progress batches use at most one additional slot. Leave headroom when setting `maxConcurrentAgents`. Children also take slots in the calling Agent's subagent pool, which admits without queueing (`maxActiveSubagents`, default 8). When that pool is full, a child start waits for one of the run's own children to finish and starts then; a run that holds no slot, with no live child and no other start in flight, fails the start with `AGENT_START`.
 
 ### Results and failures
 

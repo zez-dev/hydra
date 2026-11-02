@@ -6,6 +6,7 @@ import type { PtcBindingFunction, PtcJsonValue, PtcRuntime } from '@deepseek-ai/
 import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { SubagentError } from '@deepseek-ai/dsh-subagent'
 import type { SubagentActivation } from '@deepseek-ai/dsh-subagent'
 import { assertObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
@@ -133,6 +134,10 @@ export class PtcWorkflowRun implements WorkflowRun {
   /** Agent identity by child id, so a settled call is journaled with the label the script gave it. */
   private readonly observedAgents = new Map<string, WorkflowAgentInfo>()
   private started = 0
+  /** Settles when a live child of this run finishes disposal or a child start gives up. */
+  private slotReturned = Promise.withResolvers<undefined>()
+  /** Child starts of this run still awaiting the subagent pool's answer; each may hold a reserved slot. */
+  private starting = 0
   private terminal = false
   private cancelReason: string | undefined
   private disposed: Promise<void> | undefined
@@ -224,7 +229,7 @@ export class PtcWorkflowRun implements WorkflowRun {
       this.children.set(callId, { kind: 'replayed', callId, call: journaled })
       return { callId, childId: journaled.childId }
     }
-    const run = await this.subagents.startActivation({
+    const run = await this.startActivation({
       provider: this.provider,
       label: `${this.meta.name} child ${callId}`,
       delivery: 'caller',
@@ -252,6 +257,60 @@ export class PtcWorkflowRun implements WorkflowRun {
     return { callId, childId: run.childId }
   }
 
+  /**
+   * Start one live child. The subagent pool admits without queueing, so while it
+   * is full and this run holds a slot, through a live child or another start,
+   * wait until the run returns a slot and try again. A run that holds no slot
+   * cannot make room, and the rejection stands.
+   * @param spec - the activation request.
+   * @returns the started activation.
+   */
+  private async startActivation(spec: Parameters<SubagentRuntime['startActivation']>[0]): Promise<SubagentActivation> {
+    for (;;) {
+      const returned = this.slotReturned.promise
+      this.starting += 1
+      try {
+        return await this.subagents.startActivation(spec)
+      } catch (error: unknown) {
+        const full = error instanceof SubagentError && error.code === 'ACTIVATION_LIMIT_REACHED'
+        const holdsSlot = this.starting > 1 || [...this.children.values()].some(record => record.kind === 'live')
+        if (!full || !holdsSlot) {
+          // Any other failure released the slot it had reserved, and a start that gives up
+          // lets the waiting starts check again rather than wait for a slot nothing holds.
+          this.returnSlot()
+          throw error
+        }
+      } finally {
+        this.starting -= 1
+      }
+      await this.unlessCancelled(returned)
+    }
+  }
+
+  /** Wake child starts waiting for this run to return a subagent pool slot. */
+  private returnSlot(): void {
+    this.slotReturned.resolve(undefined)
+    this.slotReturned = Promise.withResolvers<undefined>()
+  }
+
+  /**
+   * Await one value unless the run is cancelled first.
+   * @param value - the awaited value.
+   * @returns the value; rejects with the cancellation reason when the run is cancelled first.
+   */
+  private async unlessCancelled<T>(value: Promise<T>): Promise<T> {
+    const signal = this.controller.signal
+    signal.throwIfAborted()
+    const aborted = Promise.withResolvers<never>()
+    const onAbort = (): void => { aborted.reject(signal.reason) }
+    signal.addEventListener('abort', onAbort, { once: true })
+    try {
+      return await Promise.race([value, aborted.promise])
+    } finally {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
+
   private childResult(record: ChildRecord): Promise<PtcJsonValue> {
     switch (record.kind) {
       case 'replayed': return this.replayedResult(record)
@@ -273,12 +332,8 @@ export class PtcWorkflowRun implements WorkflowRun {
 
   private async liveResult(record: LiveChild): Promise<PtcJsonValue> {
     const signal = this.controller.signal
-    signal.throwIfAborted()
-    const aborted = Promise.withResolvers<never>()
-    const onAbort = (): void => { aborted.reject(signal.reason) }
-    signal.addEventListener('abort', onAbort, { once: true })
     try {
-      const result = await Promise.race([record.run.result, aborted.promise])
+      const result = await this.unlessCancelled(record.run.result)
       const value = json({
         output: result.output,
         stopReason: result.stopReason,
@@ -294,8 +349,6 @@ export class PtcWorkflowRun implements WorkflowRun {
       // An aborted signal means the call never settled, so it gets no entry.
       if (!signal.aborted) this.journal(record, { ok: false, error: renderThrown(error) })
       throw error
-    } finally {
-      signal.removeEventListener('abort', onAbort)
     }
   }
 
@@ -322,6 +375,7 @@ export class PtcWorkflowRun implements WorkflowRun {
       this.ctx.logger.warn(`workflow-ptc: child dispose failed: ${renderThrown(error)}`)
     }).finally(() => {
       this.children.delete(record.callId)
+      this.returnSlot()
     })
     return record.disposal
   }
