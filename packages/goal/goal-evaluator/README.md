@@ -70,6 +70,7 @@ Independent: the auxiliary request has its own prefix; the denied tool result is
 ## Known Limitations and Deferred Work
 
 - **The current turn's file changes are not yet recorded** when the completion is evaluated; the deliverables seam summarizes a turn at its end, so only earlier turns' changes reach the evaluator.
+- **The evaluator sees only recent evidence** — the last `evidenceEvents` tool results, clipped. Its prompt tells it not to deny only because older results, whole files, or every step of a search fall outside that window, so it accepts a claim the visible results support and nothing visible contradicts; a claim of a best or complete result still needs visible results that support it.
 - **Same-route evaluation by default** — without an explicit `provider`/`model`, the evaluator uses the session's own model, which shares its blind spots.
 - **A route that cannot turn thinking off reasons within the cap** — its lowest selectable effort still reasons before the verdict, so `maxOutputTokens` must cover that reasoning and the verdict; an answer cut at the cap denies the completion and names the cap.
 
