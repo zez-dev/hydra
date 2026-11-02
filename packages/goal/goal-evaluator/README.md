@@ -27,7 +27,7 @@ Goal completion is otherwise a self-report: the model calls `update_goal` with `
   config:
     evidenceEvents: 12
     maxWorkspaceChangeEntries: 12
-    maxOutputTokens: 512
+    maxOutputTokens: 2048
     timeoutMs: 60000
 ```
 
@@ -35,7 +35,7 @@ Goal completion is otherwise a self-report: the model calls `update_goal` with `
 |---|---|---|
 | `evidenceEvents` | required | How many most-recent tool results are sent as evidence; earlier `update_goal` results are left out |
 | `maxWorkspaceChangeEntries` | required | Files named per recorded turn of workspace changes; the rest are counted. Applies only when `workspaceChanges` is mounted |
-| `maxOutputTokens` | required | Output-token cap of each evaluation request; a route that cannot turn thinking off spends part of it on reasoning |
+| `maxOutputTokens` | required (`2048` in `dsh-base`) | Output-token cap of each evaluation request; a route that cannot turn thinking off spends part of it on reasoning, and an answer cut at the cap fails the completion closed |
 | `timeoutMs` | required | Deadline for one evaluation request |
 | `provider`, `model` | session route | Explicit evaluator route; configure both or neither |
 

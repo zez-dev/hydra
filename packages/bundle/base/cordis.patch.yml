@@ -568,7 +568,9 @@
       config:
         evidenceEvents: 12
         maxWorkspaceChangeEntries: 12
-        maxOutputTokens: 512
+        # A route that cannot turn thinking off spends part of this cap on
+        # reasoning, and an answer cut at the cap fails the completion closed.
+        maxOutputTokens: 2048
         timeoutMs: 60000
 
     # Research goals: `/research <objective>` keeps a discovery journal under
