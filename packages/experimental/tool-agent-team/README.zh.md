@@ -65,7 +65,7 @@ kind: "package-reference"
 
 ### 成功与失败的表现
 
-`send_message` 在收件箱接收消息后返回 `{ "sent": true }`，不暴露消息 ID。成功不表示接收方已处理消息，也不保证同步刷新到存储；发送失败会作为工具错误报告。当没有其他成员 running、provisioning 或 waiting 时，`wait_agent` 会立即返回 `noProgress`，提示调用方先唤醒 teammate；否则它会等待下一次变化，调用方随后重新读取状态。Team 轮流工作时，正在工作的 teammate 调用 `wait_agent` 会把轮次交给下一个等待中的 teammate，并在轮次回到它之后返回。基于过期 revision 的任务编辑会被拒绝，而不是覆盖更新的成果。
+`send_message` 在收件箱接收消息后返回 `{ "sent": true }`，不暴露消息 ID。成功不表示接收方已处理消息，也不保证同步刷新到存储；发送失败会作为工具错误报告。当没有其他成员 running、provisioning 或 waiting 时，`wait_agent` 会立即返回 `noProgress`，提示调用方先唤醒 teammate；否则它会等待下一次变化，调用方随后重新读取状态。当其他所有 running、provisioning 或 waiting 的成员都已在 `wait_agent` 中等待时，这些等待都会立即返回 `noProgress`，并提示各自的调用方处理已有的消息和任务，或给需要其工作的成员发消息。Team 轮流工作时，正在工作的 teammate 调用 `wait_agent` 会把轮次交给下一个等待中的 teammate，并在轮次回到它之后返回。基于过期 revision 的任务编辑会被拒绝，而不是覆盖更新的成果。
 
 -----
 

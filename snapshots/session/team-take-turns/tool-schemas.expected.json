@@ -788,7 +788,7 @@
     },
     {
       "name": "wait_agent",
-      "description": "Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running, provisioning, or waiting. A working teammate hands over to the next waiting teammate during the wait and returns once it may work again. Re-list after wakeup or timeout instead of polling.",
+      "description": "Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running, provisioning, or waiting. When every other active member is already waiting here, every one of those waits ends at once with noProgress. A working teammate hands over to the next waiting teammate during the wait and returns once it may work again. Re-list after wakeup or timeout instead of polling.",
       "parameters": {
         "type": "object",
         "properties": {

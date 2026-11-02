@@ -237,6 +237,8 @@ export interface UpdateTeamTaskRequest {
 /** Result of waiting for Team activity. */
 export interface TeamWaitResult {
   readonly timedOut: boolean
+  /** Present when the wait ended because every other active member was waiting too, so no member was left to change anything. */
+  readonly allWaiting?: true
 }
 
 declare module '@deepseek-ai/dsh-session/types' {

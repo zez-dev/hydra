@@ -336,6 +336,36 @@ describe('Team turn-taking', () => {
     await waitGone(ctx, alpha.id)
   })
 
+  it('ends every wait once the Lead and each teammate wait, and the last waiter keeps its turn', async () => {
+    const { ctx, lead, adapter } = await setup()
+    lead.followup(message('lead task'))
+    await waitInFlight(adapter, lead.id)
+    const alpha = await spawn(ctx, lead, 'alpha')
+    const beta = await spawn(ctx, lead, 'beta')
+    await waitInFlight(adapter, alpha.id)
+    const alphaAgent = live(ctx, alpha.id)
+    const betaAgent = live(ctx, beta.id)
+
+    // beta's start wakes alpha's wait, which then waits for the turn and is not inside a wait.
+    const alphaWait = ctx.agentTeams.waitForChange(alphaAgent, 10_000, SIGNAL)
+    await waitInFlight(adapter, beta.id)
+    await waitStatus(ctx, lead, 'alpha', 'waiting')
+    const leadWait = ctx.agentTeams.waitForChange(lead, 10_000, SIGNAL)
+    const betaWait = ctx.agentTeams.waitForChange(betaAgent, 10_000, SIGNAL)
+    await expect(alphaWait).resolves.toEqual({ timedOut: false })
+
+    await expect(ctx.agentTeams.waitForChange(alphaAgent, 10_000, SIGNAL)).resolves.toEqual({ timedOut: false, allWaiting: true })
+    expect(statusOf(ctx, lead, 'alpha')).toBe('running')
+    await expect(leadWait).resolves.toEqual({ timedOut: false, allWaiting: true })
+    await waitStatus(ctx, lead, 'beta', 'waiting')
+    await adapter.reply(alpha.id, 'alpha acted')
+    await expect(betaWait).resolves.toEqual({ timedOut: false, allWaiting: true })
+    await adapter.reply(beta.id, 'beta done')
+    await adapter.reply(lead.id, 'lead done')
+    await waitGone(ctx, alpha.id)
+    await waitGone(ctx, beta.id)
+  })
+
   it('keeps waiting teammates first in, first out', async () => {
     const { ctx, lead, adapter } = await setup()
     const alpha = await spawn(ctx, lead, 'alpha')

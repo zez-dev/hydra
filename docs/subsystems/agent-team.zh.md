@@ -203,11 +203,13 @@ async updateTask(caller: Agent, request: UpdateTeamTaskRequest): Promise<TeamTas
 /**
  * Wait for the next Team-domain or member-status change. A teammate that has
  * the turn gives it to the next waiting teammate for the wait and returns
- * only after the turn comes back.
+ * only after the turn comes back. When the caller starts waiting while every
+ * other active member is already inside this wait, no member is left to
+ * change anything, so every one of those waits ends at once with `allWaiting`.
  * @param caller - exact live Team member waiting for activity.
  * @param timeoutMs - bounded wait duration from ten seconds through one hour.
  * @param signal - caller cancellation for the wait and for the renewed turn wait.
- * @returns one observed change or a timeout result.
+ * @returns one observed change, a timeout result, or `allWaiting` when every active member waited.
  */
 async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>
 

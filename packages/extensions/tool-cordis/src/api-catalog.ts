@@ -416,9 +416,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult>',
-        description: 'Wait for the next Team-domain or member-status change. A teammate that has the turn gives it to the next waiting teammate for the wait and returns only after the turn comes back.',
+        description: 'Wait for the next Team-domain or member-status change. A teammate that has the turn gives it to the next waiting teammate for the wait and returns only after the turn comes back. When the caller starts waiting while every other active member is already inside this wait, no member is left to change anything, so every one of those waits ends at once with `allWaiting`.',
         parameters: [{ name: 'caller', description: 'exact live Team member waiting for activity.' }, { name: 'timeoutMs', description: 'bounded wait duration from ten seconds through one hour.' }, { name: 'signal', description: 'caller cancellation for the wait and for the renewed turn wait.' }],
-        returns: 'one observed change or a timeout result.',
+        returns: 'one observed change, a timeout result, or `allWaiting` when every active member waited.',
       },
       {
         signature: 'interrupt(caller: Agent, targetName: string): TeamInterruptResult',
@@ -10585,7 +10585,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TeamWaitResult',
-    declaration: 'export interface TeamWaitResult {\n    readonly timedOut: boolean;\n}',
+    declaration: 'export interface TeamWaitResult {\n    readonly timedOut: boolean;\n    readonly allWaiting?: true;\n}',
   },
   {
     name: 'TerminalBackend',

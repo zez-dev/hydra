@@ -149,7 +149,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 ### 等待与中断
 
-`waitForChange()` 等待注册之后发生的下一条 roster、task、消息接收或实时状态边，时长从 10 秒到 1 小时，并且只报告是否超时；运行时 dispose 会释放当前等待。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 报告。`interrupt()` 仅限 Lead，委托 continuable-subagent 的 interrupt 路径，以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
+`waitForChange()` 等待注册之后发生的下一条 roster、task、消息接收或实时状态边，时长从 10 秒到 1 小时，并报告是否超时；运行时 dispose 会释放当前等待。若调用方开始等待时，其他所有 running、waiting 或 provisioning 的成员都已在 `waitForChange()` 中等待，就没有成员能产生这条边，因此调用方与当前所有等待者都会立即以 `allWaiting` 返回；该检查在 teammate 交出轮次之前进行，因此该调用方保留轮次。取消会保留 Error reason；非 Error reason 则通过 `TEAM_WAIT_ABORTED` 报告。`interrupt()` 仅限 Lead，委托 continuable-subagent 的 interrupt 路径，以 `keepInbox` 只取消 live teammate 的当前 turn；它既不释放任务 owner，也不删除持久 mail。
 
 ### 轮流工作
 

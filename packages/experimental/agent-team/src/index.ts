@@ -35,6 +35,9 @@ export type { TeamMembership } from './roster.ts'
 export { TeamId, TeamMessageId, TeamTaskId } from './types.ts'
 export { TeamError } from './error.ts'
 
+/** Member statuses that can still produce a Team change; a wait can make progress only while another member holds one. */
+export const ACTIVE_MEMBER_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'waiting', 'provisioning'])
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     agentTeams: TeamService
@@ -206,17 +209,24 @@ export class TeamService extends Service {
   /**
    * Wait for the next Team-domain or member-status change. A teammate that has
    * the turn gives it to the next waiting teammate for the wait and returns
-   * only after the turn comes back.
+   * only after the turn comes back. When the caller starts waiting while every
+   * other active member is already inside this wait, no member is left to
+   * change anything, so every one of those waits ends at once with `allWaiting`.
    * @param caller - exact live Team member waiting for activity.
    * @param timeoutMs - bounded wait duration from ten seconds through one hour.
    * @param signal - caller cancellation for the wait and for the renewed turn wait.
-   * @returns one observed change or a timeout result.
+   * @returns one observed change, a timeout result, or `allWaiting` when every active member waited.
    */
   async waitForChange(caller: Agent, timeoutMs: number, signal: AbortSignal): Promise<TeamWaitResult> {
     const membership = this.roster.membership(caller)
     // Validated before the turn passes, so an invalid wait cannot hand the turn away.
     assertWaitTimeout(timeoutMs)
-    const wait = (): Promise<TeamWaitResult> => this.activity.wait(membership.id, timeoutMs, signal)
+    signal.throwIfAborted()
+    // The peer read, the check, and the waiter registration stay one synchronous span. The check runs
+    // before a turn holder hands its turn away, so a holder whose wait ends at once keeps the turn.
+    const peers = this.roster.list(membership).filter(member => member.id !== caller.id && ACTIVE_MEMBER_STATUSES.has(member.status))
+    if (this.activity.endIfAllWaiting(membership.id, peers.map(member => member.id))) return { timedOut: false, allWaiting: true }
+    const wait = (): Promise<TeamWaitResult> => this.activity.wait(membership.id, caller.id, timeoutMs, signal)
     return await (this.turnGate?.yieldDuring(membership.id, caller, signal, wait) ?? wait())
   }
 

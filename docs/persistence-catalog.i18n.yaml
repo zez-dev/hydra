@@ -249,17 +249,17 @@
   en: a640800a38b3c874
   zh: a640800a38b3c874
 /session-persistence-event-catalog/events/team/team-member-log-only:
-  en: a5cf7ad7187721bf
-  zh: c1fee677f40e1e8f
+  en: 5355269da194633f
+  zh: e87610e603bf030d
 /session-persistence-event-catalog/events/team/team-message-delivered-log-only:
-  en: cbc9e6200d5b5a14
-  zh: 15e342a7caea3bac
+  en: 329121e5ed9e5b04
+  zh: 967b2810c49a1199
 /session-persistence-event-catalog/events/team/team-message-queued-log-only:
-  en: 2a71bc4223a51395
-  zh: bd49138103b520f4
+  en: f8d9e5a65d1c7d1c
+  zh: 939e0f6b3c0cc171
 /session-persistence-event-catalog/events/team/team-task-log-only:
-  en: 50dfd001fe7cb87d
-  zh: 35520e58034994a3
+  en: 4f5f8482c5ccf854
+  zh: 2aa8a6e6cb8babc9
 /session-persistence-event-catalog/events/todo:
   en: 308d4bb4b6b96e35
   zh: 308d4bb4b6b96e35
@@ -2229,17 +2229,17 @@
   en: 3216b23c131d0070
   zh: 73ca171c6014f16e
 /session-persistence-event-catalog/resolved-persistence-types/member-teamid-version:
-  en: ce2fd38b7d6f581f
-  zh: 64dfedc09f16dc72
+  en: 3cadce4b17e18663
+  zh: f9661f1ac3fe1e90
 /session-persistence-event-catalog/resolved-persistence-types/message-step-turn:
   en: d3b6901f4c609838
   zh: 7725b88473b99e03
 /session-persistence-event-catalog/resolved-persistence-types/message-teamid-version:
-  en: 69b817fbbf76d866
-  zh: 6c2f0c648202fd0d
+  en: 0a61ad0abf198408
+  zh: a818e5aa8d522125
 /session-persistence-event-catalog/resolved-persistence-types/messageid-targetid-teamid-version:
-  en: 6f2a42bc8732c95c
-  zh: 9fca8385d3adfb9c
+  en: a018ba2347556c7b
+  zh: d4c1b266da0dd2c2
 /session-persistence-event-catalog/resolved-persistence-types/mode-source:
   en: 3028b222670ce5ad
   zh: cae4c9437e560d61
@@ -2271,8 +2271,8 @@
   en: 5360af614fe753e3
   zh: 96427c489cc71de6
 /session-persistence-event-catalog/resolved-persistence-types/task-teamid-version:
-  en: 05565680a50f2be5
-  zh: 46acfab7456c8155
+  en: 36df223e0c0023cd
+  zh: 1c36ab0beb163779
 /session-persistence-event-catalog/resolved-persistence-types/todos:
   en: 8ab873d30e062fd5
   zh: a138832c6e299ebb

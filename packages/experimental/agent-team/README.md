@@ -149,7 +149,7 @@ Tasks are complete versioned snapshots; every mutation carries `expectedRevision
 
 ### Waiting and interruption
 
-`waitForChange()` waits for one roster, task, message-acceptance, or live-status edge that occurs after registration, from ten seconds through one hour, and reports only whether it timed out; runtime disposal releases current waits. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED`. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
+`waitForChange()` waits for one roster, task, message-acceptance, or live-status edge that occurs after registration, from ten seconds through one hour, and reports whether it timed out; runtime disposal releases current waits. When a caller starts waiting while every other running, waiting, or provisioning member is already inside `waitForChange()`, no member is left to make that edge, so the caller and every current waiter return at once with `allWaiting`; the check runs before a teammate hands its turn away, so that caller keeps the turn. Cancellation preserves an Error reason or reports a non-Error reason through `TEAM_WAIT_ABORTED`. `interrupt()` is Lead-only and delegates to the continuable-subagent interrupt path, which cancels only a live teammate's current turn with `keepInbox`; it neither releases task ownership nor deletes durable mail.
 
 ### Taking turns
 

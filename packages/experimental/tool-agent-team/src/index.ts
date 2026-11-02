@@ -3,8 +3,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
-import type { TeamMemberView } from '@deepseek-ai/dsh-experimental-agent-team'
+import { ACTIVE_MEMBER_STATUSES, TeamTaskId } from '@deepseek-ai/dsh-experimental-agent-team'
+import type { TeamMemberView, TeamWaitResult } from '@deepseek-ai/dsh-experimental-agent-team'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { InferValue, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
 
@@ -51,12 +51,23 @@ Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VE
 Use the target returned by spawn_teammate or list_agents for send_message${interrupt ? ' and interrupt_agent' : ''}, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A peer message starts with its sender name. A successful send does not mean the recipient has processed it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is ${activeStatuses(takeTurns)}; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.${takeTurns ? `\n\n${turnPolicy(interrupt)}` : ''}`
 }
 
-/** `waiting` occurs only when teammates take turns; a waiting teammate starts once the turn passes to it. */
-const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'waiting', 'provisioning'])
-
 /** Model-only wait result when no other member can produce a change. */
 function noActivePeerMessage(takeTurns: boolean): string {
   return `No other Team member is ${activeStatuses(takeTurns)}. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.`
+}
+
+/** Model-only wait result when every other active member was waiting too. */
+const ALL_WAITING_MESSAGE = 'Every other active Team member was waiting too, so no one was left to change anything. Act on the messages and tasks you already have, or send_message to the member whose work you need, before waiting again.'
+
+/**
+ * Render one Team wait for the model, naming a wait that ended because every active member waited.
+ * @param result - the Team service's wait result.
+ * @returns the model-facing wait value.
+ */
+function waitValue(result: TeamWaitResult): InferValue<typeof WAIT_VALUE_SCHEMA> {
+  return result.allWaiting === true
+    ? { timedOut: false, noProgress: { reason: 'all-members-waiting', message: ALL_WAITING_MESSAGE } }
+    : { timedOut: result.timedOut }
 }
 
 /**
@@ -121,7 +132,7 @@ const SEND_VALUE_SCHEMA = {
   },
 } as const
 
-/** `noProgress` is present only on the model-only shortcut that skips the wait. */
+/** `noProgress` is present only when the wait could not make progress: no active peer, or every active member waiting. */
 const WAIT_VALUE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -131,7 +142,7 @@ const WAIT_VALUE_SCHEMA = {
       type: 'object',
       additionalProperties: false,
       properties: {
-        reason: { type: 'string', required: true, const: 'no-active-peer' },
+        reason: { type: 'string', required: true, enum: ['no-active-peer', 'all-members-waiting'] },
         message: { type: 'string', required: true },
       },
     },
@@ -264,7 +275,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
 
     register(scoped.tools.register(defineTool({
       name: 'wait_agent',
-      description: `Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is ${activeStatuses(takeTurns)}.${takeTurns ? ' A working teammate hands over to the next waiting teammate during the wait and returns once it may work again.' : ''} Re-list after wakeup or timeout instead of polling.`,
+      description: `Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is ${activeStatuses(takeTurns)}. When every other active member is already waiting here, every one of those waits ends at once with noProgress.${takeTurns ? ' A working teammate hands over to the next waiting teammate during the wait and returns once it may work again.' : ''} Re-list after wakeup or timeout instead of polling.`,
       parameters: {
         timeout_ms: {
           type: 'integer',
@@ -278,12 +289,12 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
         // Preserve TeamService's authoritative timeout validation before the
         // model-only no-progress shortcut.
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 10_000 || timeoutMs > 3_600_000) {
-          return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+          return waitValue(await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal))
         }
         // The active-peer read and waiter registration must remain one synchronous
         // span; awaiting between them can lose the only peer-status edge.
         const hasActivePeer = ctx.agentTeams.listMembers(caller).some(member =>
-          member.id !== caller.id && ACTIVE_WAIT_STATUSES.has(member.status))
+          member.id !== caller.id && ACTIVE_MEMBER_STATUSES.has(member.status))
         if (!hasActivePeer) {
           return {
             timedOut: false,
@@ -293,7 +304,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
             },
           }
         }
-        return await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal)
+        return waitValue(await ctx.agentTeams.waitForChange(caller, timeoutMs, exec.signal))
       },
     })))
 

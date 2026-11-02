@@ -338,8 +338,8 @@ describe('dsh-tool-team', () => {
       ? 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. waiting means the teammate has a message and waits for its turn to work. provisioning and failed describe member creation.'
       : 'List the Lead and every durable teammate with an addressable target and current availability. inactive means no turn is executing, not a task result. provisioning and failed describe member creation.')
     expect(descriptions.get('wait_agent')).toBe(takeTurns
-      ? 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running, provisioning, or waiting. A working teammate hands over to the next waiting teammate during the wait and returns once it may work again. Re-list after wakeup or timeout instead of polling.'
-      : 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. Re-list after wakeup or timeout instead of polling.')
+      ? 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running, provisioning, or waiting. When every other active member is already waiting here, every one of those waits ends at once with noProgress. A working teammate hands over to the next waiting teammate during the wait and returns once it may work again. Re-list after wakeup or timeout instead of polling.'
+      : 'Wait for the next teammate status, message, or shared-task change after this call starts. This never wakes inactive members and returns noProgress immediately when no other member is running or provisioning. When every other active member is already waiting here, every one of those waits ends at once with noProgress. Re-list after wakeup or timeout instead of polling.')
     const noProgress = await execute(ctx, lead, 'wait_agent', {})
     expect(JSON.parse(text(noProgress))).toEqual({
       timedOut: false,
@@ -589,6 +589,29 @@ describe('dsh-tool-team', () => {
     expect(text(aborted)).toBe("Error: wait_agent aborted: { kind: 'user' }")
     await execute(activeSetup.ctx, activeSetup.lead, 'interrupt_agent', { target: 'active-worker' })
     await waitNoAgent(activeSetup.ctx, activeId)
+  })
+
+  it('ends every wait with actionable output once every other active member waits too', async () => {
+    const { ctx, lead } = await setup(['hang', 'hang'])
+    const workers: Agent[] = []
+    for (const name of ['worker-a', 'worker-b']) {
+      const spawned = await execute(ctx, lead, 'spawn_teammate', { name, description: name, prompt: 'wait' })
+      workers.push(await waitRunning(ctx, spawnedChildId(ctx, lead, spawned)))
+    }
+    // Whichever wait starts second finds the other waiting, so the order does not matter.
+    const results = await Promise.all(workers.map(worker => execute(ctx, worker, 'wait_agent', { timeout_ms: 10_000 })))
+    for (const result of results) {
+      expect(result.isError).toBe(false)
+      expect(JSON.parse(text(result))).toEqual({
+        timedOut: false,
+        noProgress: {
+          reason: 'all-members-waiting',
+          message: 'Every other active Team member was waiting too, so no one was left to change anything. Act on the messages and tasks you already have, or send_message to the member whose work you need, before waiting again.',
+        },
+      })
+    }
+    for (const name of ['worker-a', 'worker-b']) await execute(ctx, lead, 'interrupt_agent', { target: name })
+    for (const worker of workers) await waitNoAgent(ctx, worker.id)
   })
 
   it('adapts roster, mailbox, wait, and task CAS operations to canonical JSON', async () => {

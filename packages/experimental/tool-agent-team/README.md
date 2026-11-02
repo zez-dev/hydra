@@ -65,7 +65,7 @@ Creation and listing results identify members by `target`, with no member Sessio
 
 ### What success and failure look like
 
-`send_message` returns `{ "sent": true }` after inbox acceptance, without exposing the message ID. Success does not confirm recipient processing or a synchronous storage flush; send failures are reported as tool errors. `wait_agent` returns `noProgress` right away when no other member is running, provisioning, or waiting, telling the caller to wake a teammate first; otherwise it waits for the next change and the caller re-reads state afterward. When the Team takes turns, a working teammate's `wait_agent` gives the turn to the next waiting teammate and returns once the turn comes back. Task edits based on an outdated revision are rejected rather than overwriting newer work.
+`send_message` returns `{ "sent": true }` after inbox acceptance, without exposing the message ID. Success does not confirm recipient processing or a synchronous storage flush; send failures are reported as tool errors. `wait_agent` returns `noProgress` right away when no other member is running, provisioning, or waiting, telling the caller to wake a teammate first; otherwise it waits for the next change and the caller re-reads state afterward. When every other running, provisioning, or waiting member is already in `wait_agent`, each of those waits returns `noProgress` at once and tells its caller to act on the messages and tasks it already has, or to message the member whose work it needs. When the Team takes turns, a working teammate's `wait_agent` gives the turn to the next waiting teammate and returns once the turn comes back. Task edits based on an outdated revision are rejected rather than overwriting newer work.
 
 -----
 

@@ -916,6 +916,24 @@ describe('Team direct messages and waiting', () => {
     await lead.whenIdle()
   })
 
+  it('ends every wait at once when the last active member starts waiting', async () => {
+    const { ctx, lead, teamFiber } = await setup(['hang', 'hang', 'hang'])
+    const alpha = await waitRunning(ctx, (await spawn(ctx, lead, 'alpha')).member.id)
+    const beta = await waitRunning(ctx, (await spawn(ctx, lead, 'beta')).member.id)
+    lead.followup(createUserMessage({ content: content('busy lead'), source: { kind: 'user' } }))
+    await waitRunning(ctx, lead.id)
+    let settled = 0
+    const waits = [lead, alpha].map(agent => ctx.agentTeams.waitForChange(agent, 10_000, SIGNAL).finally(() => { settled += 1 }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    // beta is running outside a wait, so it can still change something.
+    expect(settled).toBe(0)
+    await expect(ctx.agentTeams.waitForChange(beta, 10_000, SIGNAL)).resolves.toEqual({ timedOut: false, allWaiting: true })
+    await expect(Promise.all(waits)).resolves.toEqual([{ timedOut: false, allWaiting: true }, { timedOut: false, allWaiting: true }])
+    await teamFiber.dispose()
+    lead.cancel({ kind: 'parent' })
+    await lead.whenIdle()
+  })
+
   it('steers an idle Lead and cold-resumes a sibling with actual sender attribution', async () => {
     const { ctx, lead } = await setup(['hang', textResponse('initial'), textResponse('lead'), textResponse('peer')])
     const alpha = await waitRunning(ctx, (await spawn(ctx, lead, 'alpha')).member.id)
