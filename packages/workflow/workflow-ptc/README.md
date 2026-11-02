@@ -58,7 +58,7 @@ The Node PTC provider's `maxPendingCalls` also limits workflow concurrency: chil
 
 The script runs with top-level `await`; `meta` and `args` arrive as JSON data. Every `agent()` call starts a managed subagent Activation under the run's fixed parent and waits for its text or structured result. The workflow records its own members and collects their results without adding them to the parent's subagent catalog or sending child settlement notices to the parent model. The final lossless-JSON return value becomes the run result; an ordinary child failure resolves `agent()` to `null`.
 
-Invalid metadata, an unparseable body, an unavailable provider route or a per-run cap above the ceiling is rejected before a run is published. During execution, hook misuse and tripped cooperative caps fail the workflow. Process failures, unavailable required confinement and PTC output or control limits also fail the run.
+Invalid metadata, an unparseable body, an unavailable provider route or a per-run cap above the ceiling is rejected before a run is published. During execution, hook misuse and tripped cooperative caps fail the workflow. Process failures, unavailable required confinement and PTC output or control limits also fail the run. A failed run's error text keeps the error messages and the stack frames that point into the script, which name the script line; it drops the engine's and the host's own frames.
 
 ### File policy and cancellation
 

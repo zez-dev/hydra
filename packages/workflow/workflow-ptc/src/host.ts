@@ -15,7 +15,7 @@ import { callKeyHash } from '@deepseek-ai/dsh-workflow'
 import type { JournalCall, JournalCallOutcome, WorkflowAgentEndInfo, WorkflowAgentInfo, WorkflowMeta, WorkflowResult, WorkflowRun, WorkflowRunId } from '@deepseek-ai/dsh-workflow'
 import { WORKFLOW_GUEST_SOURCE } from './guest-source.ts'
 import type { WorkflowProgress } from './guest-types.ts'
-import { renderThrown } from './realm.ts'
+import { renderReport, renderThrown } from './realm.ts'
 import type { RunRecording } from './recording.ts'
 import type { ExecutionObserver } from './runtime.ts'
 import type { ChildStartRequest, WorkerInit } from './types.ts'
@@ -432,7 +432,7 @@ export class PtcWorkflowRun implements WorkflowRun {
     } catch (error: unknown) {
       this.terminal = true
       result = this.cancelReason === undefined
-        ? { value: null, stopReason: 'error', error: renderThrown(error), agentsStarted: this.started }
+        ? { value: null, stopReason: 'error', error: renderReport(error), agentsStarted: this.started }
         : this.cancelled()
     } finally {
       this.terminal = true

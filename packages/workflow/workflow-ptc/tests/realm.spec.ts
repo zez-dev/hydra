@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import * as vm from 'node:vm'
-import { materializeFromRealm, MaterializeError, renderThrown } from '../src/realm.ts'
+import { materializeFromRealm, MaterializeError, renderReport, renderThrown } from '../src/realm.ts'
 
 /** Evaluate an expression inside a fresh vm realm and hand back the raw realm value. */
 function inRealm(expression: string): unknown {
@@ -114,6 +114,25 @@ describe('materializeFromRealm', () => {
     expect(materializeFromRealm(3)).toBe(3)
     expect(materializeFromRealm(false)).toBe(false)
     expect(materializeFromRealm(null)).toBeNull()
+  })
+})
+
+describe('renderReport', () => {
+  it('keeps message lines and the script\'s own frames, and drops every other frame', () => {
+    const error = { stack: [
+      'Error: outer: Error: inner',
+      '    at bindingFailure (file:///host/process.js:1:1)',
+      '    at run (workflow:demo:3:5)',
+      '    at workflow:demo:4:1',
+      'continued message',
+      '    at async workflow:demo:5:2',
+      '    at node:internal/process/task_queues:1:1',
+    ].join('\n') }
+    expect(renderReport(error, 'workflow:demo')).toBe([
+      'Error: outer: Error: inner', '    at run (workflow:demo:3:5)', '    at workflow:demo:4:1', 'continued message', '    at async workflow:demo:5:2',
+    ].join('\n'))
+    expect(renderReport(error)).toBe('Error: outer: Error: inner\ncontinued message')
+    expect(renderReport('plain failure', 'workflow:demo')).toBe('plain failure')
   })
 })
 

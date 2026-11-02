@@ -205,7 +205,7 @@ describe('workflow guest callbacks', () => {
     await expect(guest.runWorkflowGuest(test.host)).resolves.toMatchObject({ value: '1', stopReason: 'completed' })
   })
 
-  it('names generated helper frames without exposing the encoded guest module in errors', async () => {
+  it('reports a helper failure with the script frame and without the encoded guest module', async () => {
     // Vitest replaces stack formatting; plain Node must honor the guest's sourceURL.
     const active = promisify(execFile)(process.execPath, ['--input-type=module', '--eval', `
       let source = ''
@@ -225,7 +225,8 @@ describe('workflow guest callbacks', () => {
     const { stdout } = await active
     const result = JSON.parse(stdout) as { stopReason: string; error: string }
     expect(result.stopReason).toBe('error')
-    expect(result.error.includes('dsh-workflow-guest.js:')).toBe(true)
+    expect(result.error).toContain('workflow:helper-error:')
+    expect(result.error.includes('dsh-workflow-guest.js:')).toBe(false)
     expect(result.error.includes('data:text/javascript')).toBe(false)
   })
 })
@@ -259,8 +260,18 @@ describe('workflow child results', () => {
     })
     const result = await runWorkflowGuest(test.host)
     expect(result.stopReason).toBe('error')
-    expect(result.error).toContain('agent() could not start a child')
+    expect(result.error).toBe('WorkflowError: agent() could not start a child: Error: provider unavailable')
     expect(test.events).toEqual([])
+  })
+
+  it('reports a script failure with the script\'s own frames only', async () => {
+    const test = fixture('const fail = () => { throw new Error("script broke") }\nfail()')
+    const result = await runWorkflowGuest(test.host)
+    expect(result.stopReason).toBe('error')
+    const [message, ...frames] = result.error!.split('\n')
+    expect(message).toBe('Error: script broke')
+    expect(frames.length).toBeGreaterThan(0)
+    for (const frame of frames) expect(frame).toContain('workflow:guest-test:')
   })
 
   it('pairs and disposes a child whose result rejects, preserving a fatal pipeline failure', async () => {
@@ -269,7 +280,7 @@ describe('workflow child results', () => {
     })
     const result = await runWorkflowGuest(test.host)
     expect(result.stopReason).toBe('error')
-    expect(result.error).toContain('child agent run failed')
+    expect(result.error).toBe('WorkflowError: child agent run failed: Error: provider result failed')
     expect(test.events.at(-1)).toMatchObject({ type: 'agent-end', info: { outcome: 'failed' } })
     expect(test.disposed).toEqual([1])
   })

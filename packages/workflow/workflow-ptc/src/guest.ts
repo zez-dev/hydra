@@ -2,7 +2,7 @@
 
 import type { WorkflowResult } from '@deepseek-ai/dsh-workflow'
 import type { WorkflowGuestHost, WorkflowProgress } from './guest-types.ts'
-import { renderThrown } from './realm.ts'
+import { renderReport } from './realm.ts'
 import { WorkflowExecution } from './runtime.ts'
 import type { ExecutionObserver } from './runtime.ts'
 import type { ChildPort } from './types.ts'
@@ -25,7 +25,7 @@ export async function runWorkflowGuest(host: WorkflowGuestHost): Promise<Workflo
     inFlight = host.progress(batch).then(
       () => { inFlight = undefined; flush() },
       (error: unknown) => {
-        progressError = renderThrown(error)
+        progressError = renderReport(error)
         queued = []
         inFlight = undefined
       },

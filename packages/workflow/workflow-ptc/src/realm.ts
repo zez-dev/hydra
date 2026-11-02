@@ -36,6 +36,22 @@ export function renderThrown(error: unknown): string {
 }
 
 /**
+ * Render a thrown value for a run's failure report: {@link renderThrown}'s
+ * text with every stack frame removed except frames in the script itself.
+ * Host and guest frames name this machine's files and mean nothing to the
+ * script's author; frames in `scriptFile` locate the failing script line.
+ * @param error - any value thrown in the host or guest realm.
+ * @param scriptFile - the script's VM filename, or `undefined` for a failure outside the script.
+ * @returns the report text: message lines and the script's own frames.
+ */
+export function renderReport(error: unknown, scriptFile?: string): string {
+  const own = scriptFile === undefined ? [] : [`(${scriptFile}:`, ` ${scriptFile}:`]
+  return renderThrown(error).split('\n')
+    .filter(line => !/^\s+at /u.test(line) || own.some(marker => line.includes(marker)))
+    .join('\n')
+}
+
+/**
  * Whether an object's prototype chain represents a plain data object: `null`, or a prototype
  * whose own prototype is `null` (the realm's `Object.prototype` — which we
  * cannot compare by identity across realms). A `Date`/`Map`/class instance

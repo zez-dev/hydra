@@ -18,7 +18,7 @@ import type {
   WorkflowMeta,
   WorkflowResult,
 } from '@deepseek-ai/dsh-workflow'
-import { materializeFromRealm, MaterializeError, renderThrown } from './realm.ts'
+import { materializeFromRealm, MaterializeError, renderReport, renderThrown } from './realm.ts'
 import type { ChildHandle, ChildPort, WorkerLimits } from './types.ts'
 
 /** The observers the execution reports progress through (the session posts them to the host). */
@@ -61,6 +61,7 @@ export class WorkflowExecution {
   private currentPhase: string | undefined
   private readonly context: vm.Context
   private readonly compiled: vm.Script
+  private readonly scriptFile: string
 
   constructor(
     meta: WorkflowMeta,
@@ -70,10 +71,11 @@ export class WorkflowExecution {
     private readonly observer: ExecutionObserver,
     private readonly children: ChildPort,
   ) {
+    this.scriptFile = `workflow:${meta.name}`
     // The host parses this same wrapper before publishing a run.
     try {
       this.compiled = new vm.Script(`(async () => {\n${body}\n})()`, {
-        filename: `workflow:${meta.name}`,
+        filename: this.scriptFile,
         lineOffset: -1,
       })
     } catch (error: unknown) {
@@ -109,7 +111,7 @@ export class WorkflowExecution {
       const value = raw === undefined ? null : this.materializeResult(raw)
       return { value, stopReason: 'completed', agentsStarted: this.started }
     } catch (error: unknown) {
-      return { value: null, stopReason: 'error', error: renderThrown(error), agentsStarted: this.started }
+      return { value: null, stopReason: 'error', error: renderReport(error, this.scriptFile), agentsStarted: this.started }
     }
   }
 
