@@ -887,6 +887,15 @@ describe('desktop main startup', () => {
     expect(harness.hosts).toHaveLength(0)
   })
 
+  it.each(['darwin', 'win32', 'linux'] as const)('gives the window the application icon only on Linux, on %s', async (platform) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const { options } = harness.windows[0]!
+    if (platform === 'linux') expect(options).toMatchObject({ icon: join('desktop-test-resources', 'icon.png') })
+    else expect(options).not.toHaveProperty('icon')
+  })
+
   it('serves packaged shell documents instead of rejecting the shell origin', async () => {
     const { serveWebDocument } = await import('../src/web-document.ts')
     vi.mocked(serveWebDocument).mockResolvedValue(new Response('shell document'))

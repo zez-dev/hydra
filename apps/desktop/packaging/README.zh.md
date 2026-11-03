@@ -190,6 +190,8 @@ pnpm run package:desktop:linux:x64:unsigned
 
 使用 `package:desktop:linux:x64:unsigned:dir` 可在解包后的应用处停止。该命令把均名为 `hydra-<version>-linux-<arch>-unsigned` 的 `.AppImage` 与 `.deb` 写入 `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`。与本地 macOS DMG 一样，它不读取 dotenv 文件或继承的发布设置，使用 `com.hydra.harness` 作为应用 ID，省略自动更新与强制更新配置，并运行运行时完整性检查与冒烟检查。`Hydra desktop · Linux x64` 工作流在手动启动时于 GitHub 托管的 Ubuntu 22.04 运行器上构建这两个文件，并将其作为本次运行的可下载文件保留 14 天。
 
+两个包都按 hicolor 图标主题的尺寸（16 至 512 px）安装 `apps/desktop/resources/linux-icons/` 中的图标：electron-builder 对单个 PNG 只按其自身尺寸安装，而该主题没有 1024 px 尺寸，菜单与程序坞会找不到图标。这组图标由 `icon-windows.png` 缩放生成；该图标变更时需重新生成。每个窗口也带有该图标，X11 桌面会为未经已安装启动器启动的 AppImage 显示它。
+
 <a id="macos-release-signing"></a>
 
 ## macOS 发布签名与诊断

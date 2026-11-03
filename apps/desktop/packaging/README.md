@@ -190,6 +190,8 @@ pnpm run package:desktop:linux:x64:unsigned
 
 Use `package:desktop:linux:x64:unsigned:dir` to stop at the unpacked application. The command writes an `.AppImage` and a `.deb`, both named `hydra-<version>-linux-<arch>-unsigned`, to `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`. Like the local macOS DMG, it reads no dotenv file or inherited release settings, uses `com.hydra.harness` as the app ID, omits automatic-update and mandatory-update configuration, and runs the runtime integrity and smoke checks. The `Hydra desktop · Linux x64` workflow builds both files on a GitHub-hosted Ubuntu 22.04 runner when started by hand and keeps them as the run's downloadable files for 14 days.
 
+Both packages install the icon set in `apps/desktop/resources/linux-icons/` at the hicolor icon theme's sizes, 16 to 512 px: electron-builder installs a single PNG only at its own size, and the theme has no 1024 px size, so the menu and dock would find no icon. The set is resized from `icon-windows.png`; regenerate it when that icon changes. Each window also carries the icon, which X11 desktops show for an AppImage started outside an installed launcher.
+
 <a id="macos-release-signing"></a>
 
 ## macOS release signing and diagnostics

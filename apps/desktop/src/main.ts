@@ -241,6 +241,14 @@ function chromeFallbackFill(): string {
   return nativeTheme.shouldUseDarkColors ? '#1b1b1c' : '#f9fafb'
 }
 
+/**
+ * The application icon: the packaged copy in resources, or the source PNG when running unpackaged.
+ * @returns the icon file's path.
+ */
+function applicationIconPath(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'resources', 'icon-windows.png')
+}
+
 function createWindow(preload: string, show = false, primary = false): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
@@ -264,6 +272,9 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       visualEffectState: 'active' as const,
       backgroundColor: '#00000000',
     } : {}),
+    // X11 desktops show a window's own icon, and a Linux executable carries none, so an AppImage started
+    // outside an installed launcher would otherwise get a generic one.
+    ...(process.platform === 'linux' ? { icon: applicationIconPath() } : {}),
     webPreferences: {
       preload,
       nodeIntegration: false,
@@ -998,8 +1009,6 @@ async function main(): Promise<void> {
     updates.dispose()
   })
 
-  const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
-    : join(process.resourcesPath, 'icon.png')
   // macOS shows credits as plain text and Linux links the website, so both carry the disclaimer.
   const applyAboutPanel = (): void => {
     app.setAboutPanelOptions({
@@ -1010,7 +1019,7 @@ async function main(): Promise<void> {
       copyright: '',
       credits: `${currentDesktopLocale().messages.disclaimer}\n\n${HYDRA_DISCLAIMER_URL}`,
       website: HYDRA_DISCLAIMER_URL,
-      iconPath: applicationIconPath,
+      iconPath: applicationIconPath(),
     })
   }
   // A custom application menu replaces Electron's default menu, so macOS needs

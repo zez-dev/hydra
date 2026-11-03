@@ -240,7 +240,9 @@ export function createElectronBuilderConfig(
     // Linux builds are unsigned: an AppImage that runs from any folder, and a .deb that installs to /opt/Hydra.
     // The manifest's author is DeepSeek, which wrote the upstream application, so the package names Hydra's maintainer.
     linux: {
-      icon: fileURLToPath(new URL('../resources/icon-windows.png', import.meta.url)),
+      // electron-builder installs a single PNG at its own size only, and the hicolor icon theme has no 1024 px size,
+      // so the menu and dock would find no icon; this set holds the theme's sizes, resized from icon-windows.png.
+      icon: fileURLToPath(new URL('../resources/linux-icons', import.meta.url)),
       category: 'Development',
       executableName: 'hydra',
       syncDesktopName: true,
