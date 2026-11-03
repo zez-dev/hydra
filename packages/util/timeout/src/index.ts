@@ -67,17 +67,19 @@ export interface IdleWatchdog {
   /** Stable signal aborted by upstream cancellation or this watchdog's timeout. */
   readonly signal: AbortSignal
   /**
-   * Await one iterator demand while the idle timer is armed. The deadline
-   * settles the demand even when the awaited work ignores its abort signal.
+   * Await one iterator demand while the idle timer is armed. The deadline and
+   * an upstream cancellation settle the demand even when the awaited work
+   * ignores its abort signal.
    * @param iterator - iterator whose next value represents provider progress.
    * @returns the iterator's next result.
-   * @throws The {@link TimeoutReason} of this watchdog when the idle interval
-   *   elapses first. Only that deadline settles the demand: an upstream
-   *   cancellation reaches the iterator through {@link IdleWatchdog.signal} and
-   *   never shortens the wait. The abandoned demand stays the caller's to release
-   *   through that signal; an async generator queues its own return behind it, so
-   *   callers must not await it. Disposal clears the timer without settling an
-   *   outstanding demand.
+   * @throws The reason of {@link IdleWatchdog.signal} when it aborts while the
+   *   demand is outstanding: this watchdog's {@link TimeoutReason} when the idle
+   *   interval elapses, or the upstream reason when the caller cancels. A demand
+   *   that starts after the signal aborted is left to the iterator, which sees
+   *   the aborted signal before it reads. The abandoned demand stays the
+   *   caller's to release through that signal; an async generator queues its own
+   *   return behind it, so callers must not await it. Disposal clears the timer
+   *   without settling an outstanding demand.
    */
   next<T>(iterator: AsyncIterator<T>): Promise<IteratorResult<T>>
   /** Rearm an outstanding demand after transport activity that yields no iterator value; otherwise a no-op. */
@@ -150,10 +152,11 @@ export function idleWatchdog(
   const signal = upstream === undefined
     ? timeout.signal
     : AbortSignal.any([upstream, timeout.signal])
-  // The deadline owns the outstanding demand. A transport can leave a read it
-  // aborted pending forever (undici drops the error when the abort lands on an
-  // in-flight body read), so waiting for the iterator to observe the signal
-  // would leave the caller waiting past its own deadline.
+  // The deadline and the caller's cancellation own the outstanding demand. A
+  // transport can leave a read it aborted pending forever (undici drops the
+  // error when the abort lands on an in-flight body read), so waiting for the
+  // iterator to observe the signal would leave the caller waiting past its own
+  // deadline or cancellation.
   const idleReason = new TimeoutReason(code, timeoutMs)
   const firstReason = firstTimeoutMs === undefined ? idleReason : new TimeoutReason(code, firstTimeoutMs)
   let reason = idleReason
@@ -178,13 +181,13 @@ export function idleWatchdog(
       outstanding = true
       arm()
       const expired = Promise.withResolvers<never>()
-      const onAbort = (): void => { expired.reject(reason) }
-      timeout.signal.addEventListener('abort', onAbort, { once: true })
+      const onAbort = (): void => { expired.reject(signal.reason) }
+      signal.addEventListener('abort', onAbort, { once: true })
       try {
         // Both reactions end with this demand: a deadline promise kept for the
         // watchdog's lifetime would retain every value the settled races produced.
         return await Promise.race([
-          iterator.next().finally(() => { timeout.signal.removeEventListener('abort', onAbort) }),
+          iterator.next().finally(() => { signal.removeEventListener('abort', onAbort) }),
           expired.promise,
         ])
       } finally {

@@ -328,6 +328,19 @@ describe('idleWatchdog', () => {
     expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')).toMatchObject({ timeoutMs: 100 })
   })
 
+  it('settles an outstanding demand when the caller cancels, without waiting for the iterator', async () => {
+    vi.useFakeTimers()
+    const upstream = new AbortController()
+    // A long silent prefill: the first read may take an hour, and the transport drops the abort of its read.
+    using watchdog = idleWatchdog(upstream.signal, 100, 'LLM_STREAM_IDLE_TIMEOUT', 3_600_000)
+    const next = watchdog.next({ next: () => new Promise<IteratorResult<number>>(() => {}) })
+    const outcome = next.catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(10)
+    upstream.abort('caller cancelled')
+    expect(await outcome).toBe('caller cancelled')
+    expect(timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')).toBeUndefined()
+  })
+
   it('rejects invalid bounds and concurrent iterator demand', async () => {
     expect(() => idleWatchdog(undefined, 0, 'IDLE')).toThrow(/positive finite/)
     expect(() => idleWatchdog(undefined, Number.NaN, 'IDLE')).toThrow(/positive finite/)

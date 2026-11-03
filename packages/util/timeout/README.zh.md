@@ -103,7 +103,7 @@ timer 只在某个迭代器 `next()` 尚未完成时启动，并会因不产生�
 
 ### 空闲 watchdog 为何重新启动
 
-`idleWatchdog` 保持一个稳定的融合信号，只在 `next()` 尚未完成时启动 timer；完成后停止，后续需求或 `pulse()` 重新启动，dispose（资源释放）时清除，并发需求被拒绝。与 `deadline()` 不同，空闲 watchdog 会按自己的截止时间结算尚未完成的 demand：传输层在 abort 之后仍挂起的读取会让 `next()` 以该 watchdog 的 `TimeoutReason` reject，因此完全不观察信号的传输层也无法把等待拖过空闲间隔。信号仍用于让传输层释放自身资源——DeepSeek 与 pi-ai 适配器会在中止时关闭响应正文或 SDK 请求。
+`idleWatchdog` 保持一个稳定的融合信号，只在 `next()` 尚未完成时启动 timer；完成后停止，后续需求或 `pulse()` 重新启动，dispose（资源释放）时清除，并发需求被拒绝。与 `deadline()` 不同，空闲 watchdog 会在其信号中止时结算尚未完成的 demand：传输层在 abort 之后仍挂起的读取会让 `next()` reject——空闲间隔走完时使用该 watchdog 的 `TimeoutReason`，调用方取消时使用调用方的原因——因此完全不观察信号的传输层也无法把等待拖过空闲间隔或取消。信号中止之后才开始的 demand 交由迭代器处理。信号仍用于让传输层释放自身资源——DeepSeek 与 pi-ai 适配器会在中止时关闭响应正文或 SDK 请求。
 
 </details>
 
