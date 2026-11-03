@@ -2980,12 +2980,16 @@ it('executes raw native calls without an Agent or Session and keeps input order'
         { type: 'tool-call', id: ToolCallId('raw'), name: 'echo', arguments: '{ "text": "raw value" }' },
         { type: 'tool-call', id: ToolCallId('malformed'), name: 'echo', arguments: '{invalid' },
         { type: 'tool-call', id: ToolCallId('empty'), name: 'echo', arguments: '' },
+        { type: 'tool-call', id: ToolCallId('string'), name: 'echo', arguments: '"[1]"' },
       ],
     })
-    expect(batch.results.map(outcome => outcome.callId)).toEqual(['raw', 'malformed', 'empty'])
+    expect(batch.results.map(outcome => outcome.callId)).toEqual(['raw', 'malformed', 'empty', 'string'])
     expect(batch.results[0]?.result).toMatchObject({ isError: false, value: 'raw value' })
-    expect(batch.results[1]?.result.isError).toBe(true)
+    expect(batch.results[1]?.result)
+      .toMatchObject({ isError: true, error: { message: 'invalid arguments: the arguments are not valid JSON; send them as one JSON object' } })
     expect(batch.results[2]?.result).toMatchObject({ isError: false, value: '' })
+    // A JSON string argument parses, so the plain shape violation names it.
+    expect(batch.results[3]?.result).toMatchObject({ isError: true, error: { message: 'invalid arguments: "arguments" must be an object' } })
     expect(batch.additionalContexts).toEqual([])
     expect(batch.concluded).toBe(false)
     expect(ctx.get('sessions')).toBeUndefined()

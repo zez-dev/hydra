@@ -127,19 +127,24 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
   }
 }
 
+/** Marker before the raw text in pi-ai's `argumentsError`; the provider's own final arguments follow it. */
+const RECEIVED_ARGUMENTS = '\n\nReceived arguments:\n'
+
 /**
  * Translate the pi-ai event stream into StreamChunks. pi-ai never throws
  * mid-stream — failures arrive as `error` events, which become error/aborted
- * `finish` chunks (the harness protocol's other error-delivery style).
+ * `finish` chunks (the harness protocol's other error-delivery style). A
+ * completed tool call whose arguments are not one JSON object keeps its raw
+ * text, so the tool runtime answers that call with an error the model reads.
  * @param events - one assistant turn's pi-ai event stream.
  * @param contextWindow - resolved catalog capacity for usage-based overflow detection.
  * @param callerSignal - caller cancellation state; an aborted caller makes any
  *   in-band terminal error an aborted finish.
  * @param requestedModel - request model identity recorded for durable replay.
  * @returns the harness chunks, ending with `usage` then `finish`; throws
- *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event, or
- *   `MALFORMED_RESPONSE` when completed tool arguments are invalid. Length-limited
- *   output retains its terminal reason so the assembler can discard incomplete calls.
+ *   `LlmError` (`STREAM_CLOSED`) if the source ends without a terminal event.
+ *   Length-limited output retains its terminal reason so the assembler can
+ *   discard incomplete calls.
  */
 export async function* toStreamChunks(
   events: AsyncIterable<AssistantMessageEvent>,
@@ -150,7 +155,7 @@ export async function* toStreamChunks(
   // pi-ai contentIndex ↔ our block index map 1:1 (both count blocks from 0
   // in stream order), but we track ids per index for tool calls.
   const toolIds = new Map<number, { id: string; name: string }>()
-  let argumentsError: string | undefined
+  const streamedArguments = new Map<number, string>()
 
   for await (const event of events) {
     switch (event.type) {
@@ -185,6 +190,7 @@ export async function* toStreamChunks(
       }
       case 'toolcall_delta': {
         const known = toolIds.get(event.contentIndex)
+        streamedArguments.set(event.contentIndex, (streamedArguments.get(event.contentIndex) ?? '') + event.delta)
         yield {
           type: 'tool-call-delta',
           index: event.contentIndex,
@@ -194,11 +200,9 @@ export async function* toStreamChunks(
         }
         break
       }
-      case 'toolcall_end':
-        if (event.toolCall.argumentsError !== undefined) {
-          argumentsError ??= `Tool call "${event.toolCall.name}": ${event.toolCall.argumentsError}`
-          break
-        }
+      case 'toolcall_end': {
+        const error = event.toolCall.argumentsError
+        const marker = error?.lastIndexOf(RECEIVED_ARGUMENTS) ?? -1
         yield {
           type: 'block-end',
           index: event.contentIndex,
@@ -206,17 +210,17 @@ export async function* toStreamChunks(
             type: 'tool-call',
             id: brandString<ToolCallId>(event.toolCall.id),
             name: event.toolCall.name,
-            // pi-ai hands back the PARSED arguments; the harness vocabulary
-            // keeps the raw string.
-            arguments: JSON.stringify(event.toolCall.arguments),
+            // pi-ai hands back the PARSED arguments, or `{}` with an `argumentsError` that ends with the
+            // provider's raw text; the harness vocabulary keeps the raw string.
+            arguments: error === undefined
+              ? JSON.stringify(event.toolCall.arguments)
+              : marker >= 0 ? error.slice(marker + RECEIVED_ARGUMENTS.length) : streamedArguments.get(event.contentIndex) ?? '',
           },
         }
         break
+      }
       case 'done':
         yield { type: 'usage', usage: mapUsage(event.message.usage) }
-        if (argumentsError !== undefined && event.message.stopReason !== 'length') {
-          throw new LlmError(argumentsError, 'MALFORMED_RESPONSE')
-        }
         yield {
           type: 'finish',
           reason: mapStopReason(event.message, contextWindow),

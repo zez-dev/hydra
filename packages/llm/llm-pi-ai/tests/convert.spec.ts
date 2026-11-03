@@ -815,6 +815,20 @@ describe('toStreamChunks', () => {
     ])
   })
 
+  it('keeps streamed raw arguments when the argument error carries no received text', async () => {
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'toolcall_start', contentIndex: 0, partial: partialWithToolCall },
+      { type: 'toolcall_delta', contentIndex: 0, delta: '{"a":', partial: partialWithToolCall },
+      { type: 'toolcall_end', contentIndex: 0, toolCall: { type: 'toolCall', id: 'call-1', name: 'f', arguments: {}, argumentsError: 'cut' }, partial: partialWithToolCall },
+      { type: 'toolcall_end', contentIndex: 1, toolCall: { type: 'toolCall', id: 'call-2', name: 'f', arguments: {}, argumentsError: 'cut' }, partial: partialWithToolCall },
+      { type: 'done', reason: 'toolUse', message: assistant({ content: partialWithToolCall.content, stopReason: 'toolUse' }) },
+    )))
+    expect(chunks.filter(chunk => chunk.type === 'block-end')).toEqual([
+      { type: 'block-end', index: 0, block: { type: 'tool-call', id: 'call-1', name: 'f', arguments: '{"a":' } },
+      { type: 'block-end', index: 1, block: { type: 'tool-call', id: 'call-2', name: 'f', arguments: '' } },
+    ])
+  })
+
   it('tolerates toolcall_start with a missing partial entry', async () => {
     const chunks = await collect(toStreamChunks(feed(
       { type: 'toolcall_start', contentIndex: 0, partial: assistant() },

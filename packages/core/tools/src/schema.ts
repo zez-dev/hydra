@@ -471,6 +471,21 @@ export class ToolArgsError extends HarnessError {
 }
 
 /**
+ * Name the parse failure of arguments the runtime kept as text because they are not JSON.
+ * @param text - the model's raw argument text.
+ * @returns the one violation, or `undefined` when the text is JSON.
+ */
+function unparsedArguments(text: string): string[] | undefined {
+  try {
+    JSON.parse(text)
+  } catch (_malformedJson: unknown) {
+    // The parser's wording differs between JavaScript engines; the violation stays fixed text.
+    return ['the arguments are not valid JSON; send them as one JSON object']
+  }
+  return undefined
+}
+
+/**
  * Validate model-generated arguments against an implicit parameter schema.
  * @param spec - declared parameter schema.
  * @param args - candidate arguments, however malformed.
@@ -597,7 +612,7 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
     async execute(args: unknown, exec: ToolRunContext): Promise<JsonValue> {
       const violations = validate(args)
-      if (violations.length > 0) throw new ToolArgsError(violations)
+      if (violations.length > 0) throw new ToolArgsError(typeof args === 'string' ? unparsedArguments(args) ?? violations : violations)
       return userExecute(args as InferArgs<S>, exec) as Promise<JsonValue>
     },
   }

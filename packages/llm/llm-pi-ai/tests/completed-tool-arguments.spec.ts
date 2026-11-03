@@ -1,4 +1,4 @@
-/** Completed provider arguments fail before a malformed call can enter successful history or dispatch. */
+/** Completed tool calls keep malformed arguments raw, so the tool runtime refuses that call and the turn continues. */
 
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
@@ -90,38 +90,37 @@ describe('completed tool-call arguments through the public runtime', () => {
     ['anthropic-messages', anthropicEvents],
     ['openai-completions', completionsEvents],
     ['openai-responses', responsesEvents],
-  ] as const)('%s rejects malformed completed arguments without successful replay', async (api, events) => {
+  ] as const)('%s keeps malformed completed arguments raw with successful replay', async (api, events) => {
     const raw = '{"value":"unfinished'
     const { chunks, assembler, server } = await collect(api, events(raw))
-    expect(assembler.finish).toMatchObject({ kind: 'error', failure: { code: 'MALFORMED_RESPONSE' } })
-    expect(assembler.finish).toHaveProperty('failure.message', expect.stringContaining(raw))
-    expect(assembler.replayState).toBeUndefined()
+    expect(assembler.finish).toEqual({ kind: 'tool-calls' })
+    expect(assembler.blocks()).toContainEqual(expect.objectContaining({ type: 'tool-call', name: 'count', arguments: raw }))
+    expect(assembler.replayState).toBeDefined()
     expect(chunks.filter(chunk => chunk.type === 'finish')).toHaveLength(1)
-    expect(chunks.some(chunk => chunk.type === 'block-end' && chunk.block.type === 'tool-call')).toBe(false)
     expect(server.requests).toHaveLength(1)
   })
 
-  it.each(['null', '[]', '42'])('rejects non-object completed arguments %s', async (raw) => {
+  it.each(['null', '[]', '42'])('keeps non-object completed arguments %s raw', async (raw) => {
     const { assembler } = await collect('openai-completions', completionsEvents(raw))
-    expect(assembler.finish).toMatchObject({ kind: 'error', failure: { code: 'MALFORMED_RESPONSE' } })
-    expect(assembler.replayState).toBeUndefined()
+    expect(assembler.finish).toEqual({ kind: 'tool-calls' })
+    expect(assembler.blocks()).toContainEqual(expect.objectContaining({ type: 'tool-call', arguments: raw }))
   })
 
   it('uses authoritative invalid Responses arguments after a valid streamed prefix', async () => {
     const raw = '{"value":"final-invalid'
     const { chunks, assembler } = await collect('openai-responses', responsesEvents(raw, '{"value":"valid-prefix"}'))
     expect(chunks).toContainEqual(expect.objectContaining({ type: 'tool-call-delta', argumentsDelta: '{"value":"valid-prefix"}' }))
-    expect(assembler.finish).toMatchObject({ kind: 'error', failure: { code: 'MALFORMED_RESPONSE' } })
-    expect(assembler.finish).toHaveProperty('failure.message', expect.stringContaining(raw))
-    expect(assembler.replayState).toBeUndefined()
+    expect(assembler.finish).toEqual({ kind: 'tool-calls' })
+    expect(assembler.blocks()).toEqual([{ type: 'tool-call', id: 'call_invalid|item_invalid', name: 'count', arguments: raw }])
   })
 
-  it('retains the first completed-argument failure when several calls are invalid', async () => {
+  it('keeps each invalid call\'s own raw arguments when several calls are invalid', async () => {
     const { assembler } = await collect('openai-responses', responsesEvents('[]', undefined, true, '[1]'))
-    expect(assembler.finish).toEqual({ kind: 'error', failure: {
-      code: 'MALFORMED_RESPONSE', message: 'Tool call "count": Tool arguments must be a JSON object\n\nReceived arguments:\n[1]',
-    } })
-    expect(assembler.replayState).toBeUndefined()
+    expect(assembler.finish).toEqual({ kind: 'tool-calls' })
+    expect(assembler.blocks()).toEqual([
+      { type: 'tool-call', id: 'call_valid|item_valid', name: 'count', arguments: '[1]' },
+      { type: 'tool-call', id: 'call_invalid|item_invalid', name: 'count', arguments: '[]' },
+    ])
   })
 
   it('retains a native provider failure after malformed argument output', async () => {
@@ -161,13 +160,24 @@ describe('completed tool-call arguments through the public runtime', () => {
     expect(assembler.replayState?.response).toMatchObject({ stopReason: 'length' })
   })
 
-  it('does not dispatch an earlier valid parallel call when a later call is malformed', async () => {
-    const raw = '{"value":"unfinished'
-    const server = await mockServer([{ events: responsesEvents(raw, undefined, true) }])
+  it('runs a valid parallel call and answers the malformed one with a tool error the next request carries', async () => {
+    const raw = '{"value": ["a"].map(n => n)}'
+    const toolCalls = JSON.stringify({ choices: [{ index: 0, delta: {
+      role: 'assistant',
+      tool_calls: [
+        { index: 0, id: 'call_valid', type: 'function', function: { name: 'count', arguments: '{}' } },
+        { index: 1, id: 'call_invalid', type: 'function', function: { name: 'count', arguments: raw } },
+      ],
+    }, finish_reason: null }] })
+    const stop = (reason: string) => JSON.stringify({
+      choices: [{ index: 0, delta: {}, finish_reason: reason }], usage: { prompt_tokens: 3, completion_tokens: 2 },
+    })
+    const answer = JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: null }] })
+    const server = await mockServer([{ events: [toolCalls, stop('tool_calls'), '[DONE]'] }, { events: [answer, stop('stop'), '[DONE]'] }])
     const ctx = new Context()
     onTestFinished(() => ctx.fiber.dispose())
     await mountAgentLoopTestDependencies(ctx)
-    registerAdapter(ctx, 'openai-responses', server.url)
+    registerAdapter(ctx, 'openai-completions', server.url)
     const loop = await mountAgentLoopTestHarness(ctx)
     let executions = 0
     ctx.effect(() => ctx.tools.register(defineContentToolFixture({
@@ -184,16 +194,16 @@ describe('completed tool-call arguments through the public runtime', () => {
     agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'count twice' }] }))
     await idle
     const events = agent.session.snapshotEvents()
-    expect(executions).toBe(0)
-    expect(events.filter(event => event.type === 'tool/call' || event.type === 'tool/result' || event.type === 'assistant/message')).toEqual([])
-    const attempts = events.filter(event => event.type === 'assistant/attempt')
-    expect(attempts).toHaveLength(1)
-    expect(JSON.stringify(attempts)).toContain('call_valid|item_valid')
-    expect(JSON.stringify(attempts)).toContain('MALFORMED_RESPONSE')
-    expect(JSON.stringify(attempts)).not.toContain('replayState')
-    expect(events.find(event => event.type === 'turn/end')).toMatchObject({
-      data: { reason: { kind: 'error', error: { code: 'MALFORMED_RESPONSE' } } },
-    })
-    expect(server.requests).toHaveLength(1)
+    expect(executions).toBe(1)
+    const results = events.flatMap(event => event.type === 'tool/result' ? [event.data.message] : [])
+    expect(results.map(message => [message.toolCallId, message.isError === true])).toEqual([['call_valid', false], ['call_invalid', true]])
+    expect(JSON.stringify(results[1]?.content)).toContain('the arguments are not valid JSON')
+    expect(events.find(event => event.type === 'turn/end')).toMatchObject({ data: { reason: { kind: 'completed' } } })
+    expect(server.requests).toHaveLength(2)
+    type WireMessage = { content?: unknown; tool_call_id?: string; tool_calls?: Array<{ id: string; function: { arguments: string } }> }
+    const history = server.requests[1] as { messages: WireMessage[] }
+    const replayedCalls = history.messages.flatMap(message => message.tool_calls ?? [])
+    expect(replayedCalls.map(call => [call.id, call.function.arguments])).toEqual([['call_valid', '{}'], ['call_invalid', '{}']])
+    expect(JSON.stringify(history.messages.find(message => message.tool_call_id === 'call_invalid')?.content)).toContain('the arguments are not valid JSON')
   })
 })
