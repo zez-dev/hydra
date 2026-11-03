@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { createUserMessage, createMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmAdapter, ToolCallId } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, createMessage, CONTEXT_WINDOW_EXCEEDED_CODE, LlmAdapter, LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock, GenerateOptions, LlmResolvedModelInfo, RequestMessage, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
@@ -53,6 +53,15 @@ class WindowEnforcingAdapter extends LlmAdapter {
   summaryEmptyAbove: number | undefined
   /** When set, a summary request answers only when its request is cancelled, the way a slow checkpoint the user stops does. */
   summaryHangs = false
+  /** Summary requests still to throw `summaryFailure`, the way a server that cannot finish a long request answers. */
+  summaryFailures = 0
+  /** The failure code those summary requests throw. */
+  summaryFailure = 'SERVER'
+  /**
+   * When set, a summary request waits for its cancellation and then throws
+   * this code, as an adapter that does not classify a cancelled stream does.
+   */
+  summaryAbortCode: string | undefined
   /** Models whose lookup fails, the way a server that no longer lists a model answers. */
   readonly unresolvedModels = new Set<string>()
   /** Whether a model lookup reports the window; a server that publishes no model metadata leaves it out. */
@@ -118,6 +127,15 @@ class WindowEnforcingAdapter extends LlmAdapter {
         await new Promise(resolve => options.signal?.addEventListener('abort', resolve, { once: true }))
         yield { type: 'finish', reason: { kind: 'aborted', failure: { message: 'summary request aborted', code: 'ABORTED' } } }
         return
+      }
+      if (this.summaryFailures > 0) {
+        this.summaryFailures -= 1
+        throw new LlmError('rank 0 timed out', this.summaryFailure)
+      }
+      if (this.summaryAbortCode !== undefined) {
+        const { signal } = options
+        if (signal?.aborted === false) await new Promise((resolve) => { signal.addEventListener('abort', resolve, { once: true }) })
+        throw new LlmError('socket closed', this.summaryAbortCode)
       }
       if (this.summaryEmptyAbove !== undefined && input > this.summaryEmptyAbove) {
         yield { type: 'block-start', index: 0, blockType: 'reasoning' }
@@ -1039,6 +1057,124 @@ describe('the harness never sends a request the window cannot hold', () => {
       const sizes = adapter.summaryRequests.map(request => request.messages.length)
       expect(sizes.length).toBeGreaterThan(1)
       expect(sizes.at(-1)).toBeLessThan(sizes[0]!)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each(['SERVER', 'TIMEOUT', 'STREAM_CLOSED', 'TRANSPORT'])(
+    'retries a summarization request that did not finish (%s) with a range about half the size',
+    async (code) => {
+      const { ctx, adapter } = await harness(
+        c => new WindowEnforcingAdapter(c, 4000, 100, 0),
+        { thresholdRatio: 0.8, retainTokens: 60, maxTokens: 64, compactionRetries: 0 },
+        0,
+      )
+      const warnings: string[] = []
+      ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
+      try {
+        const { agent } = await ctx.agentLoop.createAgent(ctx, {
+          sessionId: SessionId('unfinished-then-halved'),
+          seed: seedTurns(6, 70),
+          agentOptions: { provider: 'mock', model: 'mock' },
+        })
+        agent.followup(createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'user' } }))
+        await agent.whenIdle()
+        adapter.summaryFailures = 1
+        adapter.summaryFailure = code
+        expect(await ctx.compaction.compactNow(agent, new AbortController().signal)).not.toBeNull()
+        expect(warnings).toContain(
+          `compaction: the summarization request for "${agent.id}" did not finish (rank 0 timed out); retrying with a range about half the size`,
+        )
+        const sizes = adapter.summaryRequests.map(request => request.messages.length)
+        expect(sizes).toHaveLength(2)
+        expect(sizes[1]).toBeLessThan(sizes[0]!)
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    },
+  )
+
+  it('reports a rate-limited summarization without a smaller retry', async () => {
+    const { ctx, adapter } = await harness(
+      c => new WindowEnforcingAdapter(c, 4000, 100, 0),
+      { thresholdRatio: 0.8, retainTokens: 60, maxTokens: 64, compactionRetries: 0 },
+      0,
+    )
+    try {
+      const { agent } = await ctx.agentLoop.createAgent(ctx, {
+        sessionId: SessionId('rate-limited-summary'),
+        seed: seedTurns(6, 70),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'continue' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+      adapter.summaryFailures = 1
+      adapter.summaryFailure = 'RATE_LIMIT'
+      await expect(ctx.compaction.compactNow(agent, new AbortController().signal))
+        .rejects.toMatchObject({ code: 'summary', cause: { code: 'RATE_LIMIT' } })
+      expect(adapter.summaryRequests).toHaveLength(1)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('does not retry a stopped step compaction, whatever code its summarization request ends with', async () => {
+    // A stopped request's stream can end with any code; one ending with
+    // TRANSPORT is still a stop, not a request a shorter range may finish.
+    const { ctx, adapter } = await harness(
+      c => new WindowEnforcingAdapter(c, 2000, 500, 2),
+      { thresholdRatio: 0.5, retainTokens: 60, maxTokens: 64, compactionRetries: 0 },
+      5,
+    )
+    adapter.summaryAbortCode = 'TRANSPORT'
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
+    try {
+      const { agent } = await ctx.agentLoop.createAgent(ctx, {
+        sessionId: SessionId('stopped-unfinished-summary'),
+        seed: seedTurns(3, 70),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'warm up' }], source: { kind: 'user' } }))
+      await vi.waitFor(() => { expect(adapter.summaryRequests).toHaveLength(1) })
+      agent.cancel({ kind: 'user' })
+      await agent.whenIdle()
+      expect(adapter.summaryRequests).toHaveLength(1)
+      expect(warnings.filter(message => message.includes('did not finish'))).toEqual([])
+      expect(agent.session.snapshotEvents().filter(event => event.type === 'compaction/start')).toHaveLength(1)
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('lands the step checkpoint and completes the turn after a summarization request the server did not finish', async () => {
+    // The fit of 'condenses before the request when a tool result leaves no
+    // room for the output cap', with the first summarization request failed.
+    const { ctx, adapter } = await harness(
+      c => new WindowEnforcingAdapter(c, 2000, 500, 1),
+      { thresholdRatio: 0.8, retainTokens: 60, maxTokens: 64, compactionRetries: 1 },
+      120,
+    )
+    adapter.summaryFailures = 1
+    const warnings: string[] = []
+    ctx.logger.warn = ((message: string) => void warnings.push(message)) as typeof ctx.logger.warn
+    try {
+      const { agent } = await ctx.agentLoop.createAgent(ctx, {
+        sessionId: SessionId('unfinished-step-summary'),
+        seed: seedTurns(3, 70),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      agent.followup(createUserMessage({ content: [{ type: 'text', text: 'read the file' }], source: { kind: 'user' } }))
+      await agent.whenIdle()
+
+      expect(adapter.rejected).toEqual([])
+      expect(adapter.summaryRequests).toHaveLength(2)
+      expect(warnings.some(message => message.includes('did not finish (rank 0 timed out)'))).toBe(true)
+      expect(warnings.some(message => message.startsWith('step compaction failed'))).toBe(false)
+      const events = agent.session.snapshotEvents()
+      expect(events.filter(event => event.type === 'compaction/summary')).toHaveLength(1)
+      expect(events.at(-1)).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'completed' } } })
     } finally {
       await ctx.fiber.dispose()
     }

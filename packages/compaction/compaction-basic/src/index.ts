@@ -57,6 +57,8 @@ export type {
 const SUMMARY_RAISES = 3
 /** Failed summarization attempts one compaction may follow with another range before the failure is reported. */
 const SUMMARY_RETRIES = 4
+/** Failure codes of a request that did not finish: a server error, a timeout, or a dropped stream or connection. */
+const UNFINISHED_REQUEST_CODES: readonly string[] = ['SERVER', 'TIMEOUT', 'STREAM_CLOSED', 'TRANSPORT']
 
 /** Learned density sits this far above the bound a refusal proves, so the next request is under it, not at it. */
 const REFUSAL_HEADROOM = 1.02
@@ -188,6 +190,18 @@ function isSummaryCut(error: unknown): boolean {
 /** Whether a summarization failure is an answer without text, after the summarizer's own retry. */
 function isSummaryEmpty(error: unknown): boolean {
   return causeChainHas(error, SUMMARY_EMPTY_CODE)
+}
+
+/**
+ * The failure of a summarization request that did not finish, which a shorter request may.
+ * @param error - the failure to inspect.
+ * @returns the provider failure carrying one of the unfinished-request codes, or `undefined` for any other failure.
+ */
+function unfinishedRequest(error: unknown): LlmError | undefined {
+  for (let current = error; typeof current === 'object' && current !== null; current = (current as { cause?: unknown }).cause) {
+    if (current instanceof LlmError && UNFINISHED_REQUEST_CODES.includes(current.code)) return current
+  }
+  return undefined
 }
 
 /**
@@ -667,7 +681,7 @@ export class BasicCompactionEngine extends CompactionEngine {
           if (range === null) return null
           return this.compactRegion(range.start, range.end, agent, signal)
         }
-        return this.condenseFitting(agent.session, measurement, fitSpec(policy, context.contextWindow), 0, agent, target,
+        return this.condenseFitting(agent.session, measurement, fitSpec(policy, context.contextWindow), 0, agent, target, signal,
           fit => this.compactFitting(fit, agent, signal))
       }
       /* v8 ignore next -- closed-union exhaustiveness guard */
@@ -791,7 +805,7 @@ export class BasicCompactionEngine extends CompactionEngine {
   ): Promise<(measurement: TokenMeasurement) => Promise<CompactionResult | null>> {
     const summarizer = routedTarget(agent.session)
     if (summarizer === undefined || (summarizer.provider === target.provider && summarizer.model === target.model)) {
-      return measurement => this.condenseFitting(agent.session, measurement, spec, spec.retainTokens, agent, target,
+      return measurement => this.condenseFitting(agent.session, measurement, spec, spec.retainTokens, agent, target, signal,
         fit => this.compactFitting(fit, agent, signal))
     }
     const context = await this.ctx.llm.resolveModelInfo(summarizer.provider, summarizer.model, signal)
@@ -803,7 +817,7 @@ export class BasicCompactionEngine extends CompactionEngine {
       }
     }
     const fitted = fitSpec(resolveTargetPolicy(this.config, summarizer), context.contextWindow)
-    return measurement => this.condenseFitting(agent.session, measurement, fitted, spec.retainTokens, agent, summarizer,
+    return measurement => this.condenseFitting(agent.session, measurement, fitted, spec.retainTokens, agent, summarizer, signal,
       fit => this.compactFitting(fit, agent, signal))
   }
 
@@ -863,16 +877,19 @@ export class BasicCompactionEngine extends CompactionEngine {
    * better range instead of giving up: a request the provider refuses as over
    * its window teaches the route's density and the range is refitted at it
    * (halved when the density was already known); a checkpoint cut at a
-   * ceiling the room set, or one that came back without text, gets a range
-   * about half the size; a checkpoint no
+   * ceiling the room set, one that came back without text, or a request that
+   * did not finish (`SERVER`, `TIMEOUT`, `STREAM_CLOSED`, or `TRANSPORT`)
+   * gets a range about half the size; a checkpoint no
    * smaller than its range gets the range grown by the next node. At most
-   * `SUMMARY_RETRIES` such retries follow the first attempt.
+   * `SUMMARY_RETRIES` such retries follow the first attempt, and none after
+   * the operation is cancelled.
    * @param session - the agent-owned session.
    * @param measurement - current surface measurement.
    * @param spec - the routed model's scaled budgets.
    * @param configuredRetain - retention the policy asks for.
    * @param agent - the owning agent, named in the log line.
    * @param target - the routed model, whose learned density prices the fit.
+   * @param signal - the operation's cancellation; a failure after it fires is reported, not retried.
    * @param run - condenses one fitting range.
    * @returns the compaction result, or `null` when nothing is condensable.
    */
@@ -883,6 +900,7 @@ export class BasicCompactionEngine extends CompactionEngine {
     configuredRetain: number,
     agent: Agent,
     target: Pick<LlmCallConfig, 'provider' | 'model'>,
+    signal: AbortSignal,
     run: (fit: { start: SessionSeq; end: SessionSeq; summaryCap: number; summaryCeiling: number }) => Promise<CompactionResult>,
   ): Promise<CompactionResult | null> {
     let retain = configuredRetain
@@ -927,7 +945,8 @@ export class BasicCompactionEngine extends CompactionEngine {
         this.checkpointSizes.set(session, Math.max(smallest ?? 0, this.ctx.tokenMeter.estimateMessage(checkpoint)))
         return result
       } catch (error) {
-        if (retries >= SUMMARY_RETRIES) throw error
+        // A cancelled request can end with any code, so cancellation is read from the signal.
+        if (retries >= SUMMARY_RETRIES || signal.aborted) throw error
         failed = error instanceof Error ? error : new Error(String(error))
         const half = () => { retain += halfOfRange(measurement, fit.start, fit.end) }
         if (isProviderOverflow(error)) {
@@ -959,6 +978,16 @@ export class BasicCompactionEngine extends CompactionEngine {
           half()
           this.ctx.logger.warn(
             `compaction: the checkpoint for "${agent.id}" came back without text; retrying with a range about half the size`,
+          )
+          continue
+        }
+        // A server that times out on or drops a long request may finish a shorter one.
+        const unfinished = unfinishedRequest(error)
+        if (unfinished !== undefined) {
+          half()
+          this.ctx.logger.warn(
+            `compaction: the summarization request for "${agent.id}" did not finish (${unfinished.message}); `
+            + 'retrying with a range about half the size',
           )
           continue
         }
@@ -1302,7 +1331,7 @@ export class BasicCompactionEngine extends CompactionEngine {
             remeasured: TokenMeasurement,
             retain: number,
           ): Promise<CompactionResult | null> =>
-            this.condenseFitting(agent.session, remeasured, spec, retain, agent, target, async (fit) => {
+            this.condenseFitting(agent.session, remeasured, spec, retain, agent, target, operationSignal, async (fit) => {
               this.summaryCaps.set(agent, { cap: fit.summaryCap, ceiling: fit.summaryCeiling })
               try {
                 return await manual(fit.start, fit.end)
