@@ -10,10 +10,14 @@ declare module '../contract/chat-nodes.ts' {
   interface ChatNodeDataMap {
     /** Automatic compaction checkpoint marker. */
     compaction: CompactionSummaryNode
+    /** Automatic compaction still running: started, not ended, no checkpoint yet. */
+    'compaction-running': CompactionRunningChatData
   }
 }
 
 interface CompactionState {
+  readonly start?: ConversationMatch
+  readonly ended?: true
   readonly summary?: ConversationMatch
   readonly checkpoint?: ConversationMatch
 }
@@ -46,13 +50,27 @@ export const compactionDefinition: ConversationNodeDefinition<CompactionState> =
     }
     return null
   },
-  start: () => ({}),
-  update: (context, match) => updateCompactionState(context.state, match),
+  start: (_context, match) => ({ start: match }),
+  update: (context, match) => match.event.type === 'compaction/end'
+    ? { ...context.state, ended: true }
+    : updateCompactionState(context.state, match),
+  // A State rebuilt without its start (paged out of the window) never shows
+  // the running row: only the live tail can hold a compaction still running.
+  // The running row stands outside step runs so the collapsed step groups of
+  // a running Turn cannot hide it, and hides once the compaction ends without
+  // a checkpoint.
   buildViewNode: (context) => {
     const state = context.state ?? fallbackState(context)
-    if (state.checkpoint === undefined) return null
-    const marker = compactSummary(state.summary, state.checkpoint)
-    return chatNode(context, 'compaction', marker.seq, marker)
+    if (state.checkpoint !== undefined) {
+      const marker = compactSummary(state.summary, state.checkpoint)
+      return chatNode(context, 'compaction', marker.seq, marker)
+    }
+    if (state.start === undefined) return null
+    const { seq, time } = state.start.event
+    return chatNode(context, 'compaction-running', seq, { seq, time }, {
+      groupTree: 'process',
+      visibility: state.ended === true ? 'hidden' : 'visible',
+    })
   },
 }
 

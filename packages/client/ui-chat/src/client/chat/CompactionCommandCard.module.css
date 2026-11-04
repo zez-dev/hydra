@@ -1,0 +1,37 @@
+/* Stop beside a running /compact summary: the row's 24px line and secondary
+   text tier, tertiary at rest like the row it ends. The glyph is the
+   composer's stop square at the row's text size. */
+.stop {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: calc(24px + var(--dsh-content-font-delta, 0px));
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font: inherit;
+  font-size: var(--dsh-content-font-size-secondary, 13px);
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stop svg {
+  width: calc(12px + var(--dsh-content-font-delta, 0px));
+  height: calc(12px + var(--dsh-content-font-delta, 0px));
+}
+
+@media (hover: hover) {
+  .stop:hover {
+    background: var(--dsw-alias-interactive-bg-hover);
+    color: var(--dsw-alias-label-secondary);
+  }
+}
+
+.stop:focus-visible {
+  outline: 1.5px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}

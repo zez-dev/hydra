@@ -1,13 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PerformanceUsageMode } from '../../chat-settings.ts'
+import type { CompactionStopInjected } from '../contract/slots.ts'
 import type { ChatPresentationPolicy } from '../presentation-policy.ts'
 import { NS } from '../locale.ts'
 import { AssistantNodeView } from './AssistantNodeView.tsx'
 import { CommandNodeView, ManualCompactionNodeView } from './CommandNodeView.tsx'
 import {
-  CompactionNodeView, ContextMessageNodeView, LearningReviewNodeView, RetryNodeView, TurnErrorNodeView,
-  TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
+  CompactionNodeView, CompactionRunningNodeView, ContextMessageNodeView, LearningReviewNodeView, RetryNodeView,
+  TurnErrorNodeView, TurnMaxTokensNodeView, UnknownNodeView, UserMessageNodeView,
 } from './MessageItem.tsx'
 import { DefaultReasoningBody, ReasoningContent } from './ReasoningContent.tsx'
 import { SystemPromptNodeView } from './SystemPromptRow.tsx'
@@ -68,10 +70,23 @@ export function registerChatNodeRenderers(
     locale: NS,
     children: { 'conversation.chat.commandview': { kind: 'keyed', scope: 'session' } },
   }, CommandNodeView))
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
-    { name: 'conversation.chat.node', key: 'manual-compaction', locale: NS }, ManualCompactionNodeView))
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
+    name: 'conversation.chat.node',
+    key: 'manual-compaction',
+    locale: NS,
+    // A manual compaction runs while the Session reports idle, so the composer
+    // offers no Stop; the row cancels through the same Session operation.
+    inject: (sessionId: SessionId): CompactionStopInjected => {
+      const binding = ctx.sessions.binding(sessionId)
+      if (binding === undefined) throw new Error(`ui-chat: unknown session "${sessionId}"`)
+      const session = binding.session
+      return { stop: () => { void session.cancel() } }
+    },
+  }, ManualCompactionNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
     { name: 'conversation.chat.node', key: 'compaction', locale: NS }, CompactionNodeView))
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
+    { name: 'conversation.chat.node', key: 'compaction-running', locale: NS }, CompactionRunningNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(
     { name: 'conversation.chat.node', key: 'model-retry', locale: NS }, RetryNodeView))
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register(

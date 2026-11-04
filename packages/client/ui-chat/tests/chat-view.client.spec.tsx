@@ -320,6 +320,7 @@ function HarnessUserOrigin({ useRenderer, owner, options }: {
 
 function HarnessChatNode({
   standard, owner, hookContext, usePerformanceUsage, toolOwners, fallback, renderAssistantSlot, renderUserChain,
+  stopCompaction,
 }: {
   readonly standard: HarnessStandardProps
   readonly owner: RoutedChatNodeOwner
@@ -329,6 +330,7 @@ function HarnessChatNode({
   readonly fallback: React.ReactNode
   readonly renderAssistantSlot: React.ComponentProps<typeof AssistantNodeView>['renderSlot']
   readonly renderUserChain: PropsRenderSlots<'conversation.chat.user.before'>['renderSlotChain']
+  readonly stopCompaction: () => void
 }) {
   const hooks = useMemo(() => ({
     useTurnData: CHAT_NODE_INJECT.hooks.turnData(standard, hookContext),
@@ -349,7 +351,7 @@ function HarnessChatNode({
     case 'command':
       return <CommandNodeView {...nodeProps} node={owner.node} renderSlot={renderCommandSlot} />
     case 'manual-compaction':
-      return <ManualCompactionNodeView {...nodeProps} node={owner.node} />
+      return <ManualCompactionNodeView {...nodeProps} node={owner.node} stop={stopCompaction} />
     case 'compaction':
       return <CompactionNodeView {...nodeProps} node={owner.node} />
     case 'model-retry':
@@ -442,6 +444,7 @@ function makeHarness(
     read: () => savedScroll,
   }
   const forkAt = vi.fn()
+  const stopCompaction = vi.fn<() => void>()
   // Rows and the harness must observe the same chat-store instance.
   const chat = createChatStore().create()
   const transcriptView = createSnapshotStore<TranscriptViewMode>('compact')
@@ -468,7 +471,7 @@ function makeHarness(
     return <HarnessChatNode standard={props} owner={owner}
       hookContext={opts.hookContext} usePerformanceUsage={usePerformanceUsage}
       toolOwners={toolOwners} fallback={opts.fallback} renderAssistantSlot={renderAssistantSlot}
-      renderUserChain={renderUserChain} />
+      renderUserChain={renderUserChain} stopCompaction={stopCompaction} />
   }
   const renderFlowSlot: ChatFlowSlotProps['renderSlot'] = (key: string, owner: object, opts?: {
     fallback?: React.ReactNode
@@ -585,7 +588,7 @@ function makeHarness(
     setConnection: (state: ConnectionState) => { connection.set(state) },
     openFile, openUserFile, loadOlder, loadThrough, openView,
     setOutline: (value: unknown) => { outlineValue = value },
-    chatScroll, forkAt, toolOwners,
+    chatScroll, forkAt, stopCompaction, toolOwners,
     setPerformanceUsage: (mode: 'compact' | 'detailed') => { performanceUsage.set(mode) },
     setGrouped: (value: ConversationGroupedView<ProcessGroupData> | undefined) => {
       grouped = value
@@ -4649,6 +4652,8 @@ describe('ChatView', () => {
     const view = render(<h.ChatView {...h.props} />)
     expect(view.getByText('正在压缩…')).toBeTruthy()
     expect(view.container.querySelector('[data-state="running"]')).not.toBeNull()
+    fireEvent.click(view.getByRole('button', { name: '停止' }))
+    expect(h.stopCompaction).toHaveBeenCalledTimes(1)
 
     act(() => {
       h.setChat({
@@ -4664,6 +4669,7 @@ describe('ChatView', () => {
     })
 
     expect(view.queryByText('正在压缩…')).toBeNull()
+    expect(view.queryByRole('button', { name: '停止' })).toBeNull()
     expect(view.queryByText('上下文已压缩')).toBeNull()
     expect(view.getByText('已压缩 16 条历史记录（约 11309 tokens）')).toBeTruthy()
     const row = view.getByRole('button', { name: /compact/ })
@@ -4698,6 +4704,7 @@ describe('ChatView', () => {
     const failedView = render(<failed.ChatView {...failed.props} />)
     expect(failedView.getByText('Compaction cancelled.')).toBeTruthy()
     expect(failedView.container.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(failedView.queryByRole('button', { name: '停止' })).toBeNull()
   })
 
   it('appends the running status at the transcript bottom only while the Session runs', () => {

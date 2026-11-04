@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react'
-import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type {
-  ChatNodeViewProps, CommandRowOwnerProps,
+  ChatNodeViewProps, CommandRowOwnerProps, CompactionStopInjected,
 } from '../contract/slots.ts'
 import { CompactionCommandCard } from './CompactionCommandCard.tsx'
 import { GenericCommandCard } from './GenericCommandCard.tsx'
@@ -23,16 +23,25 @@ export const CommandNodeView = memo(function CommandNodeView({ node, renderSlot,
   )
 })
 
-/** One integrated `/compact` command and compaction transaction renderer. */
+type ManualCompactionNodeViewProps = Pick<ChatNodeViewProps<'manual-compaction'>, 'node' | 't' | 'useAccess'>
+  & InjectFace<CompactionStopInjected>
+
+/**
+ * One integrated `/compact` command and compaction transaction renderer. The
+ * running row offers Stop unless this page may not cancel the Session, as
+ * the composer withholds its Stop.
+ */
 export const ManualCompactionNodeView = memo(function ManualCompactionNodeView({
-  node, t,
-}: ChatNodeViewProps<'manual-compaction'>) {
+  node, stop, useAccess, t,
+}: ManualCompactionNodeViewProps) {
   const data = node.data
+  const cancelAllowed = useAccess('session/cancel')
   return (
     <div className={css.callRow}>
       <CompactionCommandCard
         node={data.command}
         {...data.compaction === null ? {} : { compaction: data.compaction }}
+        {...cancelAllowed ? { stop } : {}}
         t={t}
       />
     </div>

@@ -61,6 +61,14 @@ export interface ManualCompactionChatData {
   readonly compaction: CompactionSummaryNode | null
 }
 
+/** One automatic compaction after its `compaction/start` and before it ends or its checkpoint lands. */
+export interface CompactionRunningChatData {
+  /** Seq of the `compaction/start` event. */
+  readonly seq: number
+  /** Time of the `compaction/start` event. */
+  readonly time: number
+}
+
 /** One durable retry chain rendered as a single row. */
 export interface RetryChatData {
   readonly attempts: readonly ModelRetryNode[]

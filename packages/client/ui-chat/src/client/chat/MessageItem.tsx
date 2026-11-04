@@ -8,7 +8,7 @@ import type {
   ChatNodeOwnerProps, ChatNodeViewProps, ChatViewSlotProps, UserContentAttachment, UserContentData, UserContentInput,
 } from '../contract/slots.ts'
 import type { ModelRetryNode, TurnErrorNode, UserMessageNode } from '../contract/snapshot.ts'
-import { CompactionItem } from './CompactionItem.tsx'
+import { CompactionItem, CompactionRunningItem } from './CompactionItem.tsx'
 import { ContextInjectionRow } from './ContextInjectionRow.tsx'
 import { MessageIconActions } from './MessageIconActions.tsx'
 import css from './MessageItem.module.css'
@@ -382,6 +382,19 @@ export const ContextMessageNodeView = memo(function ContextMessageNodeView({ nod
 /** Automatic compaction keyed Chat renderer. */
 export const CompactionNodeView = memo(function CompactionNodeView({ node, t }: ChatNodeViewProps<'compaction'>) {
   return <CompactionItem node={node.data} t={t} />
+})
+
+/**
+ * Running automatic compaction keyed Chat renderer; the composer's Stop
+ * cancels the Turn that runs it. The row shows only while the Session runs:
+ * an unended compaction in an idle Session belongs to a process that stopped,
+ * or to a standalone compaction without a command, which runs while idle.
+ */
+export const CompactionRunningNodeView = memo(function CompactionRunningNodeView({
+  useSession, t,
+}: Pick<ChatNodeViewProps<'compaction-running'>, 'useSession' | 't'>) {
+  const running = useSession(snapshot => snapshot.running)
+  return running ? <CompactionRunningItem t={t} /> : null
 })
 
 /** Correlated retry-chain keyed Chat renderer. */

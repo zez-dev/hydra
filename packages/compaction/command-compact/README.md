@@ -47,7 +47,7 @@ The command turns each expected failure into a stable message you can show direc
 | Condensation did not finish cleanly | `Compaction did not finish cleanly; some session history may have changed. Inspect the current session state before retrying.` |
 | The conversation could not be saved | `Compaction finished, but the session could not be saved.` |
 
-Cancelling the command stops the wait: the backend finishes its required cleanup, and the command settles as `Compaction cancelled.` while the UI stops waiting. Failures other than these expected cases surface as errors rather than being silently converted.
+In the Web client, the running `/compact` row offers Stop: the session counts as idle while compaction runs, so the composer shows none. Stop cancels the agent's active work, which is the compaction; a command adapter that aborts its own request cancels it too. Either way the backend finishes its required cleanup, and the command settles as `Compaction cancelled.`. Failures other than these expected cases surface as errors rather than being silently converted.
 
 ### Composing the command
 
@@ -82,7 +82,7 @@ This section explains the design decisions behind the command; the observable be
 
 The command is built on three commitments:
 
-- **Backend-independent control.** The handler depends only on `compactNow(agent, signal)`, so it works with any `CompactionEngine` implementation. The invoking agent is the exact target, and the dispatching UI's cancellation signal is forwarded through the seam.
+- **Backend-independent control.** The handler depends only on `compactNow(agent, signal, commandId)`, so it works with any `CompactionEngine` implementation. The invoking agent is the exact target. The handler forwards the invocation signal, which the command adapter owns; the Web client sends none, and its Stop cancels the agent instead, which aborts the maintenance task that `compactNow` runs in.
 - **The command lifecycle stays out of model history.** `command/run` and `command/done` are log-only events; `sourceEventSeq` correlates the successful result with the `compaction/summary` event without relying on text or row adjacency.
 - **Quiescent teardown.** The lifecycle effect unregisters `/compact` before draining already-started handlers, so an aborted command's close and flush work settles before root disposal completes.
 

@@ -2759,6 +2759,70 @@ describe('built-in conversation node Definitions', () => {
     expect(node(snapshot(value), 'compaction')).toBeUndefined()
   })
 
+  it('shows an automatic compaction running outside its step run until the checkpoint lands', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'compaction/start', { compactionId: 'automatic-live', turn: 1 }),
+    ])
+    const running = node(snapshot(value), 'compaction-running')
+    expect(running).toMatchObject({
+      anchorSeq: 3,
+      groupTree: 'process',
+      location: { kind: 'step', turn: { turn: 1 } },
+      data: { seq: 3, time: 1_700_000_000_003 },
+    })
+
+    for (const entry of [
+      at(4, 'compaction/summary', {
+        compactionId: 'automatic-live',
+        summary: [{ type: 'text', text: 'live summary' }],
+        shadowedSeqs: [1, 2],
+        shadowedTokenCount: 64,
+      }),
+      at(5, 'user/message', {
+        ...textMessage('automatic-live-checkpoint', 'checkpoint'),
+        source: { kind: 'compact-checkpoint', compactionId: 'automatic-live' },
+      }, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 2 } }),
+      at(6, 'compaction/end', { compactionId: 'automatic-live', turn: 1 }),
+    ]) value.append(entry)
+    value.flush()
+
+    expect(node(snapshot(value), 'compaction-running')).toBeUndefined()
+    const landed = node(snapshot(value), 'compaction')
+    expect(landed?.key).toBe(running?.key)
+    expect(landed?.groupTree).toBeUndefined()
+    expect(landed?.data).toMatchObject({ summary: 'live summary', summaryEventSeq: 4 })
+  })
+
+  it('hides the running row of an automatic compaction that ends without a checkpoint', () => {
+    const value = assembler([
+      at(1, 'turn/start', { turn: 1 }),
+      at(2, 'step/start', { turn: 1, step: 1 }),
+      at(3, 'compaction/start', { compactionId: 'automatic-cancelled', turn: 1 }),
+    ])
+    expect(node(snapshot(value), 'compaction-running')?.visibility).toBe('visible')
+
+    value.append(at(4, 'compaction/end', { compactionId: 'automatic-cancelled', turn: 1, error: 'This operation was aborted' }))
+    value.flush()
+    expect(node(snapshot(value), 'compaction-running')?.visibility).toBe('hidden')
+    expect(node(snapshot(value), 'compaction')).toBeUndefined()
+  })
+
+  it('shows no running row for an automatic compaction whose start is outside the loaded window', () => {
+    const value = assembler([
+      at(10, 'compaction/summary', {
+        compactionId: 'automatic-paged',
+        summary: [{ type: 'text', text: 'paged summary' }],
+        shadowedSeqs: [1, 2],
+        shadowedTokenCount: 64,
+      }),
+    ], true)
+
+    expect(node(snapshot(value), 'compaction-running')).toBeUndefined()
+    expect(node(snapshot(value), 'compaction')).toBeUndefined()
+  })
+
   it('ignores legacy retry and PTC dispatch events without correlation ids', () => {
     const value = assembler([
       at(10, 'llm/retry', {

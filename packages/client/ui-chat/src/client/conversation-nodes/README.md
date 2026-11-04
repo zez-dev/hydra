@@ -210,7 +210,7 @@ Grouping reads each Node's [group-tree position](../contract/group-tree.ts), whi
 |---|---|
 | Non-blank Assistant reasoning | Append one `reasoning` reference for that Assistant to the current group, creating a group if necessary. |
 | Assistant reply | End the preceding group and emit an independent `response` reference. If the same Node has reasoning, append that reasoning before ending the group. |
-| Node at `process` or an outer position: `model-retry`, Turn inputs, `turn-error`, `turn-max-tokens`, `turn-tail`, and the `turn-process` control | End the preceding group and retain the Node as an independent root. |
+| Node at `process` or an outer position: `model-retry`, a running automatic compaction (`compaction-running`), Turn inputs, `turn-error`, `turn-max-tokens`, `turn-tail`, and the `turn-process` control | End the preceding group and retain the Node as an independent root. |
 | Other visible Nodes owned by a Turn without a position, including tools | Append the whole Node to the current group, creating a group if necessary. |
 | Node from another Turn or without a Turn | Break the same-Turn sequence. A Node without a Turn remains independent, including an unsplit Assistant. |
 | Hidden Nodes, system prompts, ordinary Context injection, and `permission` commands | Excluded from the grouping input; they neither join nor split a group. |

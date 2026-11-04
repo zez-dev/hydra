@@ -21,6 +21,7 @@ import {
 import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { createChatStore } from '../src/client/stores.ts'
+import type { CompactionStopInjected } from '../src/client/contract/slots.ts'
 import { CHAT_SETTINGS_NAMESPACE, type ChatSettings } from '../src/chat-settings.ts'
 import type { LinkOpeningRowInjected } from '../src/client/settings/LinkOpeningRow.tsx'
 import type { TranscriptViewRowInjected } from '../src/client/settings/TranscriptViewRow.tsx'
@@ -285,6 +286,18 @@ describe('Chat inject API', () => {
         sessionId: ROOT, atSeq: 18, increaseTitle: true, onCreated: expect.any(Function) as (childId: SessionId) => void,
       })
     })
+    await b.runtime.dispose()
+  })
+
+  it('stops a running /compact through its own Session\'s cancel', async () => {
+    const b = await bench()
+    const entry = b.runtime.slots.entries('conversation.chat.node')
+      .find(row => row.options.key === 'manual-compaction')!
+    // The registry erases each inject face to a record; this entry returns the Stop face.
+    const inject = entry.inject as (sessionId: SessionId) => CompactionStopInjected & Record<string, unknown>
+    inject(ROOT).stop()
+    expect(b.session.cancel).toHaveBeenCalledOnce()
+    expect(() => inject('missing-session' as SessionId)).toThrow('ui-chat: unknown session "missing-session"')
     await b.runtime.dispose()
   })
 

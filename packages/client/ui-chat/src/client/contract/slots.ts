@@ -281,6 +281,17 @@ export interface PresentationInjected {
   }
 }
 
+/** Session cancellation bound to the manual compaction renderer's Session. */
+export interface CompactionStopInjected {
+  /**
+   * Cancel the Session's active work while keeping its queue, through the
+   * same Session operation as the composer's Stop. A running manual
+   * compaction is that work even though the Session does not report running;
+   * a refused cancel lands in the Session's prompt error.
+   */
+  stop: () => void
+}
+
 /** Full props of one keyed Chat renderer. */
 export type ChatNodeViewProps<Kind extends ChatNodeKind = ChatNodeKind> =
   PropsRuntime<'conversation.chat.node', Kind> & PropsLocale<'chat'> & PropsRenderFactories

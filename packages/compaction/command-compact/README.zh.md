@@ -43,11 +43,11 @@ kind: "package-reference"
 |---|---|
 | 压缩已在运行，或 agent 正在轮次中 | `Compaction is unavailable because this process has an active compaction, or the agent is not idle.` |
 | 压缩过程中历史发生了变化 | `The history selected for compaction changed before it could be replaced. The attempt is recorded in the session log.` |
-| 无法产生有用的摘要 | `Compaction could not produce a useful summary. The attempt is recorded in the session log.` |
+| 无法产生有用的摘要 | `Compaction could not produce a useful summary: <reason>. The attempt is recorded in the session log.` 原因会指出以下之一：检查点不小于它所替换的历史（附两者的 token 数）；即使在窗口允许的范围内提高上限并改用更小的范围，摘要仍在输出上限处被截断（在 `dsh-compaction-basic` 上调高 `summaryWindowRatio`，或把摘要请求路由到无需先思考即可作答的模型）；即使在更小的范围上重试三次，提供方仍以超出其窗口为由拒绝摘要请求（把该模型的 `contextWindow` 调低到提供方接受的值）；或后端诊断本身。引擎记录了相关数字时，原因后会在括号中附上这些数字（窗口、余量、请求与摘要上限、估算与计价大小、密度、输出下限），使粘贴出来的原因带有维护者所需的信息。 |
 | 压缩未干净地完成 | `Compaction did not finish cleanly; some session history may have changed. Inspect the current session state before retrying.` |
 | 会话无法保存 | `Compaction finished, but the session could not be saved.` |
 
-取消命令会停止等待：后端完成必需的清理，命令以 `Compaction cancelled.` 结算，UI 停止等待。除这些预期情形外的失败会以错误形式呈现，而不会被静默转换。
+在 Web 客户端中，运行中的 `/compact` 行提供“停止”：压缩运行期间会话被视为空闲，因此输入框不显示停止按钮。“停止”会取消 agent 当前的工作，也就是这次压缩；自行中止命令请求的命令适配器同样会取消它。两种情况下，后端都会完成必需的清理，命令以 `Compaction cancelled.` 结算。除这些预期情形外的失败会以错误形式呈现，而不会被静默转换。
 
 ### 组合命令
 
@@ -82,7 +82,7 @@ kind: "package-reference"
 
 该命令建立在三项承诺之上：
 
-- **与后端无关的控制。** 处理器只依赖 `compactNow(agent, signal)`，因此可与任何 `CompactionEngine` 实现协作。调用该命令的 agent 就是操作的确切目标，发起分发的 UI 会通过 seam 转发取消信号。
+- **与后端无关的控制。** 处理器只依赖 `compactNow(agent, signal, commandId)`，因此可与任何 `CompactionEngine` 实现协作。调用该命令的 agent 就是操作的确切目标。处理器转发调用信号，该信号归命令适配器所有；Web 客户端不发送该信号，它的“停止”改为取消 agent，进而中止 `compactNow` 所在的维护任务。
 - **命令生命周期不进入模型历史。** `command/run` 与 `command/done` 都是仅日志事件；`sourceEventSeq` 将成功结果与 `compaction/summary` 事件关联，不依赖文本或行相邻关系。
 - **资源销毁必须完全停稳。** 生命周期 effect 会先注销 `/compact`，再等待已开始处理器结算，因此已中止命令的闭合与 flush 工作会在根级资源释放完成前结算完毕。
 

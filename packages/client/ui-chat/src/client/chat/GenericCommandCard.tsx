@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { ChatViewSlotProps, CommandRowOwnerProps } from '../contract/slots.ts'
 import { DisclosureRow, IconApiOutlineRegular, TextShimmer } from '@deepseek-ai/dsh-client-ui-primitives'
 import a11yCss from './accessibility.module.css'
@@ -19,14 +19,18 @@ export interface GenericCommandCardProps extends CommandRowOwnerProps {
   t: ChatViewSlotProps['t']
   /** Command-specific running copy; absent uses the generic command label. */
   runningSummary?: string | undefined
+  /** Control beside the summary, outside the disclosure target; pass a stable element so the memoized card can skip renders. */
+  headerAccessory?: ReactNode
 }
 
 /**
  * Render a command summary and its lazily mounted multiline output.
- * @param props - command, locale, and optional running label.
+ * @param props - command, locale, optional running label, and optional header control.
  * @returns the command disclosure.
  */
-export const GenericCommandCard = memo(function GenericCommandCard({ node, t, runningSummary }: GenericCommandCardProps) {
+export const GenericCommandCard = memo(function GenericCommandCard({
+  node, t, runningSummary, headerAccessory,
+}: GenericCommandCardProps) {
   const [expanded, setExpanded] = useState(false)
   const text = node.outcome?.text
   const summary = node.outcome === null
@@ -67,6 +71,7 @@ export const GenericCommandCard = memo(function GenericCommandCard({ node, t, ru
         keepContentWhenOpen
         onToggle={toggle}
         collapsedContent={collapsedContent}
+        headerAccessory={headerAccessory}
       >
         {content}
       </DisclosureRow>
