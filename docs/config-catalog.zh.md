@@ -2400,7 +2400,7 @@ export interface Config extends ProtocolConfig, ModelListingConfig {
 
 - `inject`: `llm`
 - `refs`: `Api` (`@earendil-works/pi-ai`) · `CacheRetention` (`@earendil-works/pi-ai`) · `Model` (`@earendil-works/pi-ai`) · `ModelThinkingLevel` (`@earendil-works/pi-ai`) · `OpenAICompletionsCompat` (`@earendil-works/pi-ai`) · [`RetryPolicyConfig`](../packages/llm/llm/src/index.ts) · `ThinkingBudgets` (`@earendil-works/pi-ai`) · `Transport` (`@earendil-works/pi-ai`) · `Volatile` (`@deepseek-ai/cordis`)
-- `source`: [`packages/llm/llm-pi-ai/src/config.ts:253`](../packages/llm/llm-pi-ai/src/config.ts)
+- `source`: [`packages/llm/llm-pi-ai/src/config.ts:272`](../packages/llm/llm-pi-ai/src/config.ts)
 
 ```ts config-catalog
 /** Plugin configuration: the provider routes this instance owns. */
@@ -2490,6 +2490,20 @@ export interface PiAiProviderProfile {
    * process. Defaults to `true`; `false` sends none of these fields.
    */
   reasoningLevels?: boolean
+  /**
+   * On a custom route (one the installed catalog does not describe): whether
+   * every request to its `openai-completions` models asks the server's chat
+   * template to keep the model's earlier reasoning in the prompt, through
+   * `chat_template_kwargs` `preserve_thinking: true` and `clear_thinking:
+   * false` (the switches Qwen and GLM templates read). Templates that drop
+   * earlier reasoning at each new user message otherwise change the prompt
+   * from the first earlier answer that carried reasoning, so a server with a
+   * prefix cache reads that whole stretch again; kept reasoning instead stays
+   * in the context and fills it sooner. Kwargs a model's own `compat` sets win.
+   * A server that refuses the fields has them dropped for the rest of the
+   * process. Defaults to `true`; `false` sends neither field.
+   */
+  preserveThinking?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -2503,11 +2517,14 @@ export interface PiAiProviderProfile {
   /** Maximum provider idle time while one stream read is outstanding, once streaming has started. */
   streamIdleTimeoutMs?: number
   /**
-   * The slowest prompt processing the route is allowed before its first
-   * byte, in prompt tokens per second, until a completed stream has measured
-   * the route: the first-byte wait is the larger of `streamIdleTimeoutMs`
-   * and twice the prompt's estimated tokens divided by this rate (or by the
-   * measured rate once known). Defaults to `50`.
+   * The fastest prompt processing the route's first-byte wait assumes, in
+   * prompt tokens per second: the wait is the larger of `streamIdleTimeoutMs`
+   * and twice the prompt's estimated tokens divided by the route's assumed
+   * rate. That rate starts here and only falls for the rest of the process: a
+   * completed stream that read its prompt more slowly lowers it to that pace,
+   * and a first-byte timeout lowers it so the same prompt waits twice as long
+   * on the next attempt. A faster measurement never raises it, because a
+   * prompt the server had cached answers at once. Defaults to `50`.
    */
   minPromptTokensPerSecond?: number
   /**

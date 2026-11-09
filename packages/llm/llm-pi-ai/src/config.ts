@@ -47,8 +47,8 @@ import { buildProvider, supportedProtocols } from './provider.ts'
 /** Default maximum idle interval while an adapter stream read is outstanding. */
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 /**
- * Prompt tokens per second a route is assumed to process before its first
- * byte until the adapter has measured it from a completed stream.
+ * Prompt tokens per second a route is assumed to process at most before its
+ * first byte; a slower pace the adapter measures or a first-byte timeout lowers it.
  */
 export const DEFAULT_MIN_PROMPT_TOKENS_PER_SECOND = 50
 
@@ -171,6 +171,20 @@ export interface PiAiProviderProfile {
    * process. Defaults to `true`; `false` sends none of these fields.
    */
   reasoningLevels?: boolean
+  /**
+   * On a custom route (one the installed catalog does not describe): whether
+   * every request to its `openai-completions` models asks the server's chat
+   * template to keep the model's earlier reasoning in the prompt, through
+   * `chat_template_kwargs` `preserve_thinking: true` and `clear_thinking:
+   * false` (the switches Qwen and GLM templates read). Templates that drop
+   * earlier reasoning at each new user message otherwise change the prompt
+   * from the first earlier answer that carried reasoning, so a server with a
+   * prefix cache reads that whole stretch again; kept reasoning instead stays
+   * in the context and fills it sooner. Kwargs a model's own `compat` sets win.
+   * A server that refuses the fields has them dropped for the rest of the
+   * process. Defaults to `true`; `false` sends neither field.
+   */
+  preserveThinking?: boolean
   /** Token budgets used by reasoning providers that support them. */
   thinkingBudgets?: ThinkingBudgets
   /** Prompt-cache retention preference. */
@@ -184,11 +198,14 @@ export interface PiAiProviderProfile {
   /** Maximum provider idle time while one stream read is outstanding, once streaming has started. */
   streamIdleTimeoutMs?: number
   /**
-   * The slowest prompt processing the route is allowed before its first
-   * byte, in prompt tokens per second, until a completed stream has measured
-   * the route: the first-byte wait is the larger of `streamIdleTimeoutMs`
-   * and twice the prompt's estimated tokens divided by this rate (or by the
-   * measured rate once known). Defaults to `50`.
+   * The fastest prompt processing the route's first-byte wait assumes, in
+   * prompt tokens per second: the wait is the larger of `streamIdleTimeoutMs`
+   * and twice the prompt's estimated tokens divided by the route's assumed
+   * rate. That rate starts here and only falls for the rest of the process: a
+   * completed stream that read its prompt more slowly lowers it to that pace,
+   * and a first-byte timeout lowers it so the same prompt waits twice as long
+   * on the next attempt. A faster measurement never raises it, because a
+   * prompt the server had cached answers at once. Defaults to `50`.
    */
   minPromptTokensPerSecond?: number
   /**
@@ -220,7 +237,7 @@ export interface ResolvedPiAiProviderProfile
   apiKeyEnv?: CredentialRef
   /** Positive finite provider-idle interval after defaulting. */
   streamIdleTimeoutMs: number
-  /** Positive finite assumed prompt rate before the first byte, after defaulting. */
+  /** Positive finite fastest assumed prompt rate before the first byte, after defaulting. */
   minPromptTokensPerSecond: number
   /** Positive request-level base64 image payload bound after defaulting. */
   maxRequestImageBytes: number
@@ -247,6 +264,8 @@ export interface ResolvedPiAiProviderProfile
   configuredMaxTokens: ReadonlyMap<string, number>
   /** Models whose reasoning fields the adapter sends itself (see `reasoningLevels`). */
   autoReasoningModels: ReadonlySet<string>
+  /** Models whose chat template the adapter asks to keep earlier reasoning (see `preserveThinking`). */
+  preserveThinkingModels: ReadonlySet<string>
 }
 
 /** Plugin configuration: the provider routes this instance owns. */
@@ -369,6 +388,7 @@ const profile = z.object({
   headers: z.dict(z.string()),
   reasoning: z.union(THINKING_LEVELS),
   reasoningLevels: z.boolean(),
+  preserveThinking: z.boolean(),
   thinkingBudgets,
   cacheRetention: z.union(['none', 'short', 'long']),
   transport: z.union(['sse', 'websocket', 'websocket-cached', 'auto']),
@@ -529,6 +549,7 @@ export function resolveProfiles(
         defaultContextWindow: source.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
         defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
         autoReasoningLevels: !catalogProviderIds().includes(provider) && source.reasoningLevels !== false,
+        preserveThinking: !catalogProviderIds().includes(provider) && source.preserveThinking !== false,
       }, validation)
       catalogError = catalog.modelErrors.values().next().value
       piProvider = buildProvider({
@@ -559,6 +580,7 @@ export function resolveProfiles(
       ...rest.thinkingBudgets === undefined ? {} : { thinkingBudgets: { ...rest.thinkingBudgets } },
       configuredMaxTokens: catalog?.configuredMaxTokens ?? new Map(),
       autoReasoningModels: catalog?.autoReasoningModels ?? new Set(),
+      preserveThinkingModels: catalog?.preserveThinkingModels ?? new Set(),
       modelErrors: catalog?.modelErrors ?? new Map(),
       ...piProvider === undefined ? {} : { piProvider },
       ...catalogError === undefined ? {} : { catalogError },

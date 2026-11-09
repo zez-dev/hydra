@@ -127,6 +127,25 @@ export function mapStopReason(message: AssistantMessage, contextWindow?: number)
   }
 }
 
+/** pi-ai's wording for a content-filter finish, which a fresh attempt is not expected to pass. */
+const CONTENT_FILTER_FINISH = /\bfinish_reason: content_filter\b/u
+
+/**
+ * Classify an unrecognized failure that arrived after the server accepted the
+ * request as a server failure, which the retry policy retries. A server that
+ * cannot use what the model generated reports it this way: oMLX ends the
+ * stream with an `incomplete_tool_call` error event when the model's tool
+ * call does not parse, and a fresh attempt samples a new answer. Failures a
+ * classifier already recognized, and a content-filter finish, keep their codes.
+ * @param reason - the finish reason mapped from the terminal error event.
+ * @returns the same reason, with `PI_AI_ERROR` replaced by `SERVER`.
+ */
+function serverFailureAfterStart(reason: FinishReason): FinishReason {
+  if (reason.kind !== 'error' || reason.failure.code !== 'PI_AI_ERROR') return reason
+  if (CONTENT_FILTER_FINISH.test(reason.failure.message)) return reason
+  return { kind: 'error', failure: { ...reason.failure, code: 'SERVER' } }
+}
+
 /** Marker before the raw text in pi-ai's `argumentsError`; the provider's own final arguments follow it. */
 const RECEIVED_ARGUMENTS = '\n\nReceived arguments:\n'
 
@@ -156,10 +175,13 @@ export async function* toStreamChunks(
   // in stream order), but we track ids per index for tool calls.
   const toolIds = new Map<number, { id: string; name: string }>()
   const streamedArguments = new Map<number, string>()
+  // pi-ai emits `start` once the server has accepted the request and its stream is open.
+  let started = false
 
   for await (const event of events) {
     switch (event.type) {
       case 'start':
+        started = true
         break
       case 'text_start':
         yield { type: 'block-start', index: event.contentIndex, blockType: 'text' }
@@ -227,18 +249,17 @@ export async function* toStreamChunks(
           replayState: toPiReplayState(event.message, requestedModel),
         }
         return
-      case 'error':
+      case 'error': {
         // In-stream error delivery (pi-ai's style) → error finish chunk
         // (the harness's other sanctioned error path besides throwing).
         yield { type: 'usage', usage: mapUsage(event.error.usage) }
-        yield {
-          type: 'finish',
-          reason: mapStopReason(
-            callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' } : event.error,
-            contextWindow,
-          ),
-        }
+        const reason = mapStopReason(
+          callerSignal?.aborted ? { ...event.error, stopReason: 'aborted' } : event.error,
+          contextWindow,
+        )
+        yield { type: 'finish', reason: started ? serverFailureAfterStart(reason) : reason }
         return
+      }
       // no default: AssistantMessageEvent is pi-ai's closed union; a new
       // event type should fail compilation here via tsc's exhaustiveness
       // when one is added (switch covers all current variants).

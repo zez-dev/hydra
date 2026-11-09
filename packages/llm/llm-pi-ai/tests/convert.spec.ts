@@ -849,6 +849,31 @@ describe('toStreamChunks', () => {
     ])
   })
 
+  it('classifies an unrecognized error after the stream started as a retryable server failure', async () => {
+    // oMLX ends an accepted stream this way when the model's tool call does not parse.
+    const message = 'Model output contains an unrecoverable tool call. Retry the request.'
+    const error = assistant({ stopReason: 'error', errorMessage: message })
+    const chunks = await collect(toStreamChunks(feed(
+      { type: 'start', partial: assistant() },
+      { type: 'thinking_start', contentIndex: 0, partial: assistant() },
+      { type: 'error', reason: 'error', error },
+    )))
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'error', failure: { message, code: 'SERVER' } } })
+  })
+
+  it('keeps the codes of a recognized failure and of a content-filter finish after the stream started', async () => {
+    const finishOf = async (errorMessage: string): Promise<StreamChunk | undefined> => (await collect(toStreamChunks(feed(
+      { type: 'start', partial: assistant() },
+      { type: 'error', reason: 'error', error: assistant({ stopReason: 'error', errorMessage }) },
+    )))).at(-1)
+    expect(await finishOf('400 invalid request')).toMatchObject({ reason: { failure: { code: 'INVALID_REQUEST' } } })
+    expect(await finishOf('Provider finish_reason: content_filter')).toMatchObject({ reason: { failure: { code: 'PI_AI_ERROR' } } })
+    expect((await collect(toStreamChunks(feed(
+      { type: 'start', partial: assistant() },
+      { type: 'error', reason: 'aborted', error: assistant({ stopReason: 'aborted' }) },
+    )))).at(-1)).toMatchObject({ reason: { kind: 'aborted' } })
+  })
+
   it('maps aborted error events to aborted finish', async () => {
     const error = assistant({ stopReason: 'aborted' })
     const chunks = await collect(toStreamChunks(feed({ type: 'error', reason: 'aborted', error })))

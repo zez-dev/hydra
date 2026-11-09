@@ -236,8 +236,10 @@ function requestHeaders(headers: Readonly<Record<string, string>> | undefined): 
  * restart; model descriptors come from the providers those profiles built.
  */
 export class PiAiAdapter extends LlmAdapter {
-  /** Prompt tokens per second measured per `provider/model` from completed streams: the first-byte budget's rate. */
+  /** The slowest prompt pace per `provider/model` this process has learned: the first-byte budget's rate. */
   private readonly promptRates = new Map<string, number>()
+  /** Routes whose server refused the fields asking to keep earlier reasoning; they are not sent there again in this process. */
+  private readonly preserveThinkingRefused = new Set<string>()
   /** Routes whose server refused the reasoning fields this adapter adds; they are not sent there again in this process. */
   private readonly reasoningFieldsRefused = new Set<string>()
   /** Routes whose server refused a level above `high`; such a level is sent there as `high` for the rest of the process. */
@@ -372,19 +374,37 @@ export class PiAiAdapter extends LlmAdapter {
   }
 
   /**
-   * Remember how fast a route processed a prompt: its reported input tokens
-   * over the time to its first chunk, averaged with the previous measurement.
+   * The prompt rate a route's first-byte budget assumes: the slowest pace
+   * this process has learned for the route, never faster than the configured
+   * floor. A prompt the server had cached answers almost at once, so a faster
+   * measurement would cut short the wait of the next prompt it has not cached.
    * @param routeKey - `provider/model`.
+   * @param floor - the route's configured `minPromptTokensPerSecond`.
+   * @returns prompt tokens per second.
+   */
+  private promptRate(routeKey: string, floor: number): number {
+    return Math.min(this.promptRates.get(routeKey) ?? floor, floor)
+  }
+
+  /**
+   * Keep a slower pace for the route: its reported input tokens over the time
+   * to its first chunk, when that is below the rate already assumed.
+   * @param routeKey - `provider/model`.
+   * @param floor - the route's configured `minPromptTokensPerSecond`.
    * @param startedAt - when the request started.
    * @param firstChunkAt - when the first chunk arrived, if one did.
    * @param inputTokens - the input tokens the provider reported, if it did.
    */
-  private learnPromptRate(routeKey: string, startedAt: number, firstChunkAt: number | undefined, inputTokens: number | undefined): void {
+  private learnPromptRate(
+    routeKey: string,
+    floor: number,
+    startedAt: number,
+    firstChunkAt: number | undefined,
+    inputTokens: number | undefined,
+  ): void {
     if (firstChunkAt === undefined || inputTokens === undefined || inputTokens <= 0) return
     const seconds = Math.max(0.001, (firstChunkAt - startedAt) / 1000)
-    const rate = inputTokens / seconds
-    const previous = this.promptRates.get(routeKey)
-    this.promptRates.set(routeKey, previous === undefined ? rate : (previous + rate) / 2)
+    this.promptRates.set(routeKey, Math.min(this.promptRate(routeKey, floor), inputTokens / seconds))
   }
 
   stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
@@ -427,6 +447,9 @@ export class PiAiAdapter extends LlmAdapter {
     const piModel = auto ? { ...model, reasoning: false } : model
     let injected = auto && reasoning !== undefined && !this.reasoningFieldsRefused.has(routeKey) ? reasoning : undefined
     if (injected !== undefined && isAboveHigh(injected) && this.levelsAboveHighRefused.has(routeKey)) injected = 'high'
+    // Every request on the route carries the same answer, so the rendered
+    // history, and with it the server's cached prefix, stays the same.
+    let preserve = profile.preserveThinkingModels.has(model.id) && !this.preserveThinkingRefused.has(routeKey)
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
     const consumer = new AbortController()
@@ -435,11 +458,10 @@ export class PiAiAdapter extends LlmAdapter {
       : AbortSignal.any([options.signal, consumer.signal])
     const streamIdleTimeoutMs = profile.streamIdleTimeoutMs
     // A server is silent while it processes the prompt, so the first byte
-    // gets its own budget from the prompt's size and the route's pace: the
-    // rate a completed stream on this route measured, else the configured
-    // floor. Later gaps are held to the idle interval.
+    // gets its own budget from the prompt's size and the route's slowest
+    // known pace. Later gaps are held to the idle interval.
     const promptTokens = estimatePromptTokens(options)
-    const promptRate = this.promptRates.get(routeKey) ?? profile.minPromptTokensPerSecond
+    const promptRate = this.promptRate(routeKey, profile.minPromptTokensPerSecond)
     const firstByteBudgetMs = Math.ceil((promptTokens / promptRate) * 2 * 1000)
     const firstByteTimeoutMs = Math.min(MAX_TIMER_DELAY_MS, Math.max(streamIdleTimeoutMs, firstByteBudgetMs))
     using watchdog = idleWatchdog(upstream, streamIdleTimeoutMs, 'LLM_STREAM_IDLE_TIMEOUT', firstByteTimeoutMs)
@@ -470,7 +492,7 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade, updates.systemPromptUpdate === 'in-history')
-      const open = (level: ModelThinkingLevel | undefined): AsyncGenerator<StreamChunk> => toStreamChunks(
+      const open = (level: ModelThinkingLevel | undefined, keep: boolean): AsyncGenerator<StreamChunk> => toStreamChunks(
         snapshot.models().streamSimple(piModel, context, {
           ...profileOptions(profile, auto ? undefined : reasoning, apiKey),
           ...options.temperature === undefined ? {} : { temperature: options.temperature },
@@ -480,13 +502,15 @@ export class PiAiAdapter extends LlmAdapter {
           // Profile headers are deployment-owned; attribution names are
           // Harness-owned and therefore win collisions.
           headers: requestHeaders(profile.headers),
-          ...level === undefined ? {} : { onPayload: (payload: unknown) => withReasoningFields(payload, level) },
+          ...level === undefined && !keep ? {} : { onPayload: (payload: unknown) => withTemplateFields(payload, level, keep) },
         }),
         model.contextWindow,
         options.signal,
         model.id,
       )[Symbol.asyncIterator]()
-      let iterator = open(injected)
+      let iterator = open(injected, preserve)
+      /** Whether this attempt added fields the server may still refuse. */
+      let checking = injected !== undefined || preserve
       /** Usage chunks held while a refusal of the added fields may still follow. */
       const held: Extract<StreamChunk, { type: 'usage' }>[] = []
       let exhausted = false
@@ -500,39 +524,54 @@ export class PiAiAdapter extends LlmAdapter {
               yield chunk
             }
             exhausted = true
-            this.learnPromptRate(routeKey, startedAt, firstChunkAt, inputTokens)
+            this.learnPromptRate(routeKey, profile.minPromptTokensPerSecond, startedAt, firstChunkAt, inputTokens)
             return
           }
-          // A server that refuses the added reasoning fields answers with an
-          // error before any content (after a usage chunk, which is held back
-          // meanwhile): remember the route and reopen the same request without
-          // them. A refused level above `high` is first retried as `high`, since
-          // a server that validates the level names it in the same refusal.
-          if (injected !== undefined) {
+          // A server that refuses the added fields answers with an error before
+          // any content (after a usage chunk, which is held back meanwhile):
+          // remember the route and reopen the same request without the refused
+          // part. A refusal naming the fields that keep earlier reasoning drops
+          // them alone; one naming `chat_template_kwargs`, which carries both
+          // kinds, drops both; any other refusal is about the level when one was
+          // added. A refused level above `high` is then retried as `high`, since a
+          // server that validates the level names it in the same refusal.
+          if (checking) {
             if (result.value.type === 'usage') {
               held.push(result.value)
               continue
             }
-            if (refusesReasoningFields(result.value)) {
-              if (isAboveHigh(injected)) {
+            const refusal = refusalOfAddedFields(result.value)
+            const namesPreserve = refusal !== undefined && PRESERVE_THINKING_REFUSAL.test(refusal)
+            const namesKwargs = refusal !== undefined && TEMPLATE_KWARGS_REFUSAL.test(refusal)
+            const dropPreserve = refusal !== undefined && preserve && (namesPreserve || namesKwargs || injected === undefined)
+            // A refusal that names only fields this attempt did not add passes through as the failure it is.
+            const levelAction = refusal === undefined || injected === undefined || namesPreserve ? undefined
+              : isAboveHigh(injected) && !namesKwargs ? 'high' : 'drop'
+            if (dropPreserve || levelAction !== undefined) {
+              if (dropPreserve) {
+                this.preserveThinkingRefused.add(routeKey)
+                preserve = false
+              }
+              if (levelAction === 'high') {
                 this.levelsAboveHighRefused.add(routeKey)
                 injected = 'high'
-              } else {
+              } else if (levelAction === 'drop') {
                 this.reasoningFieldsRefused.add(routeKey)
                 injected = undefined
               }
+              checking = injected !== undefined || preserve
               held.length = 0
               try {
                 await iterator.return(undefined)
               } catch (_refusedStreamTeardown) {
                 // The refused stream already ended; its teardown cannot change the retry.
               }
-              iterator = open(injected)
+              iterator = open(injected, preserve)
               // The reopened request is prepared from scratch, so its first byte gets the prompt's budget again.
               watchdog.restart()
               continue
             }
-            injected = undefined
+            checking = false
             for (const chunk of held.splice(0)) {
               firstChunkAt ??= Date.now()
               inputTokens = chunk.usage.inputTokens
@@ -555,6 +594,14 @@ export class PiAiAdapter extends LlmAdapter {
     } catch (error: unknown) {
       const expired = timeoutOf(watchdog.signal, 'LLM_STREAM_IDLE_TIMEOUT')
       if (expired !== undefined) {
+        if (firstChunkAt === undefined) {
+          // The server may still have been reading the prompt: the route's
+          // next attempt at the same prompt gets twice this wait.
+          this.promptRates.set(routeKey, Math.min(
+            this.promptRate(routeKey, profile.minPromptTokensPerSecond),
+            promptTokens / (expired.timeoutMs / 1000),
+          ))
+        }
         const message = firstChunkAt === undefined
           ? `pi-ai first byte timeout after ${expired.timeoutMs}ms for a prompt of about ${promptTokens} tokens`
           : `pi-ai stream idle timeout after ${expired.timeoutMs}ms`
@@ -570,27 +617,39 @@ export class PiAiAdapter extends LlmAdapter {
   }
 }
 
+/** `chat_template_kwargs` asking Qwen (`preserve_thinking`) and GLM (`clear_thinking`) templates to keep earlier reasoning. */
+const PRESERVE_THINKING_KWARGS = Object.freeze({ preserve_thinking: true, clear_thinking: false })
+
 /**
- * Add a chosen reasoning level to an OpenAI-compatible request body in the
- * spellings the common servers read: `chat_template_kwargs` for templates
- * that switch thinking (`enable_thinking`, `thinking`) or take an effort
- * (`reasoning_effort`), and the top-level `reasoning_effort`. `off` disables
- * thinking where the template allows and asks for the lowest effort where it
- * cannot.
+ * Add the fields this adapter owns on a custom route to an OpenAI-compatible
+ * request body. A chosen reasoning level goes in the spellings the common
+ * servers read: `chat_template_kwargs` for templates that switch thinking
+ * (`enable_thinking`, `thinking`) or take an effort (`reasoning_effort`), and
+ * the top-level `reasoning_effort`; `off` disables thinking where the template
+ * allows and asks for the lowest effort where it cannot. Keeping earlier
+ * reasoning adds {@link PRESERVE_THINKING_KWARGS}, under any kwargs pi-ai
+ * built from the model's own `compat`.
  * @param payload - the body pi-ai built.
- * @param level - the chosen level.
+ * @param level - the chosen level, if any.
+ * @param preserve - whether to ask the template to keep earlier reasoning.
  * @returns the body with the fields added.
  */
-function withReasoningFields(payload: unknown, level: ModelThinkingLevel): unknown {
-  // pi-ai hands the chat-completions body it built, an object, and adds no
-  // `chat_template_kwargs` of its own to a model it was told does not reason.
+function withTemplateFields(payload: unknown, level: ModelThinkingLevel | undefined, preserve: boolean): unknown {
+  // pi-ai hands the chat-completions body it built, an object; its own
+  // `chat_template_kwargs` come only from a model's `compat`.
   const body = payload as Record<string, unknown>
+  const built = body['chat_template_kwargs']
+  const kwargs = {
+    ...preserve ? PRESERVE_THINKING_KWARGS : {},
+    ...typeof built === 'object' && built !== null ? built : {},
+  }
+  if (level === undefined) return { ...body, chat_template_kwargs: kwargs }
   const enabled = level !== 'off'
   const effort = enabled ? level : 'low'
   return {
     ...body,
     reasoning_effort: effort,
-    chat_template_kwargs: { enable_thinking: enabled, thinking: enabled, reasoning_effort: effort },
+    chat_template_kwargs: { ...kwargs, enable_thinking: enabled, thinking: enabled, reasoning_effort: effort },
   }
 }
 
@@ -603,19 +662,31 @@ function isAboveHigh(level: ModelThinkingLevel): boolean {
   return level === 'xhigh' || level === 'max'
 }
 
-/** Server wordings that name the added reasoning fields or reject unknown request fields. */
-const REASONING_FIELD_REFUSAL = new RegExp([
-  'chat_template_kwargs', 'reasoning_effort', 'enable_thinking',
+/**
+ * Server wordings that name the added fields or reject unknown request fields,
+ * including a Python template call refusing an unknown keyword argument.
+ */
+const ADDED_FIELD_REFUSAL = new RegExp([
+  'chat_template_kwargs', 'reasoning_effort', 'enable_thinking', 'preserve_thinking', 'clear_thinking',
   'unrecognized request argument', 'extra inputs are not permitted', 'unknown (?:field|parameter)',
+  'unexpected keyword argument',
 ].join('|'), 'iu')
 
+/** Server wordings that name the fields asking to keep earlier reasoning. */
+const PRESERVE_THINKING_REFUSAL = /preserve_thinking|clear_thinking/iu
+
+/** Server wordings that name the request field carrying both the level and the keep-reasoning kwargs. */
+const TEMPLATE_KWARGS_REFUSAL = /chat_template_kwargs/iu
+
 /**
- * Whether a first chunk is the server refusing the added reasoning fields.
+ * The message of a first chunk that is the server refusing the fields this adapter added.
  * @param chunk - the stream's first chunk.
- * @returns `true` for an error finish whose message names them.
+ * @returns the error message, or `undefined` when the chunk is not such a refusal.
  */
-function refusesReasoningFields(chunk: StreamChunk): boolean {
-  return chunk.type === 'finish' && chunk.reason.kind === 'error' && REASONING_FIELD_REFUSAL.test(chunk.reason.failure.message)
+function refusalOfAddedFields(chunk: StreamChunk): string | undefined {
+  if (chunk.type !== 'finish' || chunk.reason.kind !== 'error') return undefined
+  const message = chunk.reason.failure.message
+  return ADDED_FIELD_REFUSAL.test(message) ? message : undefined
 }
 
 /**

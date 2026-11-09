@@ -70,6 +70,9 @@ async function harness(config: LlmPiAi.Options): Promise<Context> {
   return ctx
 }
 
+/** The kwargs a custom route sends so Qwen and GLM templates keep earlier reasoning. */
+const KEEP_REASONING = { preserve_thinking: true, clear_thinking: false }
+
 /** One short request on the hand-declared route, at a chosen reasoning level or none. */
 function ask(ctx: Context, level?: string) {
   return assemble(ctx, {
@@ -118,7 +121,7 @@ describe('hand-declared providers', () => {
     })
   })
 
-  it('offers off through max on a custom model and sends only a chosen level', async () => {
+  it('offers off through max on a custom model and sends only a chosen level beside the fields that keep reasoning', async () => {
     const server = await mockServer([{ events: textEvents }, { events: textEvents }, { events: textEvents }, { events: textEvents }])
     const ctx = await harness(gateway(`${server.url}/v1`))
     const info = await ctx.llm.resolveModelInfo('acme-gateway', 'acme-large')
@@ -132,19 +135,88 @@ describe('hand-declared providers', () => {
     await ask(ctx, 'xhigh')
     const [plain, off, high, xhigh] = server.requests as Record<string, unknown>[]
     expect(plain).not.toHaveProperty('reasoning_effort')
-    expect(plain).not.toHaveProperty('chat_template_kwargs')
+    expect(plain?.['chat_template_kwargs']).toEqual(KEEP_REASONING)
     expect(off).toMatchObject({
       reasoning_effort: 'low',
-      chat_template_kwargs: { enable_thinking: false, thinking: false, reasoning_effort: 'low' },
+      chat_template_kwargs: { ...KEEP_REASONING, enable_thinking: false, thinking: false, reasoning_effort: 'low' },
     })
     expect(high).toMatchObject({
       reasoning_effort: 'high',
-      chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'high' },
+      chat_template_kwargs: { ...KEEP_REASONING, enable_thinking: true, thinking: true, reasoning_effort: 'high' },
     })
     expect(xhigh).toMatchObject({
       reasoning_effort: 'xhigh',
-      chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'xhigh' },
+      chat_template_kwargs: { ...KEEP_REASONING, enable_thinking: true, thinking: true, reasoning_effort: 'xhigh' },
     })
+  })
+
+  it('asks every request on a custom route to keep earlier reasoning unless the route turns it off', async () => {
+    const server = await mockServer([{ events: textEvents }, { events: textEvents }, { events: textEvents }])
+    const kept = await harness(gateway(`${server.url}/v1`))
+    await ask(kept)
+    await ask(kept)
+    const off = await harness(gateway(`${server.url}/v1`, { preserveThinking: false }))
+    await ask(off)
+    const [first, second, unrequested] = server.requests as Record<string, unknown>[]
+    // The same fields on every request, so the server renders the history the same way each time.
+    expect(first?.['chat_template_kwargs']).toEqual(KEEP_REASONING)
+    expect(second?.['chat_template_kwargs']).toEqual(KEEP_REASONING)
+    expect(unrequested).not.toHaveProperty('chat_template_kwargs')
+  })
+
+  it('keeps kwargs a model\'s own compat sets over the fields that keep reasoning', async () => {
+    const server = await mockServer([{ events: textEvents }])
+    const ctx = await harness(gateway(`${server.url}/v1`, {
+      models: [{
+        id: 'acme-large',
+        contextWindow: 65_536,
+        maxTokens: 4096,
+        reasoningEfforts: { high: 'high' },
+        compat: { thinkingFormat: 'chat-template', chatTemplateKwargs: { clear_thinking: true } },
+      }],
+    }))
+    await ask(ctx, 'high')
+    expect((server.requests[0] as Record<string, unknown>)['chat_template_kwargs'])
+      .toEqual({ preserve_thinking: true, clear_thinking: true })
+  })
+
+  it('drops only the fields that keep reasoning when a refusal names them, and keeps the chosen level', async () => {
+    // A Python template call that takes no such keyword, as some servers raise it.
+    const refusal = "TypeError: apply_chat_template() got an unexpected keyword argument 'clear_thinking'"
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: refusal } }) },
+      { events: textEvents },
+      { events: textEvents },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const reply = await ask(ctx, 'high')
+    expect(reply.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    const [refused, retried] = server.requests as Record<string, unknown>[]
+    expect(refused?.['chat_template_kwargs']).toMatchObject(KEEP_REASONING)
+    expect(retried?.['chat_template_kwargs']).toEqual({ enable_thinking: true, thinking: true, reasoning_effort: 'high' })
+    // Remembered for the route.
+    await ask(ctx)
+    expect(server.requests[2]).not.toHaveProperty('chat_template_kwargs')
+  })
+
+  it('drops the fields that keep reasoning on a refusal that names no field when no level was added', async () => {
+    const server = await mockServer([
+      { status: 400, body: JSON.stringify({ error: { message: 'Extra inputs are not permitted' } }) },
+      { events: textEvents },
+    ])
+    const ctx = await harness(gateway(`${server.url}/v1`))
+    const reply = await ask(ctx)
+    expect(reply.message.content).toEqual([{ type: 'text', text: 'hello' }])
+    expect(server.requests[1]).not.toHaveProperty('chat_template_kwargs')
+  })
+
+  it('passes a refusal through when it names only fields the request did not add', async () => {
+    const refusal = "TypeError: apply_chat_template() got an unexpected keyword argument 'clear_thinking'"
+    const server = await mockServer([{ status: 400, body: JSON.stringify({ error: { message: refusal } }) }])
+    const ctx = await harness(gateway(`${server.url}/v1`, { preserveThinking: false }))
+    const reply = await ask(ctx, 'high')
+    expect(reply.finish).toMatchObject({ kind: 'error', failure: { code: 'INVALID_REQUEST' } })
+    expect(server.requests).toHaveLength(1)
   })
 
   it('asks for high on a route whose server refuses a level above it, and keeps sending the fields', async () => {
@@ -192,7 +264,8 @@ describe('hand-declared providers', () => {
     // capability is reported unavailable instead of offering that control.
     expect((await ctx.llm.resolveModelInfo('acme-gateway', 'acme-large')).reasoning).toBeUndefined()
     await ask(ctx)
-    expect(server.requests[0]).not.toHaveProperty('chat_template_kwargs')
+    expect(server.requests[0]).not.toHaveProperty('reasoning_effort')
+    expect((server.requests[0] as Record<string, unknown>)['chat_template_kwargs']).toEqual(KEEP_REASONING)
 
     // A catalog route is unaffected: its models carry the metadata that makes
     // `off` actually disable thinking.

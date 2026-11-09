@@ -674,6 +674,12 @@ export interface RouteCatalogRequest {
    * {@link AUTO_REASONING_LEVELS}; the adapter sends their fields itself.
    */
   autoReasoningLevels?: boolean
+  /**
+   * On a route the installed catalog does not describe, ask the chat template
+   * of every `openai-completions` model to keep earlier reasoning; the adapter
+   * sends the fields itself.
+   */
+  preserveThinking?: boolean
   /** Modalities for a model neither the entry nor the catalog declares. */
   defaultInput: Model<Api>['input']
 }
@@ -862,6 +868,8 @@ export interface RouteCatalog {
   configuredMaxTokens: ReadonlyMap<string, number>
   /** Models given {@link AUTO_REASONING_LEVELS}, whose reasoning fields the adapter sends itself. */
   autoReasoningModels: ReadonlySet<string>
+  /** Models whose chat template the adapter asks to keep earlier reasoning. */
+  preserveThinkingModels: ReadonlySet<string>
 }
 
 /**
@@ -928,6 +936,7 @@ export function resolveRouteModels(
   const seen = new Set<string>()
   const configuredMaxTokens = new Map<string, number>()
   const autoReasoningModels = new Set<string>()
+  const preserveThinkingModels = new Set<string>()
   const resolveEntry = (entry: PiAiModelProfile): Model<Api> => {
     assertOfferedCompatFields(provider, `model "${entry.id}"`, entry.compat)
     if (entry.id.length === 0) invalid(provider, 'has a model with an empty id')
@@ -961,6 +970,7 @@ export function resolveRouteModels(
     const auto = request.autoReasoningLevels === true && base === undefined
       && entry.reasoningEfforts === undefined && api === 'openai-completions'
     if (auto) autoReasoningModels.add(entry.id)
+    if (request.preserveThinking === true && base === undefined && api === 'openai-completions') preserveThinkingModels.add(entry.id)
     return {
       // The installed entry lays the floor, and the fields below override it.
       // Enumerating instead would silently drop every `Model` field this
@@ -1010,6 +1020,7 @@ export function resolveRouteModels(
     configuredMaxTokens,
     modelErrors,
     autoReasoningModels: new Set([...autoReasoningModels].filter(id => !modelErrors.has(id))),
+    preserveThinkingModels: new Set([...preserveThinkingModels].filter(id => !modelErrors.has(id))),
   }
 }
 

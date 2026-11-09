@@ -439,18 +439,26 @@ describe('PiAiAdapter provider routing', () => {
     expect(result.finish).toEqual({ kind: 'stop' })
   })
 
-  it('learns the route\'s prompt rate from a completed stream and sizes the next first-byte budget from it', async () => {
-    const measured = [
+  /**
+   * A completed stream whose usage reports `promptTokens` input tokens.
+   * @param promptTokens - the reported prompt tokens.
+   * @returns the SSE payloads.
+   */
+  function measuredEvents(promptTokens: number): string[] {
+    return [
       '{"choices":[{"delta":{"role":"assistant","content":"hi"},"index":0,"finish_reason":null}]}',
-      '{"choices":[{"delta":{},"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":400,"completion_tokens":1}}',
+      `{"choices":[{"delta":{},"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":${promptTokens},"completion_tokens":1}}`,
       '[DONE]',
     ]
-    // Request 1: 400 prompt tokens answered after 40 ms teaches 10K tokens/s.
-    // Request 2: about 1000 tokens then get a 200 ms budget, so a server
-    // silent for 600 ms times out although the configured floor of 1 token/s
-    // would have allowed half an hour.
+  }
+
+  it('keeps the floor\'s first-byte budget after a prompt the server answered at once', async () => {
+    // Request 1: 400 prompt tokens answered after 40 ms, as a server answers a
+    // prompt it had cached: 10K tokens/s. Request 2: about 1000 tokens that
+    // the server reads for 600 ms. The configured floor of 1 token/s still
+    // sizes its budget, so the slower read completes instead of timing out.
     const server = await mockServer([
-      { events: measured, firstByteDelayMs: 40 },
+      { events: measuredEvents(400), firstByteDelayMs: 40 },
       { events: textEvents, firstByteDelayMs: 600 },
     ])
     const ctx = await harness(server.url, { streamIdleTimeoutMs: 40, minPromptTokensPerSecond: 1 })
@@ -460,8 +468,61 @@ describe('PiAiAdapter provider routing', () => {
       model: 'deepseek-flash',
       messages: [createUserMessage({ content: [{ type: 'text', text: 'y'.repeat(4_000) }], source: { kind: 'user' } })],
     })
-    expect(second.finish).toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
-    expect((second.finish as { failure: { message: string } }).failure.message).toMatch(/first byte/u)
+    expect(second.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('lengthens the next first-byte budget after a prompt the server read more slowly than the floor', async () => {
+    // Request 1: 2000 prompt tokens after at least 20 ms is at most 100K
+    // tokens/s, below the 1M tokens/s floor. Request 2: about 100K tokens,
+    // so its budget grows from the 300 ms idle interval to at least 2 s, and
+    // a server silent for 800 ms completes.
+    const server = await mockServer([
+      { events: measuredEvents(2_000), firstByteDelayMs: 20 },
+      { events: textEvents, firstByteDelayMs: 800 },
+    ])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 300, minPromptTokensPerSecond: 1_000_000 })
+    const first = await assemble(ctx, { model: 'deepseek-flash', messages: [] })
+    expect(first.finish).toEqual({ kind: 'stop' })
+    const second = await assemble(ctx, {
+      model: 'deepseek-flash',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'y'.repeat(400_000) }], source: { kind: 'user' } })],
+    })
+    expect(second.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('doubles the first-byte budget of the same prompt after a first-byte timeout', async () => {
+    // About 100K tokens at the 500K tokens/s floor is a 400 ms budget, which
+    // the first attempt exceeds; the second attempt waits about 800 ms and
+    // completes after 500 ms.
+    const server = await mockServer([
+      { events: textEvents, firstByteDelayMs: 1_000 },
+      { events: textEvents, firstByteDelayMs: 500 },
+    ])
+    const ctx = await harness(server.url, { streamIdleTimeoutMs: 100, minPromptTokensPerSecond: 500_000 })
+    const request = {
+      model: 'deepseek-flash',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'z'.repeat(400_000) }], source: { kind: 'user' } })],
+    }
+    const first = await assemble(ctx, request)
+    expect(first.finish).toMatchObject({ kind: 'error', failure: { code: 'TIMEOUT' } })
+    expect((first.finish as { failure: { message: string } }).failure.message).toMatch(/first byte timeout after 40\dms/u)
+    const second = await assemble(ctx, request)
+    expect(second.finish).toEqual({ kind: 'stop' })
+  })
+
+  it('reports an error event inside an accepted stream as a retryable server failure', async () => {
+    // oMLX's answer, with HTTP 200 already sent, to a tool call the model did not finish well-formed.
+    const server = await mockServer([{
+      events: [
+        '{"choices":[{"delta":{"role":"assistant","reasoning_content":"Let me read it."},"index":0,"finish_reason":null}]}',
+        '{"error":{"message":"Model output contains an unrecoverable tool call.","type":"server_error","param":null,"code":"incomplete_tool_call"}}',
+        '[DONE]',
+      ],
+    }])
+    const ctx = await harness(server.url)
+    const result = await assemble(ctx, { model: 'deepseek-flash', messages: [] })
+    expect(result.finish).toMatchObject({ kind: 'error', failure: { code: 'SERVER' } })
+    expect((result.finish as { failure: { message: string } }).failure.message).toMatch(/unrecoverable tool call/u)
   })
 
   it('names a stall after the first chunk an idle timeout, not a first-byte timeout', async () => {

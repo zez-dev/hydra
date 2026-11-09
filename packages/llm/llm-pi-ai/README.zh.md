@@ -85,8 +85,10 @@ kind: "package-reference"
 | `defaultMaxTokens` | `128,000` | 未描述模型的输出上限回退 |
 | `requestImagePixelBudget` | `4,194,304` | 每张确定性请求图片的总像素预算 |
 | `requestImageMaxBytes` | `1 MiB` | 每张请求图片在 base64 扩展前的编码字节目标 |
+| `streamIdleTimeoutMs` | `300000` | 流式开始后两个分块之间允许的最长静默；静默更久的流以 `TIMEOUT` 失败 |
+| `minPromptTokensPerSecond` | `50` | 首字节等待所假定的最快提示词处理速度：等待时长取 `streamIdleTimeoutMs` 与「提示词估算 token 数的两倍除以路由假定速率」中的较大者，因此慢速本地服务器读取大提示词时不会被误判为挂起。假定速率从此值开始且只会下降：读取提示词更慢的已完成流会降低它，首字节超时会让同一提示词的下次等待翻倍。更快的测量值永远不会提高它，因为服务器会立即应答已缓存的提示词，而下一个未缓存的提示词会在读取途中被切断并从头重试 |
 | `maxRequestImageBytes` | `20 MiB` | base64 图片载荷总上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败 |
-| `retryPolicy` | normal，5 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
+| `retryPolicy` | normal，12 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-pi-ai)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -106,6 +108,14 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 对于自托管 Chat Completions 端点，`thinkingTokenBudgetField` 选择推理预算参数，`vllmPriority` 在服务端启用优先级调度时设置整数调度优先级。模板参数接受 `$var: thinking.budget`。`openai-responses` 网关可设置 `supportsMaxOutputTokens: false` 来省略 `max_output_tokens`；Azure 与 Codex 传输会忽略这个共享兼容字段。这些控制均需显式启用；目录拥有的 Anthropic effort 和回退能力不是可配置开关。
 
+### 自定义路由上的推理级别
+
+已安装目录未描述的路由是自定义路由。当路由的 `reasoningLevels` 开启（默认开启）时，其未声明 `reasoningEfforts` 的 `openai-completions` 模型提供 off、low、medium、high、xhigh 与 max 六档；设置的 Models 页面在自定义提供方卡片上把它显示为「推理级别」开关。pi-ai 收到的此类模型被当作不推理的模型，因此不会自行添加字段，由适配器通过 pi-ai 的 `onPayload` 钩子把所选等级加入请求体：`chat_template_kwargs` 中的 `enable_thinking`、`thinking` 与 `reasoning_effort`（vLLM、SGLang 与 llama.cpp 上 Qwen、GLM、DeepSeek 和 gpt-oss chat template 读取的拼写），以及顶层的 `reasoning_effort`。`off` 发送关闭的 thinking 与 `low` 强度。未选择等级的请求不携带这些字段，因此沿用服务器自己的默认值。若服务器对携带这些字段的请求返回点名这些字段或拒绝未知请求字段的错误，该路由在本进程余下时间内不再发送它们，并会不带它们重新发送同一请求；被拒请求要求 `xhigh` 或 `max`（旧版 vLLM 不接受）时，会先以 `high` 重新发送，此后该路由这两档都以 `high` 发送。声明了 `reasoningEfforts` 的模型保留其声明，`reasoningLevels: false` 则不发送任何这些字段。
+
+### 自定义路由上的早先推理
+
+许多 chat template（包括 GLM 与 Qwen 的）只为最后一条用户消息之后的回答渲染模型的早先推理。于是每条新用户消息——包括其他插件在轮次中途以用户消息形式加入的提示——都会把此前所有回答中的推理移除，提示词从第一个携带推理的早先回答处开始改变，带前缀缓存的服务器只能把这一整段重新读取一遍。在自定义路由上，路由的 `preserveThinking` 默认开启，要求发往其 `openai-completions` 模型的每个请求保留这些推理：无论是否选择了等级，每个请求的 `chat_template_kwargs` 都携带 `preserve_thinking: true`（Qwen 拼写）与 `clear_thinking: false`（GLM 拼写），使服务器每次以相同方式渲染历史。保留的推理留在上下文中，会更快填满上下文。pi-ai 根据模型自身 `compat` 构建的 kwargs 优先于这两项。点名这两项的拒绝只丢弃它们；点名 `chat_template_kwargs` 的拒绝会连同所选等级一起丢弃；两者都未点名的拒绝在请求未携带等级时丢弃它们。被丢弃的字段在本进程余下时间内不会再发往该路由。`preserveThinking: false` 两项都不发送。
+
 ### 运行时更改配置
 
 每次操作捕获当前 `providers` Config 引用。新增或修改的 provider 配置在表单持久化前验证；未更改的目录故障仍可编辑。路由集合或重试策略变化时原子更新注册；如果其他适配器已拥有所请求的路由，则保留先前路由。
@@ -116,9 +126,13 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 
 ### 失败与恢复
 
-pi-ai 不提供的路由需要 `api`、`baseURL` 与非空 `models` 列表；无法服务的 profile 会在写入处被拒绝，并点名路由与模型。失败携带稳定 code：无法使用的凭据以 `INVALID_CREDENTIAL` 失败并点名路由与引用，`apiKeyEnv` 引用解析为空的路由以 `MISSING_CREDENTIAL` 失败，未配置模型以 `UNKNOWN_MODEL` 失败，终止性提供方失败则区分 `QUOTA` 与暂时性 `RATE_LIMIT`。`GenerateOptions.stop` 以 `UNSUPPORTED_OPTION` 被拒绝，因为 pi-ai 的通用流式 UI 无法跨提供方保证它。
+pi-ai 不提供的路由需要 `api`、`baseURL` 与非空 `models` 列表；无法服务的 profile 会在写入处被拒绝，并点名路由与模型。失败携带稳定 code：无法使用的凭据以 `INVALID_CREDENTIAL` 失败并点名路由与引用，`apiKeyEnv` 引用解析为空的路由以 `MISSING_CREDENTIAL` 失败，未配置模型以 `UNKNOWN_MODEL` 失败，终止性提供方失败则区分 `QUOTA` 与暂时性 `RATE_LIMIT`。适配器无法识别的失败为 `PI_AI_ERROR`，不会重试；但若它发生在服务器已接受请求并打开流之后，则为 `SERVER`，由重试策略重试，因为服务器是在作答途中失败的。模型的工具调用无法解析时，oMLX 会以 `incomplete_tool_call` 错误事件这样结束流；重新尝试会采样新的回答。内容过滤结束仍为 `PI_AI_ERROR`。`GenerateOptions.stop` 以 `UNSUPPORTED_OPTION` 被拒绝，因为 pi-ai 的通用流式 UI 无法跨提供方保证它。
 
 Config 更新严格验证发生变化的 provider。初始加载将已存储的目录故障保留为可编辑的 provider 诊断；未更改的故障 provider 不阻止其他编辑。可用模型仍可选择，无法解析的模型在网络 I/O 前失败。修复或删除问题配置会清除其诊断。
+
+在未解决提供方模型错误的情况下更改 `displayName`、`apiKeyEnv` 或 `baseURL`，保存仍会被拒绝。例如，某个 OpenRouter 路由的模型 `111` 需要 `api`，单独重命名该路由无法保存：请在同一编辑草稿中修复或删除该模型，再保存完整的提供方配置。中间修复会保留在草稿中，直到整个提供方通过验证；其他提供方可以独立保存。
+
+模型发现会解析每条路由的凭据配置。缺少必需凭据时得到空目录；其他解析错误会向上传播。使用原生认证或无需密钥的路由保留其配置的目录。该检查不会探测推理端点。
 
 只修改 `displayName`、`apiKeyEnv` 或 `baseURL` 而未解决提供方的模型配置错误时，保存仍会被拒绝。例如，OpenRouter 路由的模型 `111` 缺少 `api` 时，不能单独保存路由名称的修改：需要在同一份编辑草稿中修复或删除该模型，再保存完整的提供方配置。中间修复状态保留在草稿中，直到整条提供方配置通过校验；其他提供方可以独立保存。
 
@@ -217,7 +231,7 @@ git add packages/llm/llm-pi-ai/src/provider-data.generated.ts
 
 #### KV Cache 影响
 
-传给适配器的后续系统消息不会进入初始提示词，从而保留此前的请求前缀。这不改变 Agent loop 的提示词纳入行为；它仍在不支持原生系统更新的路由上合并更新。转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。
+传给适配器的后续系统消息不会进入初始提示词，从而保留此前的请求前缀。这不改变 Agent loop 的提示词纳入行为；它仍在不支持原生系统更新的路由上合并更新。转换保持逻辑请求顺序，图片句柄与卸载占位符则会添加模型可见文本。即使附件身份与请求字节保持稳定，执行世界路径变化也会改写历史句柄，并可能从该图片起阻止复用。更换适配器实例、提供方、模型或其他上游 token 具有相同的后缀影响。一次省略决策会把较早图片换成占位文本，因此复用在该消息处结束；省略永不回退，此后前缀保持稳定。历史如何渲染由服务器的 chat template 决定：在每条新用户消息处丢弃早先推理的模板，会从第一个携带推理的早先回答处改变渲染出的提示词，自定义路由的 `preserveThinking` 会要求它不要这样做。
 
 ### 提供方响应
 
