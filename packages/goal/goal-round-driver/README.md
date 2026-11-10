@@ -43,7 +43,7 @@ Mount the driver beside the goal service and the goal tools.
 |---|---|---|
 | `transientRetry` | absent | Absent: a round that ends in a request error, provider failure, or max-tokens cut disarms the goal. Present: the driver re-arms after `delayMs`, doubling per consecutive failure (capped at 2^8), and after `maxConsecutive` consecutive failures blocks the goal with reason `transient-retries-exhausted`; a successful round resets the count |
 
-Both fields are required when `transientRetry` is present. A user cancellation or explicit pause is never retried. `/goal resume` re-arms a goal blocked by exhausted retries, by `round-limit`, or paused, including after a process restart. The shipped `dsh-base` bundle sets 30 seconds and 48 consecutive failures.
+Both fields are required when `transientRetry` is present. A user cancellation or explicit pause is never retried. `/goal resume` re-arms a paused goal and a goal blocked by exhausted retries, including after a process restart; a goal blocked by `round-limit` resumes only after its `maxGoalRounds` is raised. The shipped `dsh-base` bundle sets 30 seconds and 48 consecutive failures.
 
 ```yaml
 - id: goal
@@ -64,7 +64,7 @@ With an exact live agent idle, an active armed goal, and remaining capacity, the
 
 ### When continuation stops
 
-A round starts only at whole-agent idle and, when the subagent service is loaded, only after the agent's progressing descendants settle; completion, pause, and blocking suppress continuation; a host-initiated pause also aborts the turn already running, while a model-initiated pause inside its own turn finishes normally. An edit only invalidates an in-flight round through the revision fence, and the driver continues the new revision. The driver also stops on its own when a turn ends on max tokens, a durability write fails, the agent is cancelled, the plugin unloads, or the round cap is exhausted — at the cap it records a blocker with the stable code `round-limit`. Cancellation never auto-restarts a round: a goal whose round was under way is paused at the next idle point, and a cancellation unrelated to a goal attempt only disarms continuation. Agent disposal, such as a graceful process shutdown or a reload of the plugin that owns the Agent, aborts the round with the `disposed` cause and only disarms continuation, so the goal stays active, as on plugin unload; user, parent, and hook cancellations still pause it. A round prompt still queued when the agent reaches idle is removed from the inbox, so later human input does not wait behind it; when the cancelled turn belonged to other work, continuation is disarmed rather than paused.
+A round starts only at whole-agent idle and, when the subagent service is loaded, only after the agent's progressing descendants settle; completion, pause, and blocking suppress continuation; a host-initiated pause also aborts the turn already running, while a model-initiated pause inside its own turn finishes normally. An edit only invalidates an in-flight round through the revision fence, and the driver continues the new revision. The driver also stops on its own when a turn ends on max tokens, a durability write fails, the agent is cancelled, the plugin unloads, or the round cap is exhausted — at the cap it records a blocker with the stable code `round-limit`. With `transientRetry` set, a round ending in a request error, provider failure, or max-tokens cut re-arms with backoff instead of stopping. Cancellation never auto-restarts a round: a goal whose round was under way is paused at the next idle point, and a cancellation unrelated to a goal attempt only disarms continuation. Agent disposal, such as a graceful process shutdown or a reload of the plugin that owns the Agent, aborts the round with the `disposed` cause and only disarms continuation, so the goal stays active, as on plugin unload; user, parent, and hook cancellations still pause it. A round prompt still queued when the agent reaches idle is removed from the inbox, so later human input does not wait behind it; when the cancelled turn belonged to other work, continuation is disarmed rather than paused.
 
 ### After resume, fork, or unload
 
@@ -84,7 +84,7 @@ This section explains how the driver schedules rounds without races; the observa
 
 - **Reservation, then admission.** At idle the driver reserves `roundsStarted + 1` for the current `{ goalId, revision }`, queues one `<goal_round>` prompt with a goal message source, and only an entered `user/message` increments `roundsStarted`. A reservation rejected as stale does not consume the round number.
 - **Race fences.** The `agent/pre-step` listener verifies the complete claimed record against the current goal both before and after downstream listeners, so a stale, cancelled, or competing prompt is rejected before its step enters. Human work that arrives before a reservation makes automatic work yield until the agent is idle again.
-- **Durability checkpoint.** `goal/changed` creates a durability obligation: before queuing work the driver awaits `ctx.sessions.flush()` and rechecks the goal revision and competing input after the await. A flush failure arriving through `agent/error` disarms continuation before another round can start.
+- **Durability checkpoint.** `goal/changed` creates a durability obligation: before queuing work the driver awaits `ctx.sessions.flush()` and rechecks the goal revision and competing input after the await. A flush failure arriving through `agent/error` disarms continuation before another round can start; with `transientRetry` set, a failure during a goal round counts as a failed round instead.
 - **Fail-closed teardown.** Teardown closes admission, disarms every live goal, cancels active work with the `parent` cause, and awaits the driver plus agent quiescence while its event fence remains installed.
 
 ### Source map
@@ -131,8 +131,6 @@ Append-only within an epoch: each admitted round extends the existing conversati
 
 ## Known Limitations and Deferred Work
 
-- **Retry state is process-local** — the consecutive-failure count and the pending re-arm delay live in memory; a restart resets the count to zero, and a goal left armed at restart is re-armed only by `dsh-goal-resume-on-open` or the supervisor, never by the driver.
-
 <a id="known-limitations-and-deferred-work"></a>
 
 
@@ -142,7 +140,8 @@ These limits define when the driver is a poor fit or needs special care. They ar
 - **Same-session execution only** — this package deliberately does not spawn a fresh agent, fork a session prefix, or implement Ralph-style independent attempts; that workflow belongs to its own plugin layer.
 - **Accepted-queue unload race** — Cordis plugin unload is asynchronous. A goal prompt already accepted by the agent inbox can begin and consume its round before unload starts; teardown then cancels the request, disarms the goal, and awaits quiescence. No later round starts.
 - **Round cap, not resource budget** — token, currency, time, and provider quota policies remain independent. Their session events are not attributed to the goal message or mapped into goal blocker codes.
-- **No abnormal auto-retry** — transient provider and persistence failures require a later human-authorized resume rather than an implicit retry policy.
+- **No abnormal auto-retry without `transientRetry`** — without that setting, transient provider and persistence failures require a later human-authorized resume rather than an implicit retry policy.
+- **Retry state is process-local** — the consecutive-failure count and the pending re-arm delay live in memory; a restart resets the count to zero, and a goal left armed at restart is re-armed only by `dsh-goal-resume-on-open` or the supervisor, never by the driver.
 
 <a id="dev-note"></a>
 ### Dev Note
@@ -150,6 +149,6 @@ These limits define when the driver is a poor fit or needs special care. They ar
 <details>
 <summary>Working context for maintainers — click to expand</summary>
 
-This Dev Note is working context for maintainers; it is explicitly non-authoritative. Open, undecided directions: an abnormal-failure retry policy and evaluator-backed round certification; both stay outside this package by design.
+This Dev Note is working context for maintainers; it is explicitly non-authoritative. Open, undecided direction: evaluator-backed round certification; it stays outside this package by design.
 
 </details>

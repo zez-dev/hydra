@@ -5,10 +5,14 @@
 ## Now
 
 - **Shipped:** v0.3.1, published 2026-11-10 as Latest (tag `v0.3.1` at `0441026544`), with the Mac DMG, the Linux AppImage, and the `.deb`. It holds the local-server fixes of `0ebd3794f1`, the `lean` Web agent preset, and the learning review off by default.
-- **In flight:** four small upstream DeepSeek Harness fixes (upstream pull requests 7527, 7570, 7768, and 7792) are being picked onto a local branch and tested; nothing is pushed.
+- **In flight:** nothing. On `main` since v0.3.1 and not yet released: four fixes picked from upstream DeepSeek Harness (upstream pull requests 7527, 7570, 7768, and 7792).
 - **Next:** Decide how tool results are shortened when the context window fills: `dsh-compaction-tool-result-pruner` cuts earlier results in place, so a local server reads the conversation again from the first cut. Decide what follows an oMLX memory refusal (HTTP 400 `prefill_memory_exceeded`), which fails the turn today: wait and retry, or compact. Decide how a finished background job reaches a session on a local route: today it adds a user-role notice and wakes an idle session. Bring the Web e2e expectations up to date with Hydra: `openSettings()` in `apps/web/tests/support.ts` still clicks the removed DeepSeek "Account menu", the `standard` catalog case in `apps/cli/tests/web-agent-presets.e2e.ts` lacks Hydra's own tools, and the `skill-tool-row` UI golden predates "Rewind to here". Open the 0.3.1 packages on a Mac and on an Ubuntu desktop; they were built and checksummed, not opened.
 
 ## Log
+
+### 2026-11-11
+- Landed four fixes picked from upstream DeepSeek Harness, each with its upstream test: "Load earlier" keeps working when the loaded page crosses a compaction, old sessions that hold version 1 or 2 subagent descriptors open again, a running goal stays active when its agent is disposed, and the Chinese label tells a goal that waits to continue from a paused one.
+- Each test fails with its fix removed. The goal-round-driver README pair was corrected with them.
 
 ### 2026-11-10
 - Checked the 0.3.1 provider code against a running oMLX 0.7.4.dev1 server with one Gemma model, through a recording proxy: an `incomplete_tool_call` error frame is retried and the session finishes, the custom-route `chat_template_kwargs` are accepted, and no learning-review request follows a turn.
