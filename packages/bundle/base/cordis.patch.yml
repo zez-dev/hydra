@@ -716,9 +716,9 @@
         minIntervalMs: 5000
         timeoutMs: 10000
 
-    # Learning: durable memory recalled into each session once approved, plus a
-    # turn-end extractor that proposes candidates; `/learn` approves or promotes
-    # them to skills. The extraction reuses the session's own model route.
+    # Learning: durable memory recalled into each session once approved, plus an
+    # opt-in turn-end extractor and on-request imports; `/learn` approves or
+    # promotes entries to skills. The extraction reuses the session's own model route.
     - id: memory
       name: '@deepseek-ai/dsh-memory'
       config:
@@ -745,10 +745,13 @@
     - id: learning
       name: '@deepseek-ai/dsh-learning'
       config:
-        # One extraction request after each turn with enough tool calls. Set
-        # false on a slow local route, where that request queues ahead of the
-        # next turn; /learn from and /research-ingest keep working.
-        reviewTurns: true
+        # Off: the extraction request after each turn with enough tool calls is
+        # a separate prompt on the session's own route, so on a local server it
+        # competes with the session for the server's prompt cache and queues
+        # ahead of the next turn. Set true to learn from every turn and to
+        # auto-file a research goal's journal findings; /learn from, /digest,
+        # and /research-ingest work either way.
+        reviewTurns: false
         # Everything learned is recalled at once; `candidate` would hold it for /learn approve.
         fileAs: approved
         minToolCalls: 3

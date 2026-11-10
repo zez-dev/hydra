@@ -7,7 +7,7 @@ kind: "package-group"
 
 ## Summary
 
-The learning group keeps what an agent discovered so a later session does not rediscover it. A turn-end extractor proposes candidates, a person approves them, and approved entries are recalled into each request as one block. A separate store holds per-role notes for delegated QA rounds, where the reader is not the next session but the next child agent taking the same role. Nothing in this group is recalled to a model without review or without the role it belongs to: candidates stay invisible until approved, and role notes reach only the child that shares their role and workspace.
+The learning group keeps what an agent discovered so a later session does not rediscover it. A turn-end extractor, off in the `dsh` base bundle, files what a turn discovered as approved entries or as candidates for a person to approve, and approved entries are recalled into each request as one block. A separate store holds per-role notes for delegated QA rounds, where the reader is not the next session but the next child agent taking the same role. Candidates stay invisible until approved, and role notes reach only the child that shares their role and workspace.
 
 ## Table of Contents
 

@@ -48,7 +48,7 @@ dsh --profile web --no-open --port 8080
 
 `minimal` agent preset 使用持久 Shell、`read_image` 工具和固定 persona，支持自动历史压缩以及会话空闲时的 `/compact` 命令。它复用 Host token meter，并拥有隔离的压缩后端。[压缩配置与保留策略](../../compaction/compaction-basic/README.zh.md#use-this-package) 沿用现有后端。图片读取复用 Host 文件系统和附件存储，要求模型支持图片输入；不加载文本读取、写入和编辑工具。
 
-`lean` agent preset 声明 `standard` 的全部条目，并停用工作流、插件管理、用量、诊断和错峰工具条目，因此本地推理服务器在每个新会话中预填充的固定提示更短。它的 `time-context` 条目最多每小时读取一次时钟（`refreshIntervalMs: 3600000`）。它排在标准模式之后，关闭代码工作工具时仍可选择。宿主条目仍会向会话的模型路由发送自己的请求：会话标题，以及在工具调用次数达到 `minToolCalls` 的轮次之后由 `learning` 发起的复盘；在该条目上设置 `reviewTurns: false` 即可关闭复盘。
+`lean` agent preset 声明 `standard` 的全部条目，并停用工作流、插件管理、用量、诊断和错峰工具条目，因此本地推理服务器在每个新会话中预填充的固定提示更短。它的 `time-context` 条目最多每小时读取一次时钟（`refreshIntervalMs: 3600000`）。它排在标准模式之后，关闭代码工作工具时仍可选择。宿主条目仍会向会话的模型路由发送自己的请求：会话标题；仅当 `learning` 条目设置 `reviewTurns: true` 时，还会在每个工具调用次数达到 `minToolCalls` 的轮次之后发起复盘；`dsh` base bundle 设置的是 `reviewTurns: false`。
 
 `--host` 与 `--port` 配置监听器；`--tls-cert` 与 `--tls-key` 让它直接提供 HTTPS；`--public-url` 指定 GUI 在剥离前缀的代理之后对外公告的公开 HTTP(S) 根，`--trusted-host` 则添加更多被接受的 authority。这些都在[监听、信任与公开部署](#public-deployments)中说明，而这些 flag 设置的 `tls` 字段记录在[载体的配置](../../../docs/subsystems/web-server.zh.md#config)中：
 

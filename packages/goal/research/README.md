@@ -7,7 +7,7 @@ kind: "package-reference"
 
 ## Summary
 
-`dsh-research` gives a long-running research goal a durable memory. `/research <objective>` creates or resumes a journal file under the workspace (`.dsh/research/<slug>/journal.md`) and a durable goal whose rounds follow a research loop: read the journal, pick the next hypothesis or step, run the experiment, record the result. The model records breakthroughs, hypotheses, experiments, and dead ends with the `journal` tool the moment they happen; the learning extractor files what it missed; and the journal digest is re-injected into every request as one digest-stable `user/message`, so a compacted context or a new session continues from the current state.
+`dsh-research` gives a long-running research goal a durable memory. `/research <objective>` creates or resumes a journal file under the workspace (`.dsh/research/<slug>/journal.md`) and a durable goal whose rounds follow a research loop: read the journal, pick the next hypothesis or step, run the experiment, record the result. The model records breakthroughs, hypotheses, experiments, and dead ends with the `journal` tool the moment they happen; the learning review, when turned on, files what it missed; and the journal digest is re-injected into every request as one digest-stable `user/message`, so a compacted context or a new session continues from the current state.
 
 ## Table of Contents
 
@@ -59,7 +59,7 @@ Each `journal` breakthrough is announced through `dsh-notify` as `researchBreakt
 | [`src/instruction.ts`](src/instruction.ts) | `/research` input parsing, the objective prefix, and the round instruction |
 | [`src/types.ts`](src/types.ts) | Journal, entry, store, and service types |
 
-A research goal is an ordinary goal whose objective starts with `[research:<slug>] `, so the round driver, the transient retry, the supervisor, and the evaluator apply unchanged; `activeFor(sessionId)` derives the slug from the live goal, so nothing beyond the goal and the file is persisted. The recall message is added, kept, or replaced exactly like `dsh-memory`'s: it is re-sent only when the digest changed or the previous copy left the model-visible surface, which is what carries the journal across compaction. Auto-capture lives in `dsh-learning`: when a session has an active research goal, its turn-end extraction uses a research prompt and files findings into the journal with source `auto` instead of proposing memories.
+A research goal is an ordinary goal whose objective starts with `[research:<slug>] `, so the round driver, the transient retry, the supervisor, and the evaluator apply unchanged; `activeFor(sessionId)` derives the slug from the live goal, so nothing beyond the goal and the file is persisted. The recall message is added, kept, or replaced exactly like `dsh-memory`'s: it is re-sent only when the digest changed or the previous copy left the model-visible surface, which is what carries the journal across compaction. Auto-capture lives in [`dsh-learning`](../../learning/learning/README.md) and runs only when its `reviewTurns` is `true`; the `dsh` base bundle sets `false`, so a profile patch has to turn the review on. With the review on, the turn-end extraction of a session with an active research goal uses a research prompt and files findings into the journal with source `auto` instead of proposing memories.
 
 Extension points: `ctx.research.dir`, the configured journal directory, for a plugin that only reads journal files; `ctx.research.storeFor(cwd)` for other plugins that read or write journals, `ctx.research.record()` for automated findings, and the `research/change` event.
 
@@ -156,7 +156,7 @@ Prefix-stable: the schema does not change between requests.
 - **The bridge sees live workspaces only** — a breakthrough is mirrored into memory when a live session's workspace owns the journal that changed; edits to a journal file of a workspace with no live session are mirrored the next time a session records in it.
 - **An outside edit that restores a recent own write is ignored** — the store skips any of the last 16 texts it wrote to a file, because the watcher can report a write after a later one landed and re-reading it would roll the journal back; an editor's undo to exactly one of those texts is skipped until the next change.
 - **Entries never merge or age** — the journal grows until a human prunes the file; within the recall byte cap the `<research_journal>` block keeps next steps, dead ends, criteria, open hypotheses, and recent experiments first, then the newest breakthroughs, and a section cut short says how many more the journal file holds.
-- **Auto-capture depends on the extractor's route** — `dsh-learning` reuses the session's model route unless configured otherwise; a session that never made a request has nothing to extract with.
+- **Auto-capture depends on the learning review and its route** — it runs only when `dsh-learning`'s `reviewTurns` is `true`, which the `dsh` base bundle sets `false`; the review reuses the session's model route unless configured otherwise, so a session that never made a request has nothing to extract with.
 
 -----
 

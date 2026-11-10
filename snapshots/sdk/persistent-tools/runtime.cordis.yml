@@ -1,0 +1,16 @@
+# This recording holds the learning review that follows its turn. The base
+# bundle leaves that review off, so this scenario turns it on. A patch row
+# replaces the whole config, so the bundle's other learning settings are
+# restated here.
+- id: learning
+  config:
+    reviewTurns: true
+    fileAs: approved
+    minToolCalls: 3
+    maxCandidatesPerTurn: 5
+    maxTranscriptBytes: 24000
+    maxOutputTokens: 512
+    timeoutMs: 60000
+    errorPatterns:
+      enabled: true
+      maxPairsPerTurn: 5

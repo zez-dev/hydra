@@ -192,6 +192,7 @@ const SDK_ASSERTIONS: Readonly<Record<string, SdkAssertions>> = {
   },
   'persistent-tools': {
     environment: { DSH_SYSTEM_PROMPT: MINIMAL_SYSTEM_PROMPT },
+    patches: [fileURLToPath(new URL('./persistent-tools/runtime.cordis.yml', import.meta.url))],
     expectedTools: {
       bash: ['command'], doctor: [], journal: ['action'], knowledge_add: ['path'], memory: ['action'],
       run_experiment: ['title', 'command'], str_replace_editor: ['command', 'path'], usage: [], working_directory: [],
