@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-doctor",
   "description": "Environment self-check for Hydra: /doctor and a read-only doctor tool reporting home, workspace, sandbox, native addon, git, plugins, tool-calling compat, and credentials with a fix per row",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publishConfig": {
     "access": "public"
   },

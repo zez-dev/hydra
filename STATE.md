@@ -4,11 +4,17 @@
 
 ## Now
 
-- **Shipped:** v0.3.0, published 2026-11-04 as Latest. On `main` since then and not yet released: the `lean` Web agent preset for local inference servers (`packages/bundle/web-app/presets/lean.patch.yml`).
-- **In flight:** release 0.3.1, requested 2026-11-09, waits on the owner's call about the Gemma sweep; its draft release notes predate the `lean` preset. Its learning-review-off change is staged, uncommitted, in worktree `project-review-467c4e`. When that lands, the Lean paragraph in `packages/bundle/web-app/README.md` (en, zh) must say the learning review runs only with `reviewTurns: true`.
-- **Next:** bring the Web e2e expectations up to date with Hydra: `openSettings()` in `apps/web/tests/support.ts` still clicks the removed DeepSeek "Account menu", the `standard` catalog case in `apps/cli/tests/web-agent-presets.e2e.ts` lacks Hydra's own tools, and the `skill-tool-row` UI golden predates "Rewind to here".
+- **Shipped:** v0.3.0, published 2026-11-04 as Latest.
+- **In flight:** release 0.3.1. This commit carries the version; the builds and the GitHub release follow. It holds the local-server fixes of `0ebd3794f1`, the `lean` Web agent preset, and the learning review off by default.
+- **Next:** Decide how tool results are shortened when the context window fills: `dsh-compaction-tool-result-pruner` cuts earlier results in place, so a local server reads the conversation again from the first cut. Decide what follows an oMLX memory refusal (HTTP 400 `prefill_memory_exceeded`), which fails the turn today: wait and retry, or compact. Decide how a finished background job reaches a session on a local route: today it adds a user-role notice and wakes an idle session. Bring the Web e2e expectations up to date with Hydra: `openSettings()` in `apps/web/tests/support.ts` still clicks the removed DeepSeek "Account menu", the `standard` catalog case in `apps/cli/tests/web-agent-presets.e2e.ts` lacks Hydra's own tools, and the `skill-tool-row` UI golden predates "Rewind to here".
 
 ## Log
+
+### 2026-11-10
+- Checked the 0.3.1 provider code against a running oMLX 0.7.4.dev1 server with one Gemma model, through a recording proxy: an `incomplete_tool_call` error frame is retried and the session finishes, the custom-route `chat_template_kwargs` are accepted, and no learning-review request follows a turn.
+- In every recorded session, headless and the Standard preset, the system message and the tool list stayed identical and requests were append-only, through a failed read, a failed fetch, a bash exit code 2, a call moved to the background, and the turn a finished background job starts.
+- On a scripted server with `contextWindow: 32768` the tool-result pruner rewrote earlier tool results on every second or third tool call once the estimate passed 80% of the window; the first cut changed 94% of the text the server had cached.
+- Landed the learning review off by default (`reviewTurns: false` in the base bundle, with its upgrade guide) and version 0.3.1.
 
 ### 2026-11-09
 - Added the `lean` preset: the `standard` rows with the workflow, plugin-management, usage, doctor, and off-peak tool rows disabled; listed after Standard and visible with Coding Tools off; copy in all eight UI locales.

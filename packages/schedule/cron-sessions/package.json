@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-cron-sessions",
   "description": "Durable cron schedules that start fresh DeepSeek Harness sessions on a timer: /cron add|list|enable|disable|run|remove, catch-up at boot, and outcome records",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publishConfig": {
     "access": "public"
   },

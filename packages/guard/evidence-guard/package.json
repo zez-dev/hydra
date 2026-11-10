@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-evidence-guard",
   "description": "Evidence guard plugins: an evidence standard in every system prompt and an end-of-turn review of partial reads, unchecked changes, and unverified claims",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publishConfig": {
     "access": "public"
   },

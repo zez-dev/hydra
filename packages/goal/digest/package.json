@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-digest",
   "description": "Daily digest reports for Hydra: /digest and a scheduled writer summarizing goals, tickets, checkpoints, memory, spend, cron runs, and research breakthroughs into .dsh/reports",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publishConfig": {
     "access": "public"
   },
