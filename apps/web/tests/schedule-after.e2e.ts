@@ -916,7 +916,7 @@ describe.skipIf(MODE === 'record')('web e2e: active Schedule catalog', () => {
       if (row === undefined) throw new Error(`missing shipped preset row ${id}`)
       return (row.config as { plugins: Array<{ id?: string; name?: string; disabled?: boolean }> }).plugins
     }
-    for (const id of ['preset-standard', 'preset-ptc', 'preset-cordis']) {
+    for (const id of ['preset-standard', 'preset-lean', 'preset-ptc', 'preset-cordis']) {
       const plugins = presetPlugins(id)
       expect(plugins.filter(row => row.id === 'time-context'
         && row.name === '@deepseek-ai/dsh-time-context')).toHaveLength(1)

@@ -1,0 +1,8 @@
+version: 1
+scenario: lean-preset
+profile: web
+composition: web-lean
+recording: authored
+header:
+  class: web-lean
+  pin: true

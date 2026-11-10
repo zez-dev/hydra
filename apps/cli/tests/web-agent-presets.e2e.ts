@@ -283,7 +283,7 @@ describe('the shipped Web composition', () => {
   it('supplies both shipped presets, and only those, from the system root', async () => {
     const listed = await ctx.agentPresets.list()
 
-    expect(listed.map(preset => preset.id).sort()).toEqual(['cordis', 'minimal', 'ptc', 'standard'])
+    expect(listed.map(preset => preset.id).sort()).toEqual(['cordis', 'lean', 'minimal', 'ptc', 'standard'])
     expect(listed.every(preset => !('path' in preset))).toBe(true)
     expect(ctx.agentPresets.defaultId).toBe('standard')
   })
@@ -308,6 +308,44 @@ describe('the shipped Web composition', () => {
         'workflow', 'working_directory', 'write',
       ])
       expect(ctx.commands.find(handle.agent, 'goal')).toBeDefined()
+    } finally {
+      await handle.dispose()
+    }
+  })
+
+  it('declares `lean` as the `standard` rows with the heavy tools disabled and hourly clock readings', () => {
+    type Row = { id: string; disabled?: unknown; config?: unknown }
+    const composed = composeEntries([webPatches('test')])
+    const plugins = (id: string): Row[] => (composed.find(row => row.id === `preset-${id}`)!.config as { plugins: Row[] }).plugins
+    const dropped = ['workflow-ptc', 'tool-workflow', 'tool-doctor', 'tool-session-usage', 'tool-off-peak', 'tool-plugin-manager']
+    const lean = (rows: Row[]): Row[] => rows.map(row => ({
+      ...row,
+      ...dropped.includes(row.id) ? { disabled: true } : {},
+      ...row.id === 'time-context' ? { config: { refreshIntervalMs: 3_600_000 } } : {},
+      ...Array.isArray(row.config) ? { config: lean(row.config as Row[]) } : {},
+    }))
+
+    expect(plugins('lean')).toEqual(lean(plugins('standard')))
+  })
+
+  it('composes the `standard` catalog without workflow and plugin management from `lean`', async () => {
+    const handle = await ctx.agents.create({
+      sessionId: SessionId('preset-lean'),
+      setup: agentCtx => ctx.agentPresets.mount(agentCtx, 'lean').then(() => undefined),
+    })
+    try {
+      expect(toolNames(ctx, handle.agent).filter(name => name !== 'glob' && name !== 'grep')).toEqual([
+        'ask_user_question', 'bash', 'create_goal', 'edit', 'exit_plan_mode',
+        'get_goal', 'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'journal', 'knowledge_add',
+        'list_agents', 'list_subagent_models', 'memory', 'present', 'read', 'read_image', 'run_experiment',
+        'schedule_create', 'schedule_delete', 'schedule_list', 'schedule_update',
+        'send_message', 'skill',
+        'subagent', 'subagent_fork', 'todo_write', 'update_goal', 'web_fetch', 'web_search',
+        'working_directory', 'write',
+      ])
+      expect(ctx.commands.find(handle.agent, 'goal')).toBeDefined()
+      const assembly = await ctx.systemPrompt.assemble({ scope: handle.agent })
+      expect(assembly.sections.map(section => section.text).join('\n')).not.toContain('Use the workflow tool')
     } finally {
       await handle.dispose()
     }
@@ -793,7 +831,7 @@ describe.each(['web', 'desktop'] as const)('%s native subagent bundles', (surfac
         expect(productCtx.subagents.list().filter(name => (products as readonly string[]).includes(name)).sort())
           .toEqual([...installed].sort())
         const expected = installed.map(toolName).sort()
-        for (const preset of ['standard', 'cordis', 'ptc', 'minimal']) {
+        for (const preset of ['standard', 'lean', 'cordis', 'ptc', 'minimal']) {
           expect(await presetTools(productCtx, preset)).toEqual(expected)
         }
         const handle = await productCtx.agents.create({
@@ -826,7 +864,7 @@ describe.each(['web', 'desktop'] as const)('%s native subagent bundles', (surfac
         expect([...productCtx.loader.entries()].find(entry => entry.options.id === `subagent-${product}`)?.options.config)
           .toMatchObject(providerConfig)
       }
-      for (const preset of ['standard', 'ptc', 'minimal']) {
+      for (const preset of ['standard', 'lean', 'ptc', 'minimal']) {
         expect(await presetTools(productCtx, preset)).toEqual(['custom_claude_code'])
       }
     } finally { await productCtx.fiber.dispose() }
@@ -1133,6 +1171,79 @@ describe('a profile patch stored before Developer tools owned preset selection',
     })
     try {
       expect(toolNames(legacy, handle.agent)).toEqual(['bash', 'read_image', 'working_directory'])
+    } finally {
+      await handle.dispose()
+    }
+  })
+})
+
+/** One self-contained preset child row for profiles that replace a preset's plugin list. */
+const TODO_ROW = { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo', config: { allowParallelInProgress: true } }
+
+describe('a profile saved before the lean preset took roster slot 2', () => {
+  let saved: Context
+  let savedHome: string
+  beforeAll(async () => {
+    savedHome = await mkdtemp(join(tmpdir(), 'dsh-web-presets-saved-'))
+    // A saved default plus a whole-config override of a shipped preset that
+    // still carries that preset's earlier `order`.
+    saved = await bootWeb(savedHome, [
+      { id: SETTINGS_NAMESPACE, config: { default: 'standard', selectedDefault: 'ptc' } },
+      { id: 'preset-ptc', config: { id: 'ptc', order: 2, plugins: [TODO_ROW] } },
+    ])
+  }, 120_000)
+  afterAll(async () => {
+    await saved?.fiber.dispose()
+    await rm(savedHome, { recursive: true, force: true })
+  })
+
+  it('keeps the saved default and the override, and lists lean before the tied ptc', async () => {
+    expect(saved.agentPresets.defaultId).toBe('ptc')
+    const roster = (await saved.agentPresets.remoteExportList()).presets
+    expect(roster.map(row => row.id)).toEqual(['standard', 'lean', 'ptc', 'minimal', 'cordis'])
+    expect(roster.filter(row => row.isDefault).map(row => row.id)).toEqual(['ptc'])
+
+    const handle = await saved.agents.create({
+      sessionId: SessionId('preset-saved-before-lean'),
+      setup: agentCtx => saved.agentPresets.mount(agentCtx).then(() => undefined),
+    })
+    try {
+      // The stored `ptc` override, composed as the saved default.
+      expect(toolNames(saved, handle.agent)).toEqual(['todo_write', 'working_directory'])
+    } finally {
+      await handle.dispose()
+    }
+  })
+})
+
+describe('a profile that already declared its own `lean` preset', () => {
+  let own: Context
+  let ownHome: string
+  beforeAll(async () => {
+    ownHome = await mkdtemp(join(tmpdir(), 'dsh-web-presets-own-lean-'))
+    own = await bootWeb(ownHome, [{ insert: [{
+      id: 'preset-lean', name: '@deepseek-ai/dsh-agent-preset',
+      config: { id: 'lean', name: 'My lean', order: 9, plugins: [TODO_ROW] },
+    }] }])
+  }, 120_000)
+  afterAll(async () => {
+    await own?.fiber.dispose()
+    await rm(ownHome, { recursive: true, force: true })
+  })
+
+  it('replaces the shipped row with the profile declaration', async () => {
+    expect([...own.loader.entries()].filter(entry => entry.options.id === 'preset-lean')).toHaveLength(1)
+    const roster = (await own.agentPresets.remoteExportList()).presets
+    expect(roster.map(row => row.id)).toEqual(['standard', 'ptc', 'minimal', 'cordis', 'lean'])
+    expect(roster.find(row => row.id === 'lean')).toMatchObject({ name: 'My lean' })
+    expect(roster.find(row => row.id === 'lean')).not.toHaveProperty('broken')
+
+    const handle = await own.agents.create({
+      sessionId: SessionId('preset-own-lean'),
+      setup: agentCtx => own.agentPresets.mount(agentCtx, 'lean').then(() => undefined),
+    })
+    try {
+      expect(toolNames(own, handle.agent)).toEqual(['todo_write', 'working_directory'])
     } finally {
       await handle.dispose()
     }

@@ -3,7 +3,7 @@ import type { AnalyticsPreset } from '@deepseek-ai/dsh-client-product-analytics/
 
 /** Resolve a known selection by preset id without treating an unloaded state as a default.
  * @param id - selected preset id; an empty id means unknown.
- * @returns the built-in category for a shipped id, other for any other id, or undefined until known.
+ * @returns the built-in category for a shipped id that has one, other for any other id (including `lean`), or undefined until known.
  */
 export function analyticsMode(id: string): AnalyticsPreset | 'other' | undefined {
   if (id === '') return undefined

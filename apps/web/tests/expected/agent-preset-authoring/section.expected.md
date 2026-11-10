@@ -20,6 +20,12 @@
       - 'button "如何使用: 标准模式"': 如何使用
       - 'button "查看配置: 标准模式"': 查看配置
     - listitem:
+      - 'button "设为新任务默认: 精简模式"':
+        - text: 精简模式 内置
+        - code: lean
+        - text: 在标准模式基础上去掉 Agent 的工作流、插件管理、用量和诊断工具。固定提示更短，本地模型开始任务更快。
+      - 'button "查看配置: 精简模式"': 查看配置
+    - listitem:
       - 'button "设为新任务默认: PTC 模式"':
         - text: PTC 模式 内置
         - code: ptc

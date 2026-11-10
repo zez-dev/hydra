@@ -53,9 +53,9 @@ Electron 将构建内联的 `DSH_CLIENT_VERSION` 传给 Host；埋点与导出�
 
 官方导航上报新会话、插件、自动化任务和“更多”的点击及其实际位置：`sidebar`、`sidebar_more` 或 `titlebar`。从左侧栏“更多”菜单打开自动化任务计为 `sidebar_more`，不计为侧栏直接点击。历史上不带 `position` 的 `sidebar_menu_click` 记录保持未归属。“更多”菜单动作区分左侧栏、会话和右侧栏区域。不采集第三方入口标识和自定义预设名称。
 
-模式选择器中被接受的不同选择上报为直接切换：未绑定会话时的暂存选择，或空白会话中 Host 已应用的选择。自定义来源模式记为 `other`，只上报内置目标。默认值修改、自动回退、恢复和创造模式入口均不计入。每次切换记录操作时已知的代码工作工具设置；设置未知时不上报。`code_work_view_toggle` 在该设置修改成功时上报。
+模式选择器中被接受的不同选择上报为直接切换：未绑定会话时的暂存选择，或空白会话中 Host 已应用的选择。精简模式和自定义来源模式记为 `other`，只上报有内置分类的目标。默认值修改、自动回退、恢复和创造模式入口均不计入。每次切换记录操作时已知的代码工作工具设置；设置未知时不上报。`code_work_view_toggle` 在该设置修改成功时上报。
 
-`send_button_click` 携带 `is_new_session`（提交时会话仍为空白会话时为 true）和 `agent_preset`（会话预设，取 `creator`、`ptc`、`minimal`、`standard`，自定义预设为 `other`）；预设未知时省略 `agent_preset`。采集端在 OTLP 日志记录上接收 `eventName`，业务字段位于其 `attributes`；仓库代码不提供数仓表或看板。
+`send_button_click` 携带 `is_new_session`（提交时会话仍为空白会话时为 true）和 `agent_preset`（会话预设，取 `creator`、`ptc`、`minimal`、`standard`，精简模式和自定义预设为 `other`）；预设未知时省略 `agent_preset`。采集端在 OTLP 日志记录上接收 `eventName`，业务字段位于其 `attributes`；仓库代码不提供数仓表或看板。
 
 <a id="understand-the-implementation"></a>
 ## 了解实现

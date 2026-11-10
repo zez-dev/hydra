@@ -190,7 +190,7 @@ describe('optional bundles', () => {
       const warnings: string[] = []
       const composed = composeEntries([...shipped, ...selected], warning => warnings.push(warning))
       expect(warnings).toEqual([])
-      for (const id of ['preset-standard', 'preset-cordis', 'preset-ptc', 'preset-minimal']) {
+      for (const id of ['preset-standard', 'preset-lean', 'preset-cordis', 'preset-ptc', 'preset-minimal']) {
         expect(presetRows(composed, id)).toEqual(presetRows(baseline, id))
       }
       const ids = flattenRows(composed).map(row => row.id)
@@ -250,7 +250,7 @@ describe('optional bundles', () => {
       walk((row.config as { plugins: PresetRow[] }).plugins)
       return flat
     }
-    for (const id of ['preset-standard', 'preset-cordis', 'preset-ptc']) {
+    for (const id of ['preset-standard', 'preset-lean', 'preset-cordis', 'preset-ptc']) {
       const plugins = presetPlugins(id)
       for (const plugin of [
         { id: 'time-context', name: '@deepseek-ai/dsh-time-context' },
@@ -261,7 +261,7 @@ describe('optional bundles', () => {
         expect(matches[0]?.disabled).not.toBe(true)
       }
     }
-    for (const id of ['preset-standard', 'preset-cordis', 'preset-ptc']) {
+    for (const id of ['preset-standard', 'preset-lean', 'preset-cordis', 'preset-ptc']) {
       for (const rowId of ['tool-subagent', 'tool-subagent-fork']) {
         expect(presetPlugins(id).find(plugin => plugin.id === rowId)?.config).not.toHaveProperty('toolFilter')
       }

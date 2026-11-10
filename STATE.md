@@ -1,0 +1,17 @@
+# Hydra — state
+
+<!-- Written by /wrap at session close. Newest log entry on top; keep about five. -->
+
+## Now
+
+- **Shipped:** v0.3.0, published 2026-11-04 as Latest. On `main` since then and not yet released: the `lean` Web agent preset for local inference servers (`packages/bundle/web-app/presets/lean.patch.yml`).
+- **In flight:** release 0.3.1, requested 2026-11-09, waits on the owner's call about the Gemma sweep; its draft release notes predate the `lean` preset. Its learning-review-off change is staged, uncommitted, in worktree `project-review-467c4e`. When that lands, the Lean paragraph in `packages/bundle/web-app/README.md` (en, zh) must say the learning review runs only with `reviewTurns: true`.
+- **Next:** bring the Web e2e expectations up to date with Hydra: `openSettings()` in `apps/web/tests/support.ts` still clicks the removed DeepSeek "Account menu", the `standard` catalog case in `apps/cli/tests/web-agent-presets.e2e.ts` lacks Hydra's own tools, and the `skill-tool-row` UI golden predates "Rewind to here".
+
+## Log
+
+### 2026-11-09
+- Added the `lean` preset: the `standard` rows with the workflow, plugin-management, usage, doctor, and off-peak tool rows disabled; listed after Standard and visible with Coding Tools off; copy in all eight UI locales.
+- Measured on the fake oMLX rails, first request: 45,303 → 36,905 characters of system prompt plus tool schemas (−18.5%), 37 → 33 tools; the remaining schemas are byte-identical to Standard's.
+- Lean reads the clock at most hourly (`refreshIntervalMs: 3600000`), so fewer mid-turn user-role messages force a re-prefill on chat templates that drop earlier reasoning.
+- Added the authored `snapshots/web/lean-preset` scenario (header class `web-lean`), the exact-catalog e2e case for `lean`, and e2e cases showing that a saved default, a stale-order preset override, and a profile's own `lean` declaration all survive the change.

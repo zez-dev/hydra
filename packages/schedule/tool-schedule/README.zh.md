@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当某个 preset 的 agent 需要管理持久提醒时，把下面这一行加入该 preset 的插件列表。随产品发布的 Web `standard`、`cordis` 与 `ptc` preset 会挂载它；`minimal` 不会。
+当某个 preset 的 agent 需要管理持久提醒时，把下面这一行加入该 preset 的插件列表。随产品发布的 Web `standard`、`lean`、`cordis` 与 `ptc` preset 会挂载它；`minimal` 不会。
 
 ### 何时选用
 

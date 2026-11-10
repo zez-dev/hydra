@@ -25,7 +25,7 @@ Use `dsh-tool-schedule` to let an agent create, list, edit, and delete durable H
 <a id="use-this-package"></a>
 ## Use this package
 
-Add the row below to a preset's plugin list when that preset's agents should manage durable reminders. The shipped Web `standard`, `cordis`, and `ptc` presets mount it; `minimal` does not.
+Add the row below to a preset's plugin list when that preset's agents should manage durable reminders. The shipped Web `standard`, `lean`, `cordis`, and `ptc` presets mount it; `minimal` does not.
 
 ### When to choose it
 

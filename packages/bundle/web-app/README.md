@@ -48,6 +48,8 @@ Saved model selections override the composition default. The settings card accep
 
 The `minimal` agent preset uses a persistent shell, the `read_image` tool, and a fixed persona, with automatic history compaction and the idle-session `/compact` command. It shares the Host token meter and owns an isolated compaction backend. [Compaction configuration and retention](../../compaction/compaction-basic/README.md#use-this-package) follow the existing backend. Image reads reuse the Host filesystem and attachment store and require an image-capable model; text read, write, and edit tools remain excluded.
 
+The `lean` agent preset declares the `standard` rows with the workflow, plugin-management, usage, doctor, and off-peak tool rows disabled, so a local inference server prefills a shorter fixed prompt for every new session. Its `time-context` row reads the clock at most hourly (`refreshIntervalMs: 3600000`). It is listed after Standard and stays selectable with Coding Tools off. Host rows still send their own requests to the session's model route: the session title, and the `learning` review after a turn with at least `minToolCalls` tool calls, which `reviewTurns: false` on that row turns off.
+
 `--host` and `--port` configure the listener; `--tls-cert` and `--tls-key` make it serve HTTPS; `--public-url` names the advertised public HTTP(S) root the GUI is reached at behind a prefix-stripping proxy, and `--trusted-host` adds further accepted authorities. All are described under [Listening, trust, and public deployments](#public-deployments), and the `tls` field those flags set is documented with the [carrier's config](../../../docs/subsystems/web-server.md#config):
 
 | Field | Default | Meaning |
@@ -57,7 +59,7 @@ The `minimal` agent preset uses a persistent shell, the `read_image` tool, and a
 | `surfaceContext` | `true` | Expose `DSH_WEB_URL` to the agent's shell commands |
 | `publicUrl` | Unset | Advertised HTTP(S) application root; otherwise announce the bind-address URL |
 
-The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
+The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-web-app) lists this runtime plugin's accepted fields and their JSDoc. The shipped composition inserts the `schedule` service row and the `ui-schedule` task page row, while the clock reading and the four reminder tools belong to the `standard`, `lean`, `cordis`, and `ptc` presets. The `tool-subagent` and `tool-subagent-fork` rows in those presets deny the four tools, so a delegated child's scope never lists them.
 
 <a id="public-deployments"></a>
 ### Listening, trust, and public deployments
@@ -98,7 +100,7 @@ Each browser session selects a shipped preset (`standard` by default). The Agent
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The bundle is one patch layer of five files plus one runtime glue plugin: `cordis.patch.yml` carries the host rows and the preset registry, and each `presets/<id>.patch.yml` inserts one shipped preset declaration, applied in the order `dsh.bundle.patch` lists them. The storage stack and projection cache come from `dsh-base`; the web overlay's workspace and message-feedback rows consume that shared `storageDomain` service. The patch restates the surface-specific values the base deliberately omits, inserts the web-only host rows and browser roster, then moves the agent plane behind presets. The glue plugin owns dist serving, the advertised application URL, the plain-HTTP exposure warning, the bash variable, and the readiness announcements. The `office-to-pdf` row mounts one lazy [Office conversion provider](../../document/office-to-pdf/README.md) for Host consumers, including Desktop compositions using this bundle. The conversion service's Remote methods authorize preview reads, while Document Preview owns the Office viewer and Client cache.
+The bundle is one patch layer of six files plus one runtime glue plugin: `cordis.patch.yml` carries the host rows and the preset registry, and each `presets/<id>.patch.yml` inserts one shipped preset declaration, applied in the order `dsh.bundle.patch` lists them. The storage stack and projection cache come from `dsh-base`; the web overlay's workspace and message-feedback rows consume that shared `storageDomain` service. The patch restates the surface-specific values the base deliberately omits, inserts the web-only host rows and browser roster, then moves the agent plane behind presets. The glue plugin owns dist serving, the advertised application URL, the plain-HTTP exposure warning, the bash variable, and the readiness announcements. The `office-to-pdf` row mounts one lazy [Office conversion provider](../../document/office-to-pdf/README.md) for Host consumers, including Desktop compositions using this bundle. The conversion service's Remote methods authorize preview reads, while Document Preview owns the Office viewer and Client cache.
 
 ### Patch semantics
 
@@ -120,7 +122,7 @@ The URL line and browser handoff are readiness signals: supervisors RPC as soon 
 | [`src/public-url.ts`](src/public-url.ts) | Advertised-root validation and trailing-slash normalization; a leaf module for local imports, not package API |
 | [`src/startup.ts`](src/startup.ts) | The `web-startup` provider: `--host`, `--port`, `--tls-cert`, `--tls-key`, `--public-url`, `--trusted-host`, `--no-open`, `--help` |
 | [`cordis.patch.yml`](cordis.patch.yml) | The web patch: restated base values, web host rows, browser roster, preset registry |
-| [`presets/`](presets) | One `@deepseek-ai/dsh-agent-preset` declaration per shipped preset (`standard`, `ptc`, `minimal`, `cordis`), each its own patch file |
+| [`presets/`](presets) | One `@deepseek-ai/dsh-agent-preset` declaration per shipped preset (`standard`, `lean`, `ptc`, `minimal`, `cordis`), each its own patch file |
 | [`tests/web-app.spec.ts`](tests/web-app.spec.ts) | Dist index anchoring, advertised-URL publication and warnings, bash variable, readiness publication |
 | [`tests/startup.spec.ts`](tests/startup.spec.ts) | Command-line parsing over a real Loader tree |
 | [`tests/public-url.spec.ts`](tests/public-url.spec.ts) | Advertised-root parsing and normalization |
@@ -159,6 +161,20 @@ Two managed-environment variable lines; constant per process.
 #### KV Cache effect
 
 None; the plugin contributes no system-prompt text.
+
+### Lean agent preset
+
+#### What the model sees
+
+The `standard` system prompt without the workflow guidance paragraph, and the `standard` tool catalog without `workflow`, `plugin_manager`, `usage`, `doctor`, and `off_peak`.
+
+#### Token effect
+
+Every request of a `lean` session omits those tool schemas and the paragraph, which `standard` sends on every request. Clock readings, each one user-role message, come at most hourly instead of every 10 minutes.
+
+#### KV Cache effect
+
+Prefix-stable across `lean` sessions. Switching a session between `lean` and another preset changes the tool catalog, so the server prefills again from the first differing token. A clock reading that lands mid-turn is a new user-role message; on chat templates that drop earlier reasoning at each user message, the server then prefills the turn again, and the hourly interval makes that rarer.
 
 ## Known Limitations and Deferred Work
 

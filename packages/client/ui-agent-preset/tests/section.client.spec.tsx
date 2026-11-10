@@ -36,15 +36,15 @@ function rowFor(id: string): HTMLElement {
   if (row === null) throw new Error(`no card for ${id}`)
   return row
 }
-it.each([false, true])('offers Standard, Creator and custom defaults with Coding Tools %s', (enabled) => {
+it.each([false, true])('offers Standard, Lean, Creator and custom defaults with Coding Tools %s', (enabled) => {
   const actions = view({ rows: [
-    { id: 'standard', isDefault: false }, { id: 'ptc', isDefault: false },
+    { id: 'standard', isDefault: false }, { id: 'lean', isDefault: false }, { id: 'ptc', isDefault: false },
     { id: 'minimal', isDefault: true }, { id: 'cordis', isDefault: false },
     { id: 'mine', name: 'Mine', isDefault: false },
   ] }, vi.fn(), undefined, enabled)
   expect(screen.queryByRole('button', { name: `${en.setDefault}: ${en.presetPtcName}` }) !== null).toBe(enabled)
   expect(screen.queryByRole('button', { name: `${en.inUse}: ${en.presetMinimalName}` }) !== null).toBe(enabled)
-  for (const [id, name] of [['standard', en.presetStandardName], ['cordis', en.presetCordisName], ['mine', 'Mine']]) {
+  for (const [id, name] of [['standard', en.presetStandardName], ['lean', en.presetLeanName], ['cordis', en.presetCordisName], ['mine', 'Mine']]) {
     const button = screen.getByRole<HTMLButtonElement>('button', { name: `${en.setDefault}: ${name}` })
     expect(button.disabled).toBe(false)
     fireEvent.click(button)

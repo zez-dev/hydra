@@ -330,7 +330,7 @@ describe.skipIf(!existsSync(join(root, 'apps/cli/lib/bin.js')))('Official option
   it('composes all five bundles as global tools across every preset', async () => {
     for (const name of Object.values(bundles)) await select(name, true)
     let coded: Agent | undefined
-    for (const preset of ['standard', 'cordis', 'ptc', 'minimal']) {
+    for (const preset of ['standard', 'lean', 'cordis', 'ptc', 'minimal']) {
       const owner = await agent(preset)
       expect(names(owner.agent)).toEqual(expect.arrayContaining(['session_search', 'terminal_open', 'ralph']))
       if (preset === 'ptc') coded = owner.agent

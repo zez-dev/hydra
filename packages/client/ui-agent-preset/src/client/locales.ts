@@ -15,6 +15,8 @@ export type AgentPresetSettingsKey =
   | 'view'
   | 'presetStandardName'
   | 'presetStandardDescription'
+  | 'presetLeanName'
+  | 'presetLeanDescription'
   | 'presetPtcName'
   | 'presetPtcDescription'
   | 'presetMinimalName'
@@ -50,6 +52,9 @@ export const en: Record<AgentPresetSettingsKey, string> = {
   presetStandardName: 'Standard mode',
   presetStandardDescription:
     'Work with code, files, and information. Suitable for most tasks, with search, editing, terminal commands, and other tools available as needed.',
+  presetLeanName: 'Lean mode',
+  presetLeanDescription:
+    'Standard mode without the agent’s workflow, plugin manager, usage, and doctor tools. Its smaller fixed prompt starts tasks faster on local models.',
   presetPtcName: 'PTC mode',
   presetPtcDescription:
     'Includes all Standard mode capabilities. Better suited to tasks that call tools in batches and then filter, organize, deduplicate, count, or summarize the results.',
@@ -94,6 +99,8 @@ export const zh: Record<AgentPresetSettingsKey, string> = {
 
   presetStandardName: '标准模式',
   presetStandardDescription: '处理代码、文件和资料，适合大多数任务。Agent 会按需使用检索、编辑和终端等工具。',
+  presetLeanName: '精简模式',
+  presetLeanDescription: '在标准模式基础上去掉 Agent 的工作流、插件管理、用量和诊断工具。固定提示更短，本地模型开始任务更快。',
   presetPtcName: 'PTC 模式',
   presetPtcDescription: '包含标准模式的所有能力，更适合批量调用工具，并对结果进行筛选、整理、去重、统计或汇总的任务。',
   presetMinimalName: '极简模式',
@@ -139,6 +146,8 @@ export const ja = {
   'view': '設定を表示',
   'presetStandardName': '標準モード',
   'presetStandardDescription': 'コード、ファイル、情報を扱います。検索、編集、ターミナルコマンドなどのツールを必要に応じて利用でき、ほとんどのタスクに適しています。',
+  'presetLeanName': '軽量モード',
+  'presetLeanDescription': '標準モードから、エージェントのワークフロー、プラグイン管理、使用量、診断の各ツールを除いたモードです。固定プロンプトが短いため、ローカルモデルでタスクをより速く開始できます。',
   'presetPtcName': 'PTC モード',
   'presetPtcDescription': '標準モードのすべての機能を含みます。ツールを一括で呼び出し、その結果を絞り込み、整理、重複排除、集計、要約するタスクに適しています。',
   'presetMinimalName': '最小モード',
@@ -175,6 +184,9 @@ export const es = {
   presetStandardName: 'Modo estándar',
   presetStandardDescription:
     'Trabaje con código, archivos e información. Adecuado para la mayoría de las tareas, con búsqueda, edición, comandos de terminal y otras herramientas disponibles según sea necesario.',
+  presetLeanName: 'Modo ligero',
+  presetLeanDescription:
+    'El modo Estándar sin las herramientas de flujos de trabajo, gestión de complementos, uso y diagnóstico del agente. Su indicación fija más corta inicia las tareas más rápido con modelos locales.',
   presetPtcName: 'Modo PTC',
   presetPtcDescription:
     'Incluye todas las capacidades del modo Estándar. Más adecuado para tareas que llaman a herramientas en lotes y luego filtran, organizan, deduplican, cuentan o resumen los resultados.',
@@ -220,6 +232,9 @@ export const fr = {
   presetStandardName: 'Mode standard',
   presetStandardDescription:
     'Travaillez avec du code, des fichiers et des informations. Convient à la plupart des tâches, avec recherche, édition, commandes de terminal et autres outils disponibles selon les besoins.',
+  presetLeanName: 'Mode allégé',
+  presetLeanDescription:
+    "Le mode Standard sans les outils de workflow, de gestion des plugins, d'utilisation et de diagnostic de l'agent. Son invite fixe plus courte démarre les tâches plus vite avec des modèles locaux.",
   presetPtcName: 'Mode PTC',
   presetPtcDescription:
     'Inclut toutes les fonctionnalités du mode Standard. Mieux adapté aux tâches qui appellent des outils par lots, puis filtrent, organisent, dédupliquent, comptent ou résument les résultats.',
@@ -265,6 +280,9 @@ export const de = {
   presetStandardName: 'Standardmodus',
   presetStandardDescription:
     'Arbeiten Sie mit Code, Dateien und Informationen. Geeignet für die meisten Aufgaben, da bei Bedarf Suche, Bearbeitung, Terminalbefehle und andere Tools verfügbar sind.',
+  presetLeanName: 'Schlanker Modus',
+  presetLeanDescription:
+    'Der Standardmodus ohne die Workflow-, Pluginverwaltungs-, Nutzungs- und Diagnose-Tools des Agenten. Der kürzere feste Prompt startet Aufgaben mit lokalen Modellen schneller.',
   presetPtcName: 'PTC-Modus',
   presetPtcDescription:
     'Beinhaltet alle Funktionen des Standardmodus. Besser geeignet für Aufgaben, bei denen Tools stapelweise aufgerufen und die Ergebnisse dann gefiltert, organisiert, dedupliziert, gezählt oder zusammengefasst werden.',
@@ -310,6 +328,9 @@ export const ru = {
   presetStandardName: 'Стандартный режим',
   presetStandardDescription:
     'Работайте с кодом, файлами и информацией. Подходит для большинства задач, с поиском, редактированием, командами терминала и другими инструментами, доступными по мере необходимости.',
+  presetLeanName: 'Облегчённый режим',
+  presetLeanDescription:
+    'Стандартный режим без инструментов агента для рабочих процессов, управления плагинами, статистики использования и диагностики. Более короткий постоянный промпт ускоряет запуск задач на локальных моделях.',
   presetPtcName: 'Режим PTC',
   presetPtcDescription:
     'Включает все возможности стандартного режима. Лучше подходит для задач, которые вызывают инструменты в пакетном режиме, а затем фильтруют, организуют, дедуплицируют, подсчитывают или суммируют результаты.',
@@ -355,6 +376,9 @@ export const pt = {
   presetStandardName: 'Modo padrão',
   presetStandardDescription:
     'Trabalhe com código, arquivos e informações. Adequado para a maioria das tarefas, com pesquisa, edição, comandos de terminal e outras ferramentas disponíveis conforme necessário.',
+  presetLeanName: 'Modo enxuto',
+  presetLeanDescription:
+    'O modo Padrão sem as ferramentas de fluxo de trabalho, gerenciamento de plug-ins, uso e diagnóstico do agente. O prompt fixo mais curto inicia as tarefas mais rápido com modelos locais.',
   presetPtcName: 'modo PTC',
   presetPtcDescription:
     'Inclui todos os recursos do modo Padrão. Mais adequado para tarefas que chamam ferramentas em lotes e depois filtram, organizam, desduplicam, contam ou resumem os resultados.',

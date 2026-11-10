@@ -24,7 +24,7 @@ English | [中文](README.zh.md)
 <a id="use-this-package"></a>
 ## Use this package
 
-The base bundle mounts the service with no collections and the `./tools` entry beside it, and the Web profile's standard, ptc, and cordis presets mount the `./tools` entry for their agents instead. Until a session reaches a collection, the model sees only `knowledge_add`. Add folders for every workspace in your profile's `cordis.patch.yml` (for the web profile, `~/.dsh/profiles/web/cordis.patch.yml`):
+The base bundle mounts the service with no collections and the `./tools` entry beside it, and the Web profile's standard, lean, ptc, and cordis presets mount the `./tools` entry for their agents instead. Until a session reaches a collection, the model sees only `knowledge_add`. Add folders for every workspace in your profile's `cordis.patch.yml` (for the web profile, `~/.dsh/profiles/web/cordis.patch.yml`):
 
 ```yaml
 - id: knowledge

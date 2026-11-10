@@ -1,6 +1,6 @@
 /**
  * Analytics categories for picker selections come from the preset id alone:
- * shipped ids map to fixed categories, every other id is `other`, and an
+ * shipped ids with a category map to it, every other id is `other`, and an
  * unloaded selection has no category.
  */
 
@@ -18,6 +18,7 @@ describe('analyticsMode', () => {
   })
 
   it('treats any other preset id as other', () => {
+    expect(analyticsMode('lean')).toBe('other')
     expect(analyticsMode('mine')).toBe('other')
     expect(analyticsMode('private-id')).toBe('other')
   })

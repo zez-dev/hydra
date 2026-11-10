@@ -10,6 +10,7 @@
 /** Dictionary keys carrying one shipped preset's display copy. */
 export type BuiltInPresetCopyKey =
   | 'presetStandardName' | 'presetStandardDescription'
+  | 'presetLeanName' | 'presetLeanDescription'
   | 'presetPtcName' | 'presetPtcDescription'
   | 'presetMinimalName' | 'presetMinimalDescription'
   | 'presetCordisName' | 'presetCordisDescription'
@@ -39,6 +40,7 @@ interface PresetLocaleKeys {
 
 const BUILT_IN_PRESET_KEYS: Readonly<Partial<Record<string, PresetLocaleKeys>>> = {
   standard: { name: 'presetStandardName', description: 'presetStandardDescription' },
+  lean: { name: 'presetLeanName', description: 'presetLeanDescription' },
   ptc: { name: 'presetPtcName', description: 'presetPtcDescription' },
   minimal: { name: 'presetMinimalName', description: 'presetMinimalDescription' },
   cordis: { name: 'presetCordisName', description: 'presetCordisDescription' },
